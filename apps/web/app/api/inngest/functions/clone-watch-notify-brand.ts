@@ -188,7 +188,10 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
         .maybeSingle();
       const submitted_to =
         (row?.submitted_to as Record<string, unknown> | null) ?? {};
-      return Boolean(submitted_to.brand_notification);
+      const notification = submitted_to.brand_notification as
+        | { channel_type?: string }
+        | undefined;
+      return Boolean(notification && notification.channel_type !== "shadow_summary");
     });
     if (alreadyNotified) {
       return { skipped: true, reason: "already_notified" };

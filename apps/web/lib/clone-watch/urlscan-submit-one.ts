@@ -60,17 +60,18 @@ export async function submitCloneCandidate(
   const nowIso = new Date().toISOString();
 
   if (submission.ok) {
-    await sb.rpc("record_clone_alert_urlscan_submit", {
+    const { error } = await sb.rpc("record_clone_alert_urlscan_submit", {
       p_alert_id: candidate.id,
       p_urlscan_uuid: submission.uuid,
       p_evidence: serialiseSubmitEvidence(submission.uuid, reputation, nowIso),
     });
+    if (error) throw new Error(`record scan submission failed: ${error.message}`);
     return { kind: "submitted", reputationMalicious: reputation.isMalicious };
   }
 
   // Submit failed. Reputation hit is decisive even without urlscan.
   if (reputation.isMalicious) {
-    await sb.rpc("persist_clone_alert_urlscan", {
+    const { error } = await sb.rpc("persist_clone_alert_urlscan", {
       p_alert_id: candidate.id,
       p_urlscan_uuid: null,
       p_urlscan_evidence: serialiseSubmitFailure(
@@ -83,29 +84,8 @@ export async function submitCloneCandidate(
       p_classification: "likely_phishing",
       p_set_triage_status: null, // operator confirms TP (ultrareview F5)
     });
-    // persist_clone_alert_urlscan writes the VERDICT; apply_clone_urlscan_verdict
-    // writes the LIFECYCLE. This branch only ever called the first, so a
-    // reputation-decided likely_phishing never advanced declined/monitoring →
-    // weaponised, never stamped weaponised_at, and therefore never satisfied the
-    // retrieve fn's durable emit gate (weaponised_at NOT NULL AND
-    // weaponised_notified_at NULL) — no brand alert, no enforcement plan, and the
-    // row invisible to every weaponised_at-keyed metric. 12 declined alerts sat
-    // in that state. The retrieve lane has always paired the two calls; this one
-    // is the odd path out, which is exactly why it went unnoticed.
-    //
-    // Edge-guarded and idempotent: the RPC takes the row lock, never downgrades a
-    // terminal state (a taken_down row correctly stays taken_down rather than
-    // being re-weaponised), and only reports newly_weaponised on a real
-    // transition — so a batch-step retry cannot double-fire.
-    const { error: verdictErr } = await sb.rpc("apply_clone_urlscan_verdict", {
-      p_alert_id: candidate.id,
-      p_classification: "likely_phishing",
-    });
-    if (verdictErr) {
-      throw new Error(
-        `apply_clone_urlscan_verdict failed for alert ${candidate.id}: ${verdictErr.message}`,
-      );
-    }
+    // v303 applies the lifecycle in the same transaction as the verdict.
+    if (error) throw new Error(`persist reputation verdict failed: ${error.message}`);
     return { kind: "reputation_classified", reputationMalicious: true };
   }
 
@@ -124,7 +104,7 @@ export async function submitCloneCandidate(
 
   // No reputation hit + genuine submit failure → record it (bumps
   // urlscan_failure_streak so it ages out of the gate after the cap).
-  await sb.rpc("record_clone_alert_urlscan_submit", {
+  const { error } = await sb.rpc("record_clone_alert_urlscan_submit", {
     p_alert_id: candidate.id,
     p_urlscan_uuid: null,
     p_evidence: serialiseSubmitFailure(
@@ -135,6 +115,7 @@ export async function submitCloneCandidate(
       submission.message,
     ),
   });
+  if (error) throw new Error(`record scan failure failed: ${error.message}`);
   return {
     kind: "submit_failed",
     reputationMalicious: false,

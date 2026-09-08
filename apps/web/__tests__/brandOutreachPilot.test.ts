@@ -87,9 +87,9 @@ describe("shapeCloneAlert", () => {
 // ── isReportedRow ("reported on their behalf") ──
 
 describe("isReportedRow", () => {
-  it("counts netcraft-submitted, weaponised and taken_down as reported", () => {
-    expect(isReportedRow(shapeCloneAlert(raw({ lifecycle_state: "weaponised" })))).toBe(true);
-    expect(isReportedRow(shapeCloneAlert(raw({ lifecycle_state: "taken_down" })))).toBe(true);
+  it("counts only submission evidence as reported", () => {
+    expect(isReportedRow(shapeCloneAlert(raw({ lifecycle_state: "weaponised" })))).toBe(false);
+    expect(isReportedRow(shapeCloneAlert(raw({ lifecycle_state: "taken_down" })))).toBe(false);
     expect(
       isReportedRow(shapeCloneAlert(raw({ submitted_to: { netcraft: {} } }))),
     ).toBe(true);
@@ -132,13 +132,13 @@ describe("compareSampleRows / buildBrandCloneSample ranking", () => {
     ];
     const s = buildBrandCloneSample(rawRows, "reece.com.au");
     expect(s.totalCount).toBe(7); // dup collapsed
-    // reported = dup(weaponised) + b(taken_down) + c(netcraft) = 3
-    expect(s.reportedCount).toBe(3);
+    // Only c has a submission record; detection alone does not count.
+    expect(s.reportedCount).toBe(1);
     expect(s.weaponisedCount).toBe(1);
     expect(s.takenDownCount).toBe(1);
     expect(s.rows).toHaveLength(CLONE_SAMPLE_SIZE);
     expect(s.rows[0].domain).toBe("dup.click"); // weaponised leads
-    expect(s.insufficientData).toBe(false); // 3 >= floor
+    expect(s.insufficientData).toBe(true); // 1 < floor
   });
 
   it("flags insufficientData below the reported-clone floor", () => {
@@ -149,7 +149,7 @@ describe("compareSampleRows / buildBrandCloneSample ranking", () => {
       ],
       "smallbrand.com.au",
     );
-    expect(s.reportedCount).toBe(1);
+    expect(s.reportedCount).toBe(0);
     expect(s.reportedCount).toBeLessThan(MIN_REPORTED_CLONES_FOR_OUTREACH);
     expect(s.insufficientData).toBe(true);
   });
@@ -241,7 +241,7 @@ describe("BrandOutreachPilot render", () => {
       }),
     );
     // the value-proof section + real domain
-    expect(html).toContain("A sample of the clones");
+    expect(html).toContain("A sample of the lookalikes");
     expect(html).toContain("reece-rewards.click");
     // factual verbs / counts
     expect(html).toContain("detected");
@@ -267,7 +267,7 @@ describe("BrandOutreachPilot render", () => {
         cloneSample: { ...sample, rows: [], totalCount: 0, reportedCount: 0 },
       }),
     );
-    expect(html).not.toContain("A sample of the clones");
+    expect(html).not.toContain("A sample of the lookalikes");
     // pitch + signature still present
     expect(html).toContain("72 695 772 313");
   });

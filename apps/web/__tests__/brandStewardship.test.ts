@@ -68,10 +68,8 @@ describe("F2 watch-list fields (toCloneDetail via aggregateClonesByDomain)", () 
     expect(weap.first_seen_at).toBe("2026-07-01T00:00:00Z");
     expect(weap.screenshot_url).toBe("https://urlscan.io/screenshots/x.png");
     expect(weap.result_url).toBe("https://urlscan.io/result/abc-123/");
-    // declined → netcraft_declined_at
-    expect(domains.find((d) => d.domain === "decl.click")!.still_live_as_of).toBe(
-      "2026-07-05T00:00:00Z",
-    );
+    // A decline can mean unavailable; it does not prove liveness.
+    expect(domains.find((d) => d.domain === "decl.click")!.still_live_as_of).toBeNull();
     // monitoring → null (last_rechecked_at is NOT an honest observed-live stamp)
     expect(domains.find((d) => d.domain === "mon.click")!.still_live_as_of).toBeNull();
   });

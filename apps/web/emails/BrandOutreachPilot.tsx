@@ -176,7 +176,7 @@ export default function BrandOutreachPilot({
                   as="h2"
                   style={{ color: "#1B2A4A", fontSize: "17px", fontWeight: 700, margin: "0 0 6px 0" }}
                 >
-                  A sample of the clones we&apos;ve reported for {brandName} in
+                  A sample of the lookalikes we&apos;ve detected for {brandName} in
                   the last {sample.windowDays} days
                 </Heading>
                 <Text
@@ -187,7 +187,8 @@ export default function BrandOutreachPilot({
                   {sample.totalCount === 1 ? "" : "s"} designed to resemble{" "}
                   {brandName}, and reported{" "}
                   <strong>{sample.reportedCount}</strong> of them for
-                  browser / blocklist protection on your behalf. A few examples
+                  browser / blocklist protection on your behalf. This sample includes
+                  unreviewed detections; status reflects when this email was prepared. A few examples
                   are below — this is evidence of Ask Arthur&apos;s own detections
                   and actions, not an assessment of your organisation&apos;s
                   compliance.

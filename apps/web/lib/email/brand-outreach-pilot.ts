@@ -16,8 +16,8 @@ import type {
  * the lean `BrandCloneSample` the template renders.
  *
  * "Reported on your behalf" is deliberate, honest wording (Axis A): a clone
- * counts as *reported* when we forwarded it to Netcraft (browser/blocklist), or
- * when it reached `weaponised` / `taken_down` (states that only follow a report).
+ * counts as *reported* from its Netcraft submission record (browser/blocklist).
+ * Weaponisation is a separate observation.
  * We never claim a takedown we didn't cause, and never characterise a registrant.
  */
 
@@ -74,15 +74,11 @@ export function isReportedToNetcraft(raw: RawCloneAlert): boolean {
 
 /**
  * A clone counts as "reported on their behalf" when we forwarded it to Netcraft,
- * OR it reached weaponised / taken_down (both only occur after a report). This
+ * only when a submission record exists. Phishing detection alone is not a report. This
  * is the number the founder's "enough data to pitch" rule keys on.
  */
 export function isReportedRow(row: CloneSampleRow): boolean {
-  return (
-    row.reportedToNetcraft ||
-    row.lifecycleState === "weaponised" ||
-    row.lifecycleState === "taken_down"
-  );
+  return row.reportedToNetcraft;
 }
 
 /** Map a raw alert row → the presentation-ready sample row. Pure. */

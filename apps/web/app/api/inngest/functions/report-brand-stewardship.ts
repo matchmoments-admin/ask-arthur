@@ -308,8 +308,8 @@ export const reportBrandStewardship = inngest.createFunction(
 
       const logRows = await step.run("fetch-onward-log", async () => {
         const sb = createServiceClient();
-        if (!sb) return [] as OnwardLogRow[];
-        const { rows: data, error } = await fetchAllRows<OnwardLogRow>(
+        if (!sb) throw new Error("brand-stewardship: onward data unavailable");
+        const { rows: data, error, truncated } = await fetchAllRows<OnwardLogRow>(
           (from, to) =>
             sb
               .from("onward_report_log")
@@ -329,7 +329,10 @@ export const reportBrandStewardship = inngest.createFunction(
           logger.error("brand-stewardship: onward log fetch failed", {
             error: error.message,
           });
-          return [] as OnwardLogRow[];
+          throw new Error("brand-stewardship: onward data unavailable");
+        }
+        if (truncated) {
+          throw new Error("brand-stewardship: onward data truncated");
         }
         if (data.length >= ONWARD_LOG_FETCH_LIMIT) {
           logger.warn("brand-stewardship: onward log fetch hit LIMIT", {
@@ -351,10 +354,11 @@ export const reportBrandStewardship = inngest.createFunction(
         const map: Record<string, string> = {};
         for (let i = 0; i < ids.length; i += 500) {
           const chunk = ids.slice(i, i + 500);
-          const { data } = await sb
+          const { data, error } = await sb
             .from("scam_reports")
             .select("id, impersonated_brand")
             .in("id", chunk);
+          if (error) throw new Error(`brand resolution failed: ${error.message}`);
           for (const row of data ?? []) {
             const brand = (row.impersonated_brand as string | null)?.trim();
             if (brand) map[String(row.id)] = brand;
@@ -372,8 +376,8 @@ export const reportBrandStewardship = inngest.createFunction(
       // hosting/registrar source. Keyed by the impersonated brand's domain.
       const cloneRows = await step.run("fetch-clone-detections", async () => {
         const sb = createServiceClient();
-        if (!sb) return [] as CloneAlertRow[];
-        const { rows: data, error } = await fetchAllRows<CloneAlertRow>(
+        if (!sb) throw new Error("brand-stewardship: clone data unavailable");
+        const { rows: data, error, truncated } = await fetchAllRows<CloneAlertRow>(
           (from, to) =>
             sb
               .from("shopfront_clone_alerts")
@@ -401,7 +405,10 @@ export const reportBrandStewardship = inngest.createFunction(
           logger.error("brand-stewardship: clone fetch failed", {
             error: error.message,
           });
-          return [] as CloneAlertRow[];
+          throw new Error("brand-stewardship: clone data unavailable");
+        }
+        if (truncated) {
+          throw new Error("brand-stewardship: clone data truncated");
         }
         if (data.length >= CLONE_FETCH_LIMIT) {
           logger.warn("brand-stewardship: clone fetch hit LIMIT", {
@@ -468,8 +475,8 @@ export const reportBrandStewardship = inngest.createFunction(
       // brand-facing send stays gated on #371). Bounded window read; no paid API.
       const redditRows = await step.run("fetch-reddit-mentions", async () => {
         const sb = createServiceClient();
-        if (!sb) return [] as RedditPostIntelRow[];
-        const { rows: data, error } = await fetchAllRows<RedditPostIntelRow>(
+        if (!sb) throw new Error("brand-stewardship: reddit data unavailable");
+        const { rows: data, error, truncated } = await fetchAllRows<RedditPostIntelRow>(
           (from, to) =>
             sb
               .from("reddit_post_intel")
@@ -483,11 +490,12 @@ export const reportBrandStewardship = inngest.createFunction(
             }>,
           { maxRows: REDDIT_FETCH_LIMIT },
         );
+        if (truncated) throw new Error("brand-stewardship: reddit data truncated");
         if (error) {
           logger.error("brand-stewardship: reddit mention fetch failed", {
             error: error.message,
           });
-          return [] as RedditPostIntelRow[];
+          throw new Error("brand-stewardship: reddit data unavailable");
         }
         return (data ?? []) as RedditPostIntelRow[];
       });

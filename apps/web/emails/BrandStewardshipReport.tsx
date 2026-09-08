@@ -247,6 +247,14 @@ export default function BrandStewardshipReport({
               borderTop: "none",
             }}
           >
+            {cloneDetections && (
+              <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5" }}>
+                Lookalikes first detected during {periodLabel} (UTC), including
+                unreviewed detections and excluding confirmed false positives.
+                Outcomes reflect this report&apos;s preparation; this is a monthly
+                snapshot, not a live status check.
+              </Text>
+            )}
             {/* Editable slot: greeting (Email Studio; falls back to default) */}
             <div
               style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6", margin: "0 0 20px 0" }}

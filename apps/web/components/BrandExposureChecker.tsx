@@ -98,8 +98,8 @@ export default function BrandExposureChecker() {
         <div className="mt-6 rounded-lg border p-5" style={{ borderColor: "var(--color-line)" }}>
           {state.teaser.count === 0 ? (
             <p className="text-deep-navy text-sm font-semibold">
-              Good news — no confirmed lookalikes for {state.teaser.brand} in our
-              current window. We keep watching daily.
+              No confirmed lookalikes for {state.teaser.brand} in our recorded
+              history. Unreviewed detections are excluded; this is not a safety verdict.
             </p>
           ) : (
             <>
@@ -109,7 +109,9 @@ export default function BrandExposureChecker() {
                 {state.teaser.brand}.
               </p>
               <p className="text-gov-slate mt-1 text-sm">
-                A sample (domains masked until you request the full list):
+                Confirmed detections across our recorded history, including resolved
+                cases. Counts differ from monthly reports, which also include
+                unreviewed lookalikes. A masked sample:
               </p>
               <ul className="mt-3 space-y-1">
                 {state.teaser.examples.map((ex) => (

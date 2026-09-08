@@ -316,16 +316,15 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           });
           return false;
         }
-        // Mark handled (shadow summary) so the notify-brand consumer + dashboard
-        // treat it as already-notified. Non-fatal.
+        // Record internal confirmation separately from real brand delivery.
+        // No email has been sent at this point. Non-fatal.
         const { error: stampErr } = await sb.rpc("merge_clone_alert_submission", {
           p_alert_id: alert.id,
-          p_key: "brand_notification",
+          p_key: "auto_triage",
           p_value: {
             channel_type: "shadow_summary",
             recipient: shadowRecipient,
-            status: "sent",
-            sent_at: new Date().toISOString(),
+            status: "confirmed",
             ts: new Date().toISOString(),
           },
           p_set_triage_status: null,

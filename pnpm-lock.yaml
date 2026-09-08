@@ -64,6 +64,9 @@ importers:
       '@askarthur/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/typescript
+      '@electric-sql/pglite':
+        specifier: 0.3.14
+        version: 0.3.14
       '@tailwindcss/postcss':
         specifier: ^4.0.0
         version: 4.2.0
@@ -1544,6 +1547,9 @@ packages:
     resolution: {integrity: sha512-7rBLLzWQnBwutH2WZ0EWUkQdihqrnLYCUMaB44hSol9e0/cdIhuNFcqZO0xNheAU6qqHVA8sMiLofkYTgb+lmw==}
     engines: {node: '>= 0.10.4'}
     hasBin: true
+
+  '@electric-sql/pglite@0.3.14':
+    resolution: {integrity: sha512-3DB258dhqdsArOI1fIt7cb9RpUOgcDg5hXWVgVHAeqVQ/qxtFy605QKs4gx6mFq3jWsSPqDN8TgSEsqC3OfV9Q==}
 
   '@emnapi/core@1.8.1':
     resolution: {integrity: sha512-AvT9QFpxK0Zd8J0jopedNm+w/2fIzvtPKPjqyw9jwvBaReTTqPBk9Hixaz7KbjimP+QNz605/XnjFcDAL2pqBg==}
@@ -12049,6 +12055,8 @@ snapshots:
       split: 1.0.1
     transitivePeerDependencies:
       - supports-color
+
+  '@electric-sql/pglite@0.3.14': {}
 
   '@emnapi/core@1.8.1':
     dependencies:
