@@ -291,3 +291,76 @@ describe("the elapsed metric is interpretable on a retry", () => {
     expect(logged.find((l) => l.msg === "fn.error")!.fields["attempt"]).toBe(1);
   });
 });
+
+/**
+ * The Axiom flush must complete before the handler returns.
+ *
+ * It used to be `void log.flush()` — fire-and-forget, on the assumption that
+ * the function instance outlives the flush. Measured 2026-09-08 it does not:
+ * 44 preclassify events, 41 fn.complete rows in Axiom, ~7% lost on an
+ * always-ship WARN signal. For a once-a-day function that loss made
+ * clone-watch-enrich-attribution look dead for a month while Inngest showed
+ * every daily run Completed. Silence in Axiom is not evidence a function did
+ * not run.
+ */
+describe("the Axiom flush is awaited, bounded, and never fatal", () => {
+  const install = (flush: () => Promise<void>) => {
+    process.env.FF_AXIOM_ENABLED = "true";
+    vi.spyOn(axiomLogger, "getLogger").mockReturnValue({
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+      flush,
+    } as unknown as ReturnType<typeof axiomLogger.getLogger>);
+  };
+
+  it("does not return until the flush has resolved", async () => {
+    let flushed = false;
+    install(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      flushed = true;
+    });
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+
+    await wrapped(ctx({ runId: "r", attempt: 0 }));
+
+    // With `void log.flush()` this is false: the handler has returned and the
+    // instance may already be frozen with the POST still in flight.
+    expect(flushed).toBe(true);
+  });
+
+  it("also waits on the error path before rethrowing", async () => {
+    let flushed = false;
+    install(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      flushed = true;
+    });
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => {
+      throw new Error("boom");
+    });
+
+    await expect(wrapped(ctx({ runId: "r" }))).rejects.toThrow("boom");
+    expect(flushed).toBe(true);
+  });
+
+  it("never lets a failing flush fail the function", async () => {
+    install(async () => {
+      throw new Error("axiom down");
+    });
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+
+    await expect(wrapped(ctx({ runId: "r" }))).resolves.toBe("ok");
+  });
+
+  it("does not hang on a flush that never resolves", async () => {
+    // next-axiom's flush has no timeout of its own. Awaiting it unbounded
+    // would let a slow Axiom stall every function's final replay.
+    install(() => new Promise<void>(() => {}));
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+
+    const started = Date.now();
+    await expect(wrapped(ctx({ runId: "r" }))).resolves.toBe("ok");
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 10_000);
+});
