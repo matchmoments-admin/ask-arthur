@@ -30,6 +30,7 @@ import { logger } from "@askarthur/utils/logger";
 import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
+import { spanningBudget } from "./step-budget";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { SCAM_REPORTS_BACKFILL_EMBED_EVENT } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
@@ -37,6 +38,30 @@ import { isFeatureBraked } from "../cost-log";
 
 const BATCH_SIZE = 100;
 const MAX_BATCHES_PER_RUN = 50; // 5000 rows max per invocation
+
+/**
+ * Wall-clock budget for the whole batch loop, in milliseconds.
+ *
+ * SPANNING, not in-step: the loop awaits `step.run` per batch, so it crosses
+ * step boundaries and its clock must be `event.ts` — a Date.now() taken in the
+ * handler body is reset by every replay and the guard could never fire
+ * (#1124). See ./step-budget.ts for the two bounds.
+ *
+ * WHY IT MATTERS HERE. The loop is capped at MAX_BATCHES_PER_RUN, and it exits
+ * as soon as a batch comes back short — so on a drained worklist a run costs
+ * two or three step boundaries and this budget never fires. The cap only binds
+ * during a real backfill, and there it is a COUNT with no time bound at all:
+ * the run could hold one of the account's five slots for as long as the
+ * batches took (ADR-0019). This makes the run's cost bounded in the unit that
+ * is actually scarce.
+ *
+ * Stopping early is safe because the worklist is self-healing — an unembedded
+ * row is selected again by the next run, and the cron is daily.
+ */
+//
+// ONE budget spans BOTH passes (scam_reports then verified_scams). Two
+// independent budgets would let a run take twice as long as either.
+const BACKFILL_WALL_CLOCK_MS = 600_000;
 
 const FINANCE_SCAM_TYPES = new Set<string>([
   "investment",
@@ -124,6 +149,20 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
     name: "Analyze: Backfill scam_reports + verified_scams embeddings",
     retries: 2,
     concurrency: { limit: 1 },
+    // ADR-0019's circuit breaker, absent until #1135. This function had the
+    // worst structural boundary count in the fleet: 1 + 50 + 50 + 1 = 102.
+    //
+    // inngest-finish-budget: 22 boundaries — 102 cannot co-occur with a 600s
+    // wall clock: at the 30s-per-boundary queue wait ADR-0019 measures, 600s
+    // admits ~20 batch boundaries, +2 for the brake and cost steps. Declaring
+    // 102 would put the floor at 3690s — a 62-minute "circuit breaker" for a
+    // run the budget already bounds at ~660s. 22 x 30s = 660s queue wait; 600s
+    // BACKFILL_WALL_CLOCK_MS; 60s slack = 1320s. Declared 23m (1380s).
+    //
+    // Both loops also exit on a short batch, so on a drained worklist a run is
+    // two or three boundaries and none of this binds. See BACKLOG.md on the
+    // floor formula double-counting a spanning budget's queue wait.
+    timeouts: { finish: "23m" },
   },
   [
     // Steady-state delta for verified_scams (+ any scam_reports the sync path
@@ -133,7 +172,7 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "scam-reports-backfill-embed" },
-    async ({ step }) => {
+    async ({ event, step }) => {
       // Autonomous paid spend now (daily cron) → honour the same embedding brake
       // that scam-report-embed uses, set by cost-daily-check when embed spend
       // exceeds its cap. The manual backfill respects it too (operator can clear
@@ -162,8 +201,19 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
       // Folding into one step keeps the vectors inside the closure; the
       // step output is a tiny count/tokens summary.
 
+      const budget = spanningBudget({ event }, BACKFILL_WALL_CLOCK_MS, logger);
+      let stoppedForTime = false;
+
       // ── Pass 1: scam_reports (skip SAFE, skip short content) ──────────
       for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
+        if (budget.expired()) {
+          stoppedForTime = true;
+          logger.warn("scam-reports-backfill-embed: wall-clock break", {
+            pass: "scam_reports",
+            batchesDone: batchIdx,
+          });
+          break;
+        }
         const summaries = await step.run(
           `scam-reports-batch-${batchIdx}`,
           async () => {
@@ -275,6 +325,14 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
       // ── Pass 2: verified_scams (no SAFE filter — verified rows are
       //          authoritative anchors, all of them embed) ─────────────────
       for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
+        if (budget.expired()) {
+          stoppedForTime = true;
+          logger.warn("scam-reports-backfill-embed: wall-clock break", {
+            pass: "verified_scams",
+            batchesDone: batchIdx,
+          });
+          break;
+        }
         const summaries = await step.run(
           `verified-scams-batch-${batchIdx}`,
           async () => {
@@ -383,6 +441,8 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
         totalTokens,
         estimatedCostUsd: totalCostUsd.toFixed(6),
         modelId: lastModelId,
+        stoppedForTime,
+        budgetDegraded: budget.degraded,
       });
 
       return {
@@ -391,6 +451,10 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
         totalTokens,
         estimatedCostUsd: totalCostUsd,
         modelId: lastModelId,
+        // A partial run must not read as a small one: the budget stopped it
+        // and the remainder is waiting in the self-healing worklist.
+        stoppedForTime,
+        budgetDegraded: budget.degraded,
       };
     },
   ),

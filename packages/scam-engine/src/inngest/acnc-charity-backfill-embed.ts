@@ -32,6 +32,7 @@ import { logger } from "@askarthur/utils/logger";
 import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
+import { spanningBudget } from "./step-budget";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { embed } from "../embeddings";
 import { isFeatureBraked } from "../cost-log";
@@ -42,6 +43,27 @@ import { isFeatureBraked } from "../cost-log";
 // runs the manual event ~13 times to backfill 63k.
 const BATCH_SIZE = 200;
 const MAX_BATCHES_PER_RUN = 25;
+
+/**
+ * Wall-clock budget for the whole batch loop, in milliseconds.
+ *
+ * SPANNING, not in-step: the loop awaits `step.run` per batch, so it crosses
+ * step boundaries and its clock must be `event.ts` — a Date.now() taken in the
+ * handler body is reset by every replay and the guard could never fire
+ * (#1124). See ./step-budget.ts for the two bounds.
+ *
+ * WHY IT MATTERS HERE. The loop is capped at MAX_BATCHES_PER_RUN, and it exits
+ * as soon as a batch comes back short — so on a drained worklist a run costs
+ * two or three step boundaries and this budget never fires. The cap only binds
+ * during a real backfill, and there it is a COUNT with no time bound at all:
+ * the run could hold one of the account's five slots for as long as the
+ * batches took (ADR-0019). This makes the run's cost bounded in the unit that
+ * is actually scarce.
+ *
+ * Stopping early is safe because the worklist is self-healing — an unembedded
+ * row is selected again by the next run, and the cron is daily.
+ */
+const BACKFILL_WALL_CLOCK_MS = 600_000;
 
 export const ACNC_CHARITY_EMBED_BACKFILL_EVENT =
   "acnc.charity-embed.backfill.v1" as const;
@@ -96,6 +118,21 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
     // One at a time — multiple concurrent runs would race on the same
     // NULL rows. Inngest handles the lock.
     concurrency: { limit: 1 },
+    // ADR-0019's circuit breaker, absent until #1135.
+    //
+    // inngest-finish-budget: 22 boundaries — the STRUCTURAL max is 27 (brake +
+    // 25 batches + log-cost), but 27 cannot co-occur with a 600s wall clock:
+    // at the 30s-per-boundary queue wait ADR-0019 measures, 600s admits ~20
+    // batch boundaries, +2 for the brake and cost steps. Declaring the
+    // structural 27 would put the floor at 1470s for a run the budget already
+    // bounds at ~660s. 22 x 30s = 660s queue wait; 600s BACKFILL_WALL_CLOCK_MS;
+    // 60s slack = 1320s. Declared 23m (1380s).
+    //
+    // If the queue is idle the run does MORE boundaries and finishes FASTER,
+    // so the floor still covers it — the wall clock is bounded by the budget
+    // either way. See BACKLOG.md on the floor formula double-counting a
+    // spanning budget's queue wait.
+    timeouts: { finish: "23m" },
   },
   [
     { cron: "0 4 * * *" }, // daily 04:00 UTC
@@ -103,7 +140,7 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "acnc-charity-backfill-embed" },
-    async ({ step }) => {
+    async ({ event, step }) => {
       // Tier 3 brake gap (enterprise-review P2, closed 2026-08-07): this fn
       // spends on Voyage with logCost but never READ the charity_check brake
       // that cost-daily-check engages — a brake nothing reads is scenery.
@@ -136,7 +173,21 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
       // correct (the load-step is idempotent on `IS NULL`, the write-step
       // is per-row keyed and idempotent on the `embedding IS NULL` filter
       // of the next load).
+      const budget = spanningBudget({ event }, BACKFILL_WALL_CLOCK_MS, logger);
+
+      let stoppedForTime = false;
       for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
+        if (budget.expired()) {
+          // Leftovers drain on the next run rather than the whole run being
+          // cancelled mid-loop — a cancellation gets no retry, no error and no
+          // telemetry (#1069).
+          stoppedForTime = true;
+          logger.warn("acnc-charity-backfill-embed: wall-clock break", {
+            batchesDone: batchIdx,
+            batchCap: MAX_BATCHES_PER_RUN,
+          });
+          break;
+        }
         const summary = await step.run(`batch-${batchIdx}`, async () => {
           const supabase = createServiceClient();
           if (!supabase) throw new Error("Supabase service client unavailable");
@@ -247,6 +298,8 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
         totalTokens,
         estimatedCostUsd: totalCostUsd.toFixed(6),
         modelId: lastModelId,
+        stoppedForTime,
+        budgetDegraded: budget.degraded,
       });
 
       return {
@@ -254,6 +307,10 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
         totalTokens,
         estimatedCostUsd: totalCostUsd,
         modelId: lastModelId,
+        // A partial run must not read as a small one: the budget stopped it
+        // and the remainder is waiting in the self-healing worklist.
+        stoppedForTime,
+        budgetDegraded: budget.degraded,
       };
     },
   ),

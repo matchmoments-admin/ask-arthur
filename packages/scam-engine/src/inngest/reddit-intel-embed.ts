@@ -123,6 +123,13 @@ export const redditIntelEmbed = inngest.createFunction(
     id: "reddit-intel-embed",
     name: "Reddit Intel: Embed newly classified posts",
     retries: 3,
+    // ADR-0019's circuit breaker, absent until #1135. 7 static step.run sites,
+    // none in a loop and none interpolated, so the floor test counts them
+    // itself: 7 x 30s queue wait + 60s slack = 270s. Declared 8m (480s) to
+    // cover the write-embeddings step's real work — EMBED_ROWS_PER_RUN (60)
+    // is ~3 Voyage requests, each now bounded at EMBED_REQUEST_TIMEOUT_MS
+    // (30s, #1134) where before it was unbounded — plus the per-row writes.
+    timeouts: { finish: "8m" },
   },
   // DUAL TRIGGER — the repo idiom already used by scam-reports-backfill-embed
   // and acnc-charity-backfill-embed: same drain logic, scheduled AND

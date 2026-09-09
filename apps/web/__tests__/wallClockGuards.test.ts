@@ -36,12 +36,29 @@ import path from "node:path";
  * the one shape that has actually bitten — see docs/agents/defect-shapes.md
  * shape N on the limits of source-level guards.
  */
-const FN_DIR = path.join(__dirname, "..", "app", "api", "inngest", "functions");
+const FN_DIRS = [
+  path.join(__dirname, "..", "app", "api", "inngest", "functions"),
+  // Extended to scam-engine in #1135. Both backfill embedders declare a
+  // spanning budget there, and half a sweep is how a rule quietly becomes
+  // optional: the apps/web-only version could not see them at all.
+  path.join(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "packages",
+    "scam-engine",
+    "src",
+    "inngest",
+  ),
+];
 
-const files = fs
-  .readdirSync(FN_DIR)
-  .filter((f) => f.endsWith(".ts"))
-  .map((f) => path.join(FN_DIR, f));
+const files = FN_DIRS.flatMap((dir) =>
+  fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+    .map((f) => path.join(dir, f)),
+);
 
 function stripComments(src: string): string {
   return src
@@ -53,7 +70,7 @@ function stripComments(src: string): string {
 
 describe("wall-clock guards survive Inngest step replay", () => {
   it("finds the function directory (guards a silently-empty sweep)", () => {
-    expect(files.length).toBeGreaterThan(30);
+    expect(files.length).toBeGreaterThan(60);
   });
 
   it("no guard compares against a timestamp captured in the handler body", () => {

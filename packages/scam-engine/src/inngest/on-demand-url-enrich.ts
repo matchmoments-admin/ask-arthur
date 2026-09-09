@@ -53,6 +53,16 @@ export const onDemandUrlEnrich = inngest.createFunction(
     // already 'completed' after the first pass).
     idempotency: "event.data.requestId",
     retries: 1,
+    // ADR-0019's circuit breaker, absent until #1135.
+    //
+    // inngest-finish-budget: 6 boundaries — 1 static step.run plus a per-domain
+    // step whose id is interpolated inside a loop bounded by
+    // MAX_DOMAINS_PER_CHECK (5). The floor test cannot read a runtime cap, so
+    // it is declared. 6 x 30s = 180s queue wait; no inline wall-clock budget
+    // (each domain is one Promise.all of lookupWhois at 5s and checkSSL at 3s,
+    // then ONE bulk update — there is no per-row await loop here); 60s slack
+    // = 240s. Declared 6m (360s).
+    timeouts: { finish: "6m" },
     concurrency: { limit: 2 },
   },
   { event: ANALYZE_COMPLETED_EVENT },
