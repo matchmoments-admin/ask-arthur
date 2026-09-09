@@ -101,6 +101,56 @@ describe("in-step budgets track the Inngest route's maxDuration", () => {
     expect(NAMING_WALL_CLOCK_MS).toBeLessThanOrEqual(MAX_IN_STEP_WALL_CLOCK_MS);
   });
 
+  it("no in-step provider timeout can outlive the request that carries it", () => {
+    // #1134. reddit-intel-daily declared CLASSIFY_TIMEOUT_MS = 360_000 for a
+    // Claude call made inside a step.run. Every Inngest step executes as ONE
+    // HTTP request to a route that declares maxDuration = 300, so a 360s
+    // budget could never fire: Vercel killed the request 60s first and the
+    // failure arrived as "HTTP 504 before the SDK responded, no step output
+    // was produced" — no attribution, no error row, three retries of a full
+    // 300s slot hold. Same shape as the #1124 wall-clock guards: a number
+    // describing protection the surrounding budget made impossible.
+    //
+    // WHAT THIS DOES NOT CATCH (house style, docs/agents/defect-shapes.md): a
+    // timeout constant declared OUTSIDE these two directories and imported in
+    // — TAKE_TIMEOUT_MS in reddit-intel/take-writer.ts is one, currently 240s
+    // and therefore fine. It also cannot resolve a computed value.
+    //
+    // Go-red: restore CLASSIFY_TIMEOUT_MS = 360_000.
+    const declared = declaredMaxDuration() * 1000;
+    const offenders: string[] = [];
+    let seen = 0;
+    for (const dir of SCAN_DIRS) {
+      for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+        if (f.endsWith(".test.ts")) continue;
+        const src = fs.readFileSync(path.join(dir, f), "utf8");
+        for (const m of src.matchAll(
+          /const\s+(\w*_TIMEOUT_MS)\s*=\s*([\d_]+)\s*;/g,
+        )) {
+          seen++;
+          const ms = Number(m[2]!.replaceAll("_", ""));
+          if (ms >= declared) {
+            offenders.push(
+              `${f}: ${m[1]} = ${ms}ms >= maxDuration ${declared}ms`,
+            );
+          }
+        }
+      }
+    }
+    expect(
+      seen,
+      "found no *_TIMEOUT_MS declarations — sweep is inert",
+    ).toBeGreaterThan(3);
+    expect(
+      offenders,
+      "These timeouts are inside a step.run but outlive the request that " +
+        "carries it, so they can never fire:\n" +
+        offenders.map((o) => `  - ${o}`).join("\n") +
+        "\n\nVercel kills the request at maxDuration first, producing a 504 " +
+        "with no step output and no attribution.",
+    ).toEqual([]);
+  });
+
   it("every budgetedStep call site passes a same-file literal under the ceiling", () => {
     // budgetedStep throws above the ceiling at runtime; this catches it at
     // test time, and refuses a budget it cannot resolve rather than passing a

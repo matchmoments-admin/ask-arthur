@@ -35,6 +35,80 @@ export type EmbeddingDomain = "generic" | "finance" | "multimodal";
 
 export const EMBEDDING_DIMENSIONS = 1024;
 
+/**
+ * Per-request timeout for a provider embedding call, in milliseconds.
+ *
+ * WHY THIS EXISTS. Until #1134 there was NO timeout on either provider fetch —
+ * no `AbortSignal` anywhere in this file. Every embedding call happens inside
+ * an Inngest `step.run`, and an Inngest step holds one of the account's five
+ * concurrency slots for its whole duration (ADR-0019). An unbounded provider
+ * call inside a step is therefore a slot held indefinitely by a hung socket,
+ * on the one resource the fleet is measured at 5/5 in use.
+ *
+ * 30s is roughly fifteen times the observed round trip for a full
+ * EMBED_CHUNK_TEXTS (20) chunk, so it cannot fire on a healthy call; it exists
+ * to bound a hang, not to pace a slow one. Chunks run sequentially, so the
+ * worst case a caller sees is chunks x this value — which is why the callers'
+ * own in-step budgets (CLUSTER_BATCH_WALL_CLOCK_MS and friends) are the real
+ * ceiling and this is the per-socket floor beneath them.
+ *
+ * GUARDED PARSE, deliberately. `Number("")` is 0 and `Number("30s")` is NaN,
+ * and either would mean "abort immediately" or "never abort" — the same class
+ * of silent disable as `parseFloat("$10")` on a cost brake (CLAUDE.md). A
+ * non-finite or non-positive override falls back to the default rather than
+ * disabling the bound.
+ */
+export const EMBED_REQUEST_TIMEOUT_MS_DEFAULT = 30_000;
+
+export function embedRequestTimeoutMs(): number {
+  const raw = Number(
+    process.env["EMBED_REQUEST_TIMEOUT_MS"] ?? EMBED_REQUEST_TIMEOUT_MS_DEFAULT,
+  );
+  return Number.isFinite(raw) && raw > 0
+    ? raw
+    : EMBED_REQUEST_TIMEOUT_MS_DEFAULT;
+}
+
+/**
+ * One fetch with the embedding timeout applied and an abort translated into a
+ * named error.
+ *
+ * Both providers need identical treatment, and a bare `AbortSignal.timeout`
+ * rejection surfaces as a `TimeoutError` DOMException whose message says
+ * nothing about which provider or which budget — three steps from the cause,
+ * which is the shape this repo keeps paying for. Deletion test: removing this
+ * would put the same signal, the same catch and the same translation in both
+ * callVoyage and callOpenAI.
+ */
+async function embedFetch(
+  url: string,
+  init: RequestInit,
+  provider: EmbeddingProvider,
+  ctx: { requestId?: string; modelId: string },
+): Promise<Response> {
+  const timeoutMs = embedRequestTimeoutMs();
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      logger.error("Embedding request timed out", {
+        requestId: ctx.requestId,
+        provider,
+        modelId: ctx.modelId,
+        timeoutMs,
+      });
+      throw new Error(
+        `${provider} embeddings timed out after ${timeoutMs}ms (model ${ctx.modelId})`,
+      );
+    }
+    throw err;
+  }
+}
+
 interface ModelSpec {
   provider: EmbeddingProvider;
   modelId: string;
@@ -464,14 +538,19 @@ async function callVoyage(
     body.output_dimension = EMBEDDING_DIMENSIONS;
   }
 
-  const res = await fetch("https://api.voyageai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const res = await embedFetch(
+    "https://api.voyageai.com/v1/embeddings",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    "voyage",
+    { requestId, modelId: spec.modelId },
+  );
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
@@ -526,14 +605,19 @@ async function callOpenAI(
     body.dimensions = EMBEDDING_DIMENSIONS;
   }
 
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const res = await embedFetch(
+    "https://api.openai.com/v1/embeddings",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    "openai",
+    { requestId, modelId: spec.modelId },
+  );
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");

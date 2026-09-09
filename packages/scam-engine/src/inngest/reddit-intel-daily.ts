@@ -92,16 +92,48 @@ export const PROMPT_VERSION_FOR_BACKFILL = PROMPT_VERSION;
 // Deliberately below ~16K: past that the Anthropic SDK wants streaming to
 // avoid HTTP timeouts, and this is a non-streaming call. Going higher is a
 // bigger change than raising a number.
-export const CLASSIFY_MAX_TOKENS = 16_000;
+//
+// LOWERED 16_000 -> 14_000 on 2026-09-10 (#1134), because 16,000 was not a
+// reachable ceiling either. Three constants have to agree and two of them
+// could not:
+//
+//   reddit-intel-output-budget.test.ts   timeout >= maxTokens / 50 tok/s
+//   apps/web/app/api/inngest/route.ts    timeout <  maxDuration (300s)
+//
+// At 16,000 the first demands >=320s and the second allows <300s — no timeout
+// value satisfies both, so the pair was unsatisfiable and the 360s that had
+// been chosen to honour the first simply could never fire. 14,000 is the
+// largest ceiling whose slowest full-length generation (14,000/50 = 280s)
+// fits inside the request that carries it. It is still well above the 12,000
+// under which 24 of 78 production runs lost their daily summary, and
+// truncation is now marked and counted (#996) rather than silent.
+export const CLASSIFY_MAX_TOKENS = 14_000;
 
 // MUST be raised whenever CLASSIFY_MAX_TOKENS is. Sonnet 4.6 emits at
 // ~50-100 tokens/sec, so the worst case is maxTokens/50 seconds: 240s was
-// exactly right for 12k, and would now cut a full-length 16k response off
+// exactly right for 12k, and would cut a full-length 16k response off
 // mid-flight — converting a truncation into a timeout, which is strictly
-// worse because a timeout returns nothing at all. 16,000/50 = 320s, so 360s
-// carries a margin. Inngest's function ceiling is 15 min, so retries still
-// have room.
-export const CLASSIFY_TIMEOUT_MS = 360_000;
+// worse because a timeout returns nothing at all. 16,000/50 = 320s.
+//
+// LOWERED 360_000 -> 280_000 on 2026-09-10 (#1134), because 360s COULD NEVER
+// FIRE. This call runs inside a `step.run`, and every Inngest step executes as
+// one HTTP request to a route that declares `maxDuration = 300`
+// (apps/web/app/api/inngest/route.ts). Vercel kills the request at 300s, so a
+// 360s budget was unreachable by 60s: the failure it was meant to bound
+// arrived instead as "HTTP 504 before the SDK responded, no step output was
+// produced" — no attribution, no logFunctionError row, and three full retries
+// of the same 300s slot hold. Same shape as the wall-clock guards in #1124: a
+// number describing protection that the surrounding budget made impossible.
+//
+// AND THE ARITHMETIC DOES NOT CLOSE, which is the real finding. The pessimistic
+// emission bound (320s) EXCEEDS the request budget (300s), so the slowest
+// legitimate 16k generation cannot fit in one step at any timeout value. No
+// number fixes that. 280_000 is chosen as the largest value that still fires
+// inside the request with room to log and return, so the tail becomes a clean,
+// attributed abort instead of a silent 504 — a legibility fix, not a
+// correctness one. The correctness fix is to shrink the output per call
+// (smaller BATCH_SIZE) or to stream; tracked in BACKLOG.md -> Ops.
+export const CLASSIFY_TIMEOUT_MS = 280_000;
 
 // INPUT budget, per post. Distinct from the scraper's BODY_MD_MAX_CHARS
 // (20,000) which bounds what we STORE — this bounds what we SEND.
@@ -591,6 +623,21 @@ export const redditIntelDaily = inngest.createFunction(
     id: "reddit-intel-daily",
     name: "Reddit Intel: Daily batch classifier + summariser",
     retries: 3,
+    // ADR-0019's circuit breaker. Absent until #1134, so a hung step could
+    // hold one of the account's five slots across all three retries with no
+    // ceiling at all.
+    //
+    // inngest-finish-budget: 10 boundaries — 10 static step.run sites x 30s
+    // queue wait = 300s; inline 280s classify (CLASSIFY_TIMEOUT_MS) + 240s
+    // write-takes (TAKE_TIMEOUT_MS, in reddit-intel/take-writer.ts) = 520s;
+    // the remaining eight steps are single statements; 60s slack = 880s.
+    // Declared 16m (960s) rather than 15m so the budget is not sitting on its
+    // own floor — a finish tuned to the exact worst case CANCELS healthy runs,
+    // and a cancellation gets no retry, no error and no telemetry (#1069).
+    // Neither Claude timeout is a *_WALL_CLOCK_MS constant, so the floor test
+    // cannot see them; they are stated here so raising either is visibly a
+    // change to this number too.
+    timeouts: { finish: "16m" },
     // No event-level idempotency key here — the cron triggers with a fresh
     // triggeredAt timestamp each run. Idempotency lives at the DB layer
     // (UNIQUE(feed_item_id) on reddit_post_intel + UPSERT on daily_summary).

@@ -20,6 +20,7 @@ import {
   CLASSIFY_MAX_TOKENS,
   CLASSIFY_TIMEOUT_MS,
 } from "../inngest/reddit-intel-daily";
+import { ROUTE_MAX_DURATION_S } from "../inngest/step-budget";
 
 // Sonnet 4.6's slowest observed sustained output rate. The timeout has to
 // cover a full-length response at this rate or the ceiling is unreachable.
@@ -33,6 +34,37 @@ describe("classify output budget", () => {
     // yields nothing and burns the Inngest attempt.
     const worstCaseMs = (CLASSIFY_MAX_TOKENS / SLOWEST_TOKENS_PER_SEC) * 1000;
     expect(CLASSIFY_TIMEOUT_MS).toBeGreaterThanOrEqual(worstCaseMs);
+  });
+
+  it("keeps the timeout inside the request that carries it", () => {
+    // #1134, and the half of the invariant that was missing. The call runs
+    // inside a step.run, and every Inngest step executes as ONE HTTP request
+    // to a route declaring maxDuration = 300. A timeout at or above that can
+    // never fire: Vercel kills the request first and the failure arrives as
+    // "HTTP 504 before the SDK responded, no step output was produced" — no
+    // attribution, no error row, and the full retry ladder at a 300s slot
+    // hold apiece. CLASSIFY_TIMEOUT_MS sat at 360_000 for a month.
+    expect(CLASSIFY_TIMEOUT_MS).toBeLessThan(ROUTE_MAX_DURATION_S * 1000);
+  });
+
+  it("keeps the output ceiling and the request budget mutually satisfiable", () => {
+    // The two assertions above pull in opposite directions: one puts a FLOOR
+    // under the timeout (maxTokens / 50 tok/s) and the other a CEILING over it
+    // (the request budget). If maxTokens rises far enough the window closes
+    // and there is no legal timeout at all — which is exactly the state this
+    // file was in at 16,000 tokens, undetected, because nothing compared the
+    // two bounds to each other.
+    //
+    // Go-red: restore CLASSIFY_MAX_TOKENS = 16_000.
+    const floorMs = (CLASSIFY_MAX_TOKENS / SLOWEST_TOKENS_PER_SEC) * 1000;
+    expect(
+      floorMs,
+      `A full-length ${CLASSIFY_MAX_TOKENS}-token response needs ${floorMs}ms ` +
+        `at the slowest observed rate, but the request is killed at ` +
+        `${ROUTE_MAX_DURATION_S * 1000}ms. Lower CLASSIFY_MAX_TOKENS, shrink ` +
+        `the batch, or switch to streaming — raising the timeout cannot fix ` +
+        `this.`,
+    ).toBeLessThan(ROUTE_MAX_DURATION_S * 1000);
   });
 
   it("stays inside Inngest's 15-minute function ceiling with retry headroom", () => {
