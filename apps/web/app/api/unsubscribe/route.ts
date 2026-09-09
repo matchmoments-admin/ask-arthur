@@ -5,7 +5,7 @@ import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 
 const UnsubscribeSchema = z.object({
-  email: z.string().email("Please enter a valid email address"),
+  email: z.string().trim().toLowerCase().max(254).pipe(z.email("Please enter a valid email address")),
 });
 
 export async function POST(req: NextRequest) {
@@ -36,13 +36,10 @@ export async function POST(req: NextRequest) {
     const { email } = parsed.data;
     const supabase = createServiceClient();
     if (!supabase) {
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "subscription_unavailable" }, { status: 503, headers: { "Retry-After": "60" } });
     }
 
-    const { error } = await supabase
-      .from("email_subscribers")
-      .update({ is_active: false })
-      .eq("email", email);
+    const { error } = await supabase.rpc("unsubscribe_newsletter", { p_email: email });
 
     if (error) {
       logger.error("Unsubscribe error", { error: String(error) });

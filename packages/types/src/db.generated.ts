@@ -2769,6 +2769,9 @@ export type Database = {
       }
       email_subscribers: {
         Row: {
+          confirmation_expires_at: string | null
+          confirmation_requested_at: string | null
+          confirmation_token_hash: string | null
           consent_at: string | null
           consent_source: string | null
           created_at: string
@@ -2778,6 +2781,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          confirmation_expires_at?: string | null
+          confirmation_requested_at?: string | null
+          confirmation_token_hash?: string | null
           consent_at?: string | null
           consent_source?: string | null
           created_at?: string
@@ -2787,6 +2793,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          confirmation_expires_at?: string | null
+          confirmation_requested_at?: string | null
+          confirmation_token_hash?: string | null
           consent_at?: string | null
           consent_source?: string | null
           created_at?: string
@@ -4283,6 +4292,51 @@ export type Database = {
         }
         Relationships: []
       }
+      linkedin_drafts: {
+        Row: {
+          attempted_at: string | null
+          author_urn: string | null
+          commentary: string
+          created_at: string
+          id: string
+          post_urn: string | null
+          published_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          attempted_at?: string | null
+          author_urn?: string | null
+          commentary: string
+          created_at?: string
+          id?: string
+          post_urn?: string | null
+          published_at?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          attempted_at?: string | null
+          author_urn?: string | null
+          commentary?: string
+          created_at?: string
+          id?: string
+          post_urn?: string | null
+          published_at?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: []
+      }
       media_analyses: {
         Row: {
           channel: string | null
@@ -4532,6 +4586,21 @@ export type Database = {
           last_detected_at?: string | null
           name?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      newsletter_confirmation_budget: {
+        Row: {
+          attempts: number
+          day: string
+        }
+        Insert: {
+          attempts: number
+          day: string
+        }
+        Update: {
+          attempts?: number
+          day?: string
         }
         Relationships: []
       }
@@ -9641,6 +9710,10 @@ export type Database = {
         Args: { p_entity_ids: number[] }
         Returns: Json
       }
+      confirm_newsletter_subscription: {
+        Args: { p_token_hash: string }
+        Returns: boolean
+      }
       consume_sim_swap_credit: {
         Args: { p_user_id: string }
         Returns: {
@@ -10510,6 +10583,7 @@ export type Database = {
       prune_cost_telemetry: { Args: { p_days?: number }; Returns: number }
       prune_feed_http_cache: { Args: { p_days?: number }; Returns: number }
       prune_feed_ingestion_log: { Args: { p_days?: number }; Returns: number }
+      prune_newsletter_confirmation_requests: { Args: never; Returns: number }
       prune_telco_events: {
         Args: never
         Returns: {
@@ -10616,6 +10690,10 @@ export type Database = {
           report_count: number
         }[]
       }
+      request_newsletter_confirmation: {
+        Args: { p_email: string; p_source: string; p_token_hash: string }
+        Returns: boolean
+      }
       resolve_brand: { Args: { p_raw: string }; Returns: string }
       review_verdict_severity: { Args: { v: string }; Returns: number }
       search_charities: {
@@ -10697,6 +10775,7 @@ export type Database = {
           updated_count: number
         }[]
       }
+      unsubscribe_newsletter: { Args: { p_email: string }; Returns: undefined }
       update_shop_check_signal: {
         Args: {
           p_composite_score?: number

@@ -34,8 +34,8 @@ export default function SubscribeForm({ variant = "default", source }: Subscribe
 
   if (status === "success") {
     return (
-      <p className="text-[#388E3C] text-base font-medium">
-        You&apos;re subscribed! Check your inbox on Mondays.
+      <p role="status" className="text-[#388E3C] text-base font-medium">
+        Check your inbox to confirm your subscription. If you&apos;re already subscribed, you&apos;re all set.
       </p>
     );
   }

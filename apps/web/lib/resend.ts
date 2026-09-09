@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Resend } from "resend";
 import { render } from "@react-email/components";
 import type { ReactElement } from "react";
@@ -21,7 +22,7 @@ export async function sendWelcomeEmail(email: string): Promise<void> {
   const unsubscribeUrl = signUnsubscribeUrl(email, "https://askarthur.au/unsubscribe");
   const oneClickUrl = signUnsubscribeUrl(email, "https://askarthur.au/api/unsubscribe-one-click");
 
-  await resend.emails.send({
+  const receipt = await resend.emails.send({
     from: FROM,
     to: email,
     subject: "Welcome to Ask Arthur — You're on the list!",
@@ -31,6 +32,7 @@ export async function sendWelcomeEmail(email: string): Promise<void> {
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
   });
+  if (receipt.error || !receipt.data?.id) throw new Error("welcome_email_rejected");
   logCost({
     feature: "email",
     provider: "resend",
@@ -96,6 +98,13 @@ export async function sendWeeklyDigest(
             "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
           },
+        }, {
+          // Same-day retries dedupe at Resend for its 24-hour retention window.
+          // A changed payload produces a visible conflict rather than a duplicate.
+          idempotencyKey: `weekly/${new Date().toISOString().slice(0, 10)}/${createHash("sha256").update(email.toLowerCase()).digest("hex")}`,
+        }).then((receipt) => {
+          if (receipt.error || !receipt.data?.id) throw new Error("weekly_email_rejected");
+          return receipt.data.id;
         });
       })
     );
@@ -109,6 +118,9 @@ export async function sendWeeklyDigest(
         unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
         metadata: { batch_size: batch.length, failed: batch.length - fulfilled },
       });
+    }
+    if (fulfilled !== batch.length) {
+      throw new Error(`weekly_email_batch_failed: ${batch.length - fulfilled} rejected`);
     }
   }
 }
@@ -147,6 +159,13 @@ export async function sendWeeklyIntelDigest(
             "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
           },
+        }, {
+          // Same-day retries dedupe at Resend for its 24-hour retention window.
+          // A changed payload produces a visible conflict rather than a duplicate.
+          idempotencyKey: `weekly/${new Date().toISOString().slice(0, 10)}/${createHash("sha256").update(email.toLowerCase()).digest("hex")}`,
+        }).then((receipt) => {
+          if (receipt.error || !receipt.data?.id) throw new Error("weekly_email_rejected");
+          return receipt.data.id;
         });
       }),
     );
@@ -165,6 +184,9 @@ export async function sendWeeklyIntelDigest(
           prompt_version: payload.promptVersion,
         },
       });
+    }
+    if (fulfilled !== batch.length) {
+      throw new Error(`weekly_email_batch_failed: ${batch.length - fulfilled} rejected`);
     }
   }
 }

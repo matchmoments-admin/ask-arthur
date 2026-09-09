@@ -79,11 +79,12 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Misc consumer
 
-| Route          | Purpose                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| `/subscribe`   | Newsletter signup landing (link target for the scan@ email footer; #933) |
-| `/unsubscribe` | Email unsubscribe form                                                   |
-| `/onboarding`  | Post-signup welcome flow (anon)                                          |
+| Route                | Purpose                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `/subscribe`         | Newsletter signup landing (link target for the scan@ email footer; #933)               |
+| `/subscribe/confirm` | Email ownership confirmation; explicit button submits token (v303, deployment pending) |
+| `/unsubscribe`       | Email unsubscribe form                                                                 |
+| `/onboarding`        | Post-signup welcome flow (anon)                                                        |
 
 ---
 
@@ -341,15 +342,16 @@ First-touch is captured by `middleware.ts`, which sets the `aa_attribution` cook
 
 ### Auth + onboarding (open)
 
-| Route                        | Method | Purpose                              |
-| ---------------------------- | ------ | ------------------------------------ |
-| `/api/auth/signout`          | POST   | Clear session + redirect             |
-| `/api/subscribe`             | POST   | Newsletter signup                    |
-| `/api/waitlist`              | POST   | Waitlist form                        |
-| `/api/leads`                 | POST   | B2B contact form                     |
-| `/api/feedback`              | POST   | User feedback collection             |
-| `/api/unsubscribe`           | POST   | Email unsubscribe form               |
-| `/api/unsubscribe-one-click` | GET    | RFC 8058 one-click unsubscribe token |
+| Route                        | Method | Purpose                                                         |
+| ---------------------------- | ------ | --------------------------------------------------------------- |
+| `/api/auth/signout`          | POST   | Clear session + redirect                                        |
+| `/api/subscribe`             | POST   | Request email confirmation; 202 does not mean subscribed (v303) |
+| `/api/subscribe/confirm`     | POST   | Consume hashed 24-hour token and activate subscription (v303)   |
+| `/api/waitlist`              | POST   | Waitlist form                                                   |
+| `/api/leads`                 | POST   | B2B contact form                                                |
+| `/api/feedback`              | POST   | User feedback collection                                        |
+| `/api/unsubscribe`           | POST   | Email unsubscribe form                                          |
+| `/api/unsubscribe-one-click` | POST   | RFC 8058 one-click unsubscribe token                            |
 
 ### Admin (admin)
 
@@ -478,3 +480,9 @@ Chrome's CRX format gives the server no way to verify a request came from a stor
 1. **Keypair generation** (`apps/extension/src/lib/identity.ts`) — on first run, `crypto.subtle.generateKey({name:'ECDSA', namedCurve:'P-256'}, extractable=false, ['sign','verify'])`. Persisted in IndexedDB; non-extractable `CryptoKey` handles survive MV3 service-worker restarts via structured clone.
 2. **Registration** (`apps/extension/src/lib/register.ts` + `src/entrypoints/offscreen/`) — a one-shot MV3 offscreen document iframes `https://askarthur.au/extension-turnstile`, the Turnstile widget runs, the token is `postMessage`d back and forwarded to background via `chrome.runtime.sendMessage`. Background POSTs `{installId, publicKeyJwk, turnstileToken}` to `/api/extension/register`. Server verifies via Cloudflare siteverify and upserts the public key into `extension_installs`. Turnstile rejects `chrome-extension://` origins directly — hosting the bridge iframe on our own domain is the supported workaround.
 3. **Request signing** (`apps/extension/src/lib/sign.ts`) — every API call signs `${METHOD}\n${PATH}\n${TIMESTAMP}\n${NONCE}\n${BASE64(SHA256(BODY))}` and attaches four `X-Extension-*` headers. Server-side verification (`apps/web/app/api/extension/_lib/signature.ts`) checks ±5 min clock skew, rejects replayed nonces via Upstash SETNX (10 min TTL), fetches the public key from `extension_installs` (cached in Redis 5 min), and verifies the signature.
+
+### LinkedIn draft studio (v304; deployment pending)
+
+- `/admin/linkedin-drafts`: admin-only editor, saved drafts and exact-text preview. Linked from the admin navigation.
+- `/api/admin/linkedin-drafts`: GET lists the newest 100 drafts; POST creates or saves a draft with a revision check. Neither operation publishes.
+- `/api/admin/linkedin-drafts/publish`: POST requires admin access, same-origin request, `publishNow: true`, saved revision and the production publishing flag. Atomically claims the draft, then makes one LinkedIn post attempt. No scheduled caller.

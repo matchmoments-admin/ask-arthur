@@ -49,7 +49,7 @@ export default function WaitlistForm() {
 
       {status === "success" ? (
         <div className="bg-safe-bg border border-safe-border rounded-[4px] p-4 text-[#388E3C] text-base font-medium">
-          You&apos;re on the list! We&apos;ll let you know when Scam Shield for Families is ready.
+          Your waitlist request is saved. {weeklyAlerts && "Check your inbox to confirm weekly scam alerts."}
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-3">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
+import { requestNewsletterConfirmation } from "@/lib/newsletter-subscription";
 import { logger } from "@askarthur/utils/logger";
 
 // Known capture surfaces (#933 item 4). Stored verbatim as consent_source so
@@ -15,7 +16,7 @@ const KNOWN_SOURCES = [
 ] as const;
 
 const SubscribeSchema = z.object({
-  email: z.string().email("Please enter a valid email address"),
+  email: z.string().trim().toLowerCase().max(254).pipe(z.email("Please enter a valid email address")),
   source: z.enum(KNOWN_SOURCES).optional(),
 });
 
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
     const parsed = SubscribeSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -46,34 +47,19 @@ export async function POST(req: NextRequest) {
     const { email, source } = parsed.data;
     const supabase = createServiceClient();
     if (!supabase) {
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "subscription_unavailable" }, {
+        status: 503, headers: { "Retry-After": "60" },
+      });
     }
-
-    const { error } = await supabase
-      .from("email_subscribers")
-      .upsert(
-        {
-          email,
-          is_active: true,
-          consent_at: new Date().toISOString(),
-          consent_source: source ?? "subscribe_form",
-        },
-        { onConflict: "email" }
-      );
-
-    if (error) {
-      logger.error("Subscribe error", { error: String(error) });
-      return NextResponse.json(
-        { error: "Failed to subscribe" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
+    await requestNewsletterConfirmation(supabase, email, source ?? "subscribe_form");
+    return NextResponse.json({ success: true, status: "confirmation_required" }, {
+      status: 202, headers: { "Cache-Control": "no-store" },
+    });
   } catch {
+    logger.warn("newsletter_signup_failed");
     return NextResponse.json(
-      { error: "Something went wrong. Please try again." },
-      { status: 500 }
+      { error: "subscription_unavailable" },
+      { status: 503, headers: { "Retry-After": "900" } }
     );
   }
 }

@@ -140,7 +140,8 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `blog_posts` — CMS posts. `search_vector` TSVECTOR GIN. v2.
 - `blog_categories` — Category taxonomy. v18.
 - `blog_external_links` — Curated "Further reading" links per post (nofollow by default; `origin` audits editorial vs outreach vs partnership). Service-role RLS, managed via `/admin/blog`. Policy: `/blog/editorial-policy`. v227.
-- `email_subscribers` — Newsletter signup. DENY_ALL RLS (v109).
+- `email_subscribers` — Newsletter signup. DENY_ALL RLS (v109). v303 adds pending ownership-confirmation hashes, expiry and request timestamp; new signups stay inactive until confirmed. Deployment pending.
+- `newsletter_confirmation_budget` — v303 service-role-only UTC-day request budget (200). `request_newsletter_confirmation`, `confirm_newsletter_subscription`, `unsubscribe_newsletter` and `prune_newsletter_confirmation_requests` are service-role-only RPCs defined in `supabase/migration-v303-newsletter-confirmation.sql`. Requests use a per-address transaction lock and 15-minute cooldown; opt-out invalidates pending tokens.
 
 ### Clone-watch / Shopfront
 
@@ -470,3 +471,7 @@ pnpm --filter @askarthur/types gen:db
 The generated file is committed (NOT git-ignored) so CI typechecks have access to it without needing the Supabase CLI or an access token. The trade-off: every regen produces a sizeable diff that must land in the same PR as the migration that prompted it.
 
 **Pilot file** — `apps/web/app/admin/feedback/page.tsx` uses `Tables<'feedback_triage_queue'>` as the base for its `TriageRow` shape and narrows nullability + enum strings at the page boundary with a runtime type guard. Use this pattern (boundary narrowing, no `as` casts) when the MV/view row's nullability is wider than the consumer expects.
+
+### LinkedIn drafts (v304; deployment pending)
+
+`linkedin_drafts` stores private plain-text drafts, revision, status, operator identifier, attempt timestamps and LinkedIn receipt. RLS and grants restrict all access to service_role in `supabase/migration-v304-linkedin-drafts.sql`; admin routes enforce operator access. Conditional updates on `(id, version, status=draft)` prevent stale saves and duplicate claims. Publishing/uncertain rows are locked until an operator reconciles the external outcome. Four seed drafts use stable IDs and never overwrite edits on migration reapplication.

@@ -1,0 +1,87 @@
+{
+  "checked_at": "2026-09-07T21:21:47.691Z",
+  "project": "rquomhcgnodxzkhokwni",
+  "mode": "read-only",
+  "checks": {
+    "newsletter_schema": [
+      {
+        "column_name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO"
+      },
+      {
+        "column_name": "email",
+        "data_type": "text",
+        "is_nullable": "NO"
+      },
+      {
+        "column_name": "is_active",
+        "data_type": "boolean",
+        "is_nullable": "NO"
+      },
+      {
+        "column_name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO"
+      },
+      {
+        "column_name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO"
+      },
+      {
+        "column_name": "consent_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES"
+      },
+      {
+        "column_name": "consent_source",
+        "data_type": "text",
+        "is_nullable": "YES"
+      }
+    ],
+    "migration_head": [
+      {
+        "version": "20260820113830",
+        "name": "v280_image_check_origin_metadata"
+      },
+      {
+        "version": "20260810031556",
+        "name": "v279_submit_dead_domain_cadence"
+      },
+      {
+        "version": "20260810030352",
+        "name": "v278_mark_clone_alert_rechecked"
+      },
+      {
+        "version": "20260809214700",
+        "name": "v277_recheck_dead_domain_cadence"
+      },
+      {
+        "version": "20260809214344",
+        "name": "v276_reputation_lifecycle_backfill"
+      }
+    ],
+    "newsletter_baseline": [
+      {
+        "total": 0,
+        "active": 0
+      }
+    ],
+    "subscriber_grants": [
+      {
+        "rls": true
+      }
+    ],
+    "security": {
+      "INFO:rls_enabled_no_policy": 39
+    },
+    "performance": {
+      "INFO:unindexed_foreign_keys": 3,
+      "WARN:auth_rls_initplan": 4,
+      "INFO:no_primary_key": 8,
+      "INFO:unused_index": 300,
+      "INFO:auth_db_connections_absolute": 1
+    }
+  }
+}
