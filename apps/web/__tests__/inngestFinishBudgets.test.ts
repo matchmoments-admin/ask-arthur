@@ -81,6 +81,119 @@ function wallClockSeconds(src: string): number {
   );
 }
 
+/**
+ * Coverage, not just correctness: a function with NO finish timeout is invisible
+ * to the floor check above, because `declaredFinishSeconds` returns null and the
+ * test returns early. That is how seven scam-engine functions sat unbounded for
+ * months while this file reported 77 green tests — the guard was real and the
+ * gap was simply out of its reach.
+ *
+ * ADR-0019 prescribes `timeouts.finish` fleet-wide as the circuit breaker:
+ * finite, so a hung step cannot hold one of the account's five slots or rack up
+ * step-runs across the whole retry ladder.
+ *
+ * The ALLOWLIST is asserted in both directions. An unlisted file without a
+ * finish timeout fails (the door is closed to new ones); a listed file that has
+ * SINCE GAINED one also fails, so the list cannot rot into permission.
+ */
+const NO_FINISH_ALLOWLIST: Record<string, string> = {
+  "clone-watch-notify-brand.ts":
+    "pre-existing gap; #1135 closed the seven scam-engine functions only. BACKLOG.md -> Ops",
+  "clone-watch-submit-netcraft.ts":
+    "pre-existing gap; needs its own boundary derivation. BACKLOG.md -> Ops",
+  "clone-watch-weekly-digest.ts":
+    "pre-existing gap; needs its own boundary derivation. BACKLOG.md -> Ops",
+  "phone-footprint-pdf.ts":
+    "pre-existing gap; feature is mothballed (NORTH_STAR.md). BACKLOG.md -> Ops",
+  "phone-footprint-vonage-backfill.ts":
+    "pre-existing gap; feature is mothballed (NORTH_STAR.md). BACKLOG.md -> Ops",
+};
+
+describe("every registered Inngest function declares a finish timeout", () => {
+  const defined = SCAN_DIRS.flatMap((dir) =>
+    readdirSync(dir)
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .map((f) => ({ name: f, src: readFileSync(new URL(f, dir), "utf8") }))
+      .filter((f) => /\binngest\.createFunction\(/.test(f.src)),
+  );
+
+  it("finds the registered functions (guards a silently-empty sweep)", () => {
+    expect(defined.length).toBeGreaterThan(60);
+  });
+
+  it("has no unlisted function without one", () => {
+    const offenders = defined
+      .filter((f) => declaredFinishSeconds(f.src) == null)
+      .map((f) => f.name)
+      .filter((n) => !(n in NO_FINISH_ALLOWLIST));
+    expect(
+      offenders,
+      "These functions declare no timeouts.finish, so nothing bounds a hung " +
+        "run:\n" +
+        offenders.map((o) => `  - ${o}`).join("\n") +
+        "\n\nDerive one (boundaries x 30s + inline wall-clocks + 60s slack) " +
+        "or add it to NO_FINISH_ALLOWLIST with a reason.",
+    ).toEqual([]);
+  });
+
+  it("has no stale allowlist entry", () => {
+    // A file that gained a finish timeout must leave the list, or the list
+    // starts granting permission nobody asked for.
+    const stale: string[] = [];
+    for (const name of Object.keys(NO_FINISH_ALLOWLIST)) {
+      const file = defined.find((f) => f.name === name);
+      if (!file) {
+        stale.push(`${name} (no longer a registered function — remove)`);
+      } else if (declaredFinishSeconds(file.src) != null) {
+        stale.push(`${name} (now HAS a finish timeout — remove)`);
+      }
+    }
+    expect(stale).toEqual([]);
+  });
+});
+
+/**
+ * Containment for the fleet's only unbounded fan-in.
+ *
+ * `analyze-failure-subscriber` triggers on `inngest/function.failed`, i.e. on
+ * EVERY function's final-retry failure fleet-wide. Until #1135 it declared no
+ * concurrency, throttle, rateLimit or idempotency, so during an incident its
+ * invocations scaled 1:1 with failures across ~46 functions — at exactly the
+ * moment the account can least afford them.
+ *
+ * This asserts DECLARATIVE CONFIG by reading the source, the same way the floor
+ * check above reads `timeouts.finish`. It cannot prove Inngest honours the key;
+ * it proves the config still says what the incident analysis concluded.
+ */
+describe("analyze-failure-subscriber stays contained", () => {
+  // Comments stripped before matching: the file's own docblock explains WHY
+  // rateLimit rather than throttle, and the first version of this guard fired
+  // on that prose. "Strip comments before matching" is rule 2 of the house
+  // style in docs/agents/defect-shapes.md, learned here exactly that way.
+  const src = readFileSync(new URL("analyze-failure.ts", SCAN_DIRS[1]!), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((l) => l.replace(/\/\/[^\n]*/g, " "))
+    .join("\n");
+
+  it("caps invocations per failing function, discarding rather than queueing", () => {
+    // rateLimit DISCARDS, throttle QUEUES (memory/MEMORY.md). In a failure
+    // storm a queue holds the backlog — and the slots — long after the storm.
+    expect(src).toMatch(/rateLimit:\s*\{[^}]*limit:\s*\d+/);
+    // Keyed per failing function, so one loud failure cannot mask another.
+    expect(src).toMatch(
+      /rateLimit:\s*\{[^}]*key:\s*"event\.data\.function_id"/,
+    );
+    expect(src).not.toMatch(/throttle:/);
+  });
+
+  it("does not match its own function id", () => {
+    // "analyze-failure-subscriber".startsWith("analyze-") is true, so its own
+    // failures passed its own filter and were logged as pipeline failures.
+    expect(src).toMatch(/fnId === SELF_FUNCTION_ID/);
+  });
+});
+
 describe("Inngest finish budgets tolerate concurrency-queue waits", () => {
   const files = SCAN_DIRS.flatMap((dir) =>
     readdirSync(dir)
