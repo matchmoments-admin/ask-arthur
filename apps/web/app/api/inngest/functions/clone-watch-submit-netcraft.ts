@@ -38,6 +38,14 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     id: "shopfront-clone-submit-netcraft",
     name: "Clone-Watch: Submit to Netcraft",
     retries: 3,
+    // ADR-0019's circuit breaker, absent until #1139. 4 static step.run
+    // sites, no loop and no interpolation: 4 x 30s queue wait + 60s slack =
+    // 180s. The one provider call (the Netcraft POST in submit-netcraft)
+    // carries its own 20s AbortSignal.timeout — a provider timeout, not a
+    // Step Budget, so the floor test cannot see it; stated here so raising it
+    // is visibly a change to this number too. Real worst case is therefore
+    // ~140s. Declared 5m (300s), clear of both.
+    timeouts: { finish: "5m" },
     concurrency: { limit: 4 },
     idempotency: "event.data.alertId",
     // Anti-abuse: trickle submissions like a normal reporter (Netcraft's public

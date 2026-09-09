@@ -81,6 +81,91 @@ function wallClockSeconds(src: string): number {
   );
 }
 
+interface RegisteredFn {
+  file: string;
+  ordinal: number;
+  of: number;
+  label: string;
+  /** Source from the function's leading comment block to the next function. */
+  body: string;
+}
+
+/**
+ * Every registered function, sliced PER FUNCTION rather than per file.
+ *
+ * WHY THE SLICING MATTERS. Both guards in this file used to read one file at a
+ * time, which is wrong in two directions once a file defines more than one
+ * function: the coverage check saw the FIRST finish timeout and called the file
+ * covered (phone-footprint-refresh-monitor and enrich-vulnerability-au-context
+ * were unbounded behind a covered sibling), and the floor check compared one
+ * function's finish against the whole file's step sites and boundary
+ * declaration. Second time in this workstream a sweep turned out to be half a
+ * sweep (#1139).
+ *
+ * A function's region starts at its leading comment block — that is where the
+ * `inngest-finish-budget:` declaration lives — and runs to the next function's
+ * region. So the declaration, the `timeouts`, and the `step.run` sites all
+ * attribute to the same function.
+ */
+function registeredFunctions(): RegisteredFn[] {
+  const out: RegisteredFn[] = [];
+  for (const dir of SCAN_DIRS) {
+    for (const f of readdirSync(dir).filter(
+      (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
+    )) {
+      const src = readFileSync(new URL(f, dir), "utf8");
+      const lines = src.split("\n");
+      // Line index of each `inngest.createFunction(`.
+      const hits = lines
+        .map((l, i) => (/inngest\.createFunction\(/.test(l) ? i : -1))
+        .filter((i) => i >= 0);
+      if (hits.length === 0) continue;
+
+      // Walk back over the declaration statement and its leading comments.
+      const starts = hits.map((hit) => {
+        let i = hit;
+        while (i > 0 && !/^\s*(?:export\s+)?const\s/.test(lines[i]!)) i--;
+        while (i > 0) {
+          const prev = lines[i - 1]!.trim();
+          if (
+            prev.startsWith("//") ||
+            prev.startsWith("*") ||
+            prev.startsWith("/*")
+          )
+            i--;
+          else break;
+        }
+        return i;
+      });
+
+      hits.forEach((_, idx) => {
+        // A file with ONE function IS that function: use the whole file, so
+        // step.run sites in helpers defined above it still count. Slicing
+        // there would have demanded a boundary declaration from
+        // shop-signal-enrich for steps the per-file version counted correctly.
+        const from = hits.length === 1 ? 0 : starts[idx]!;
+        const to =
+          hits.length === 1
+            ? lines.length
+            : idx + 1 < starts.length
+              ? starts[idx + 1]!
+              : lines.length;
+        out.push({
+          file: f,
+          ordinal: idx + 1,
+          of: hits.length,
+          label:
+            hits.length === 1
+              ? f
+              : `${f} (function ${idx + 1} of ${hits.length})`,
+          body: lines.slice(from, to).join("\n"),
+        });
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * Coverage, not just correctness: a function with NO finish timeout is invisible
  * to the floor check above, because `declaredFinishSeconds` returns null and the
@@ -97,34 +182,26 @@ function wallClockSeconds(src: string): number {
  * SINCE GAINED one also fails, so the list cannot rot into permission.
  */
 const NO_FINISH_ALLOWLIST: Record<string, string> = {
-  "clone-watch-notify-brand.ts":
-    "pre-existing gap; #1135 closed the seven scam-engine functions only. BACKLOG.md -> Ops",
-  "clone-watch-submit-netcraft.ts":
-    "pre-existing gap; needs its own boundary derivation. BACKLOG.md -> Ops",
-  "clone-watch-weekly-digest.ts":
-    "pre-existing gap; needs its own boundary derivation. BACKLOG.md -> Ops",
-  "phone-footprint-pdf.ts":
-    "pre-existing gap; feature is mothballed (NORTH_STAR.md). BACKLOG.md -> Ops",
-  "phone-footprint-vonage-backfill.ts":
-    "pre-existing gap; feature is mothballed (NORTH_STAR.md). BACKLOG.md -> Ops",
+  // EMPTY as of #1139. Every registered Inngest function in both directories
+  // now declares a finish timeout. Keep the mechanism: an entry here is how a
+  // deliberate exception is recorded, and the staleness check below is what
+  // stops one becoming permanent.
 };
 
 describe("every registered Inngest function declares a finish timeout", () => {
-  const defined = SCAN_DIRS.flatMap((dir) =>
-    readdirSync(dir)
-      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-      .map((f) => ({ name: f, src: readFileSync(new URL(f, dir), "utf8") }))
-      .filter((f) => /\binngest\.createFunction\(/.test(f.src)),
-  );
+  const defined = registeredFunctions();
 
   it("finds the registered functions (guards a silently-empty sweep)", () => {
     expect(defined.length).toBeGreaterThan(60);
+    // At least one file defines more than one — if that stops being true the
+    // per-function split is untested against the case it exists for.
+    expect(defined.some((f) => f.of > 1)).toBe(true);
   });
 
   it("has no unlisted function without one", () => {
     const offenders = defined
-      .filter((f) => declaredFinishSeconds(f.src) == null)
-      .map((f) => f.name)
+      .filter((f) => declaredFinishSeconds(f.body) == null)
+      .map((f) => f.label)
       .filter((n) => !(n in NO_FINISH_ALLOWLIST));
     expect(
       offenders,
@@ -137,15 +214,14 @@ describe("every registered Inngest function declares a finish timeout", () => {
   });
 
   it("has no stale allowlist entry", () => {
-    // A file that gained a finish timeout must leave the list, or the list
-    // starts granting permission nobody asked for.
+    // A function that gained a finish timeout must leave the list, or the
+    // list starts granting permission nobody asked for.
     const stale: string[] = [];
-    for (const name of Object.keys(NO_FINISH_ALLOWLIST)) {
-      const file = defined.find((f) => f.name === name);
-      if (!file) {
-        stale.push(`${name} (no longer a registered function — remove)`);
-      } else if (declaredFinishSeconds(file.src) != null) {
-        stale.push(`${name} (now HAS a finish timeout — remove)`);
+    for (const key of Object.keys(NO_FINISH_ALLOWLIST)) {
+      const fn = defined.find((f) => f.label === key);
+      if (!fn) stale.push(`${key} (no longer a registered function — remove)`);
+      else if (declaredFinishSeconds(fn.body) != null) {
+        stale.push(`${key} (now HAS a finish timeout — remove)`);
       }
     }
     expect(stale).toEqual([]);
@@ -200,16 +276,12 @@ describe("analyze-failure-subscriber stays contained", () => {
 });
 
 describe("Inngest finish budgets tolerate concurrency-queue waits", () => {
-  const files = SCAN_DIRS.flatMap((dir) =>
-    readdirSync(dir)
-      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-      .map((f) => ({ name: f, url: new URL(f, dir) })),
-  );
-  expect(files.length).toBeGreaterThan(10);
+  const fns = registeredFunctions();
+  expect(fns.length).toBeGreaterThan(10);
 
-  for (const file of files) {
-    it(`${file.name} finish budget covers its boundary count`, () => {
-      const src = readFileSync(file.url, "utf8");
+  for (const file of fns) {
+    it(`${file.label} finish budget covers its boundary count`, () => {
+      const src = file.body;
       const finish = declaredFinishSeconds(src);
       if (finish == null) return; // no finish timeout — nothing to breach
 
@@ -220,7 +292,7 @@ describe("Inngest finish budgets tolerate concurrency-queue waits", () => {
 
       if (needsDeclaration && !declared) {
         throw new Error(
-          `${file.name}: has ${staticSites === 0 ? "no static step sites (steps live in a helper)" : "per-item step ids inside a loop"}, ` +
+          `${file.label}: has ${staticSites === 0 ? "no static step sites (steps live in a helper)" : "per-item step ids inside a loop"}, ` +
             `so counting \`step.run(\` call sites would UNDERCOUNT the runtime boundaries and pass a budget nobody checked. ` +
             `Declare the worst case in a comment: "inngest-finish-budget: <N> boundaries — <derivation>". ` +
             `Prefer reducing N (fold per-item steps into one batch step, or add a wall-clock guard) over raising the budget.`,
@@ -248,7 +320,7 @@ describe("Inngest finish budgets tolerate concurrency-queue waits", () => {
         !hasSpanningBudget
       ) {
         throw new Error(
-          `${file.name}: declares ${declaredCount} boundaries but has ${staticSites} static step.run sites, ` +
+          `${file.label}: declares ${declaredCount} boundaries but has ${staticSites} static step.run sites, ` +
             `which LOWERS its own floor. Under-declaring is only sound when a spanningBudget() caps the run's ` +
             `wall clock, and this file constructs none. Raise the declaration, or bound the run.`,
         );
@@ -266,7 +338,7 @@ describe("Inngest finish budgets tolerate concurrency-queue waits", () => {
 
       expect(
         finish,
-        `${file.name}: finish budget ${finish}s < floor ${required}s ` +
+        `${file.label}: finish budget ${finish}s < floor ${required}s ` +
           `(${boundaries} boundaries${declared ? " (declared)" : ""} × ${QUEUE_WAIT_SECONDS_PER_STEP}s queue wait ` +
           `+ ${wallClockSeconds(src)}s inline wall-clocks + ${SLACK_SECONDS}s slack). ` +
           `A too-small finish budget CANCELS healthy runs silently — see #1069.`,

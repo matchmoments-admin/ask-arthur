@@ -79,6 +79,16 @@ export const phoneFootprintPdfRender = inngest.createFunction(
     // or user double-click doesn't double-render + double-charge Resend.
     idempotency: "event.data.requestId || event.data.footprintId",
     retries: 1,
+    // ADR-0019's circuit breaker, absent until #1139. 5 static step.run
+    // sites, no loop: 5 x 30s queue wait + 60s slack = 210s. The slow step is
+    // render-pdf (CPU, no network), then an R2 upload and one Resend send.
+    // Declared 5m (300s).
+    //
+    // The feature is MOTHBALLED (NORTH_STAR.md — zero lifetime usage), so
+    // this is dark. It gets a breaker anyway: ADR-0019 is fleet-wide, and a
+    // function with no finish timeout is invisible to the floor check, which
+    // is how seven of these went unbounded for months.
+    timeouts: { finish: "5m" },
     concurrency: { limit: 3 },
   },
   { event: PHONE_FOOTPRINT_PDF_EVENT },
