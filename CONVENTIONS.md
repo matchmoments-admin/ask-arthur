@@ -173,6 +173,29 @@ $$;
 - No `any` — use `unknown` with type guards if needed
 - Zod schemas for runtime validation at API boundaries
 
+### Injected clients: narrow to what is called
+
+When a function takes a Supabase (or any) client as a parameter so tests can
+drive its failure paths, declare the parameter as a **structural type of
+exactly the tables and builder calls it makes** — not the whole
+`SupabaseClient`. The reference shape is `PersistClient` / `PersistTables` in
+`packages/scam-engine/src/inngest/reddit-intel-cluster.ts` (#1133): a
+per-table lookup interface plus `from<T extends keyof Tables>(table: T): Tables[T]`.
+
+Why: the wide type forces the test fake to be `{ from } as never`, which is the
+type system switched off at the one seam the tests exist to exercise. A table
+or method the function starts calling that the fake does not model then falls
+through to whatever branch comes last and answers for it silently. With the
+narrow type, that is a compile error in the function (it cannot name a fourth
+table) AND in the fake (it cannot omit a method). The real client still passes
+unchanged — `SupabaseClient` satisfies the structural type.
+
+Rules: write the fake as a typed `Tables` object and `from: (t) => tables[t]`,
+never a cast; put the type beside the function, exported for its test; do not
+retro-fit the other wide-typed injections (`vuln-detect`, `billing-ingest-nightly`,
+`stripe/webhook`, `brand-aliases`, `onward/submit`, …) in one sweep — narrow
+each the next time its test is touched.
+
 ### React
 
 - Functional components only (no class components)
