@@ -200,6 +200,25 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     expect(r.linkFailures).toBe(2);
   });
 
+  it("counts join failures per post when a theme's centroid update fails", async () => {
+    // The three failure counters are documented as POSTS. This one was
+    // incremented once per THEME, so forty posts absorbed by a theme whose
+    // update failed read as a single dropped post in the run summary — the
+    // partial run looked like a quiet one. Go-red: `joinFailures++` → 1.
+    const { client } = fakeSupabase({
+      themeUpdateError: { message: "deadlock detected" },
+    });
+    const joins = Array.from({ length: 40 }, (_, i) =>
+      joinAssignment(`p${i}`, "theme-hot"),
+    );
+
+    const r = await persistAssignments(client, joins);
+
+    expect(r.joinFailures).toBe(40);
+    expect(r.joinedThemeCount).toBe(0);
+    expect(r.linkFailures).toBe(0);
+  });
+
   it("skips posts a prior attempt already linked", async () => {
     const { client, calls } = fakeSupabase({
       alreadyLinked: [{ id: "post-1", theme_id: "theme-existing" }],

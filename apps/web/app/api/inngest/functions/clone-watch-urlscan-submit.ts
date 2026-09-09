@@ -182,7 +182,27 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       // one. A Date.now() captured here would reset on every replay and the
       // guard below could never fire. event.ts is set when the run is
       // TRIGGERED and survives replay.
-      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+      //
+      // elapsedSinceTrigger returns null when event.ts is unusable, and the
+      // first version of this guard wrote `?? 0` — turning "unknowable" back
+      // into the confident zero it exists to avoid, so the guard could never
+      // fire on such a run. Degrade instead: fall back to a clock captured
+      // here. That clock resets on replay, so it bounds only the current
+      // segment, but a segment bound is strictly safer than no bound. Warned
+      // once so a degraded run is distinguishable from a healthy one.
+      const segmentStartMs = Date.now();
+      let degradedWarned = false;
+      const elapsedMs = () => {
+        const sinceTrigger = elapsedSinceTrigger({ event });
+        if (sinceTrigger !== null) return sinceTrigger;
+        if (!degradedWarned) {
+          degradedWarned = true;
+          logger.warn(
+            "clone-watch urlscan submit: event.ts unusable — wall-clock guard degraded to segment clock",
+          );
+        }
+        return Date.now() - segmentStartMs;
+      };
 
       const batch = await step.run("submit-batch", async () => {
         let submitted = 0;

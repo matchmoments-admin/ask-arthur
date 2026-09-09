@@ -41,6 +41,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import {
   DB_WRITE_CONCURRENCY,
+  groupBy,
   mapWithConcurrency,
 } from "@askarthur/utils/concurrency";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -626,50 +627,50 @@ export async function persistAssignments(
   // forward, so for a theme joined k times in this batch the LAST assignment
   // holds the final centroid and count. Applying only that one is both correct
   // and k-1 fewer round trips.
-  const lastJoinByTheme = new Map<string, Assignment>();
-  for (const a of joins) lastJoinByTheme.set(a.themeId, a);
+  const joinsByTheme = groupBy(joins, (a) => a.themeId);
 
   let joinedThemeCount = 0;
   await mapWithConcurrency(
-    [...lastJoinByTheme.values()],
+    [...joinsByTheme.entries()],
     DB_WRITE_CONCURRENCY,
-    async (a) => {
+    async ([themeId, themeJoins]) => {
       // Checked per item rather than per wave: a wave is only as short as its
       // slowest member, and abandoning work already in flight would waste it.
       // Items skipped here keep theme_id NULL and return in the next run.
       if (outOfTime()) return;
+      const last = themeJoins[themeJoins.length - 1]!;
       const { error } = await supabase
         .from("reddit_intel_themes")
         .update({
-          centroid_embedding: vectorToPgString(a.newCentroid),
-          centroid_embedding_model_version: a.embeddingModelVersion,
-          member_count: a.newMemberCount,
+          centroid_embedding: vectorToPgString(last.newCentroid),
+          centroid_embedding_model_version: last.embeddingModelVersion,
+          member_count: last.newMemberCount,
           last_seen_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
-        .eq("id", a.themeId);
+        .eq("id", themeId);
       if (error) {
         logger.warn("cluster: theme update failed", {
-          themeId: a.themeId,
+          themeId,
+          posts: themeJoins.length,
           error: error.message,
         });
-        joinFailures++;
+        // Per POST, like the other two counters. This was `joinFailures++` —
+        // one per theme — so a theme absorbing 40 posts that failed its
+        // centroid update read as a single dropped post in the run summary.
+        joinFailures += themeJoins.length;
         return;
       }
-      for (const j of joins) {
-        if (j.themeId === a.themeId) themeIdByPost.set(j.postId, a.themeId);
-      }
+      for (const j of themeJoins) themeIdByPost.set(j.postId, themeId);
       joinedThemeCount++;
     },
   );
 
   // ── Post -> theme links, grouped by theme ────────────────────────────────
-  const postsByTheme = new Map<string, string[]>();
-  for (const [postId, themeId] of themeIdByPost) {
-    const list = postsByTheme.get(themeId);
-    if (list) list.push(postId);
-    else postsByTheme.set(themeId, [postId]);
-  }
+  const postsByTheme = groupBy(
+    [...themeIdByPost.keys()],
+    (postId) => themeIdByPost.get(postId)!,
+  );
 
   const linkedPostIds: string[] = [];
   await mapWithConcurrency(

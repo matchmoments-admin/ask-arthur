@@ -84,6 +84,29 @@ describe("wall-clock guards survive Inngest step replay", () => {
     ).toEqual([]);
   });
 
+  it("no guard turns an unknowable elapsed time back into a confident zero", () => {
+    // elapsedSinceTrigger returns null when event.ts is unusable — its docblock
+    // says a confident zero is the failure mode the whole change is about. The
+    // first conversion of the four clone-watch guards then wrote
+    // `elapsedSinceTrigger({ event }) ?? 0` at every site, so on such a run the
+    // guard could never fire: the exact pre-#1124 behaviour, behind a comment
+    // describing the fix. Go-red: reinstating `?? 0` at any site fails this.
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = stripComments(fs.readFileSync(file, "utf8"));
+      const m = src.match(/elapsedSinceTrigger\([^)]*\)\s*\?\?\s*0\b/);
+      if (m) offenders.push(`${path.basename(file)}  ${m[0]}`);
+    }
+    expect(
+      offenders,
+      "These guards coerce a null elapsed time to 0, so they never fire when " +
+        "event.ts is unusable:\n" +
+        offenders.map((o) => `  - ${o}`).join("\n") +
+        "\n\nDegrade to a segment clock and warn once instead — or use " +
+        "spanningBudget from @askarthur/scam-engine/inngest/step-budget.",
+    ).toEqual([]);
+  });
+
   it("every declared budget fits inside its own finish timeout", () => {
     // A guard spanning step boundaries is bounded by timeouts.finish, not by
     // the route's maxDuration. Asserting it against maxDuration would flag four

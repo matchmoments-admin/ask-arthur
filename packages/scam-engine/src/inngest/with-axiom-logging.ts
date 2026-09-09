@@ -92,16 +92,6 @@ async function flushBounded(log: {
 }
 
 /**
- * True when this invocation came from a cron schedule rather than an event.
- *
- * Prefer this to any test on `event.data`. The cron payload is a POPULATED
- * object (`{ cron: "25 2,8,14,20 * * *" }`), so truthiness cannot distinguish
- * the two paths — and a strict Zod parse of it throws on every scheduled run.
- * Where a function needs a domain payload with a cron fallback, discriminate
- * on SHAPE with `safeParse` (see resolveRedditIntel*Data in ./events.ts);
- * where it only needs to know which trigger fired, use this.
- */
-/**
  * True wall-clock elapsed for a run, in milliseconds — or null if unknowable.
  *
  * WHY THIS IS NOT `Date.now() - handlerEntry`. Inngest re-executes the handler
@@ -143,6 +133,16 @@ export function elapsedSinceTrigger(ctx: {
   return elapsed >= 0 ? elapsed : null;
 }
 
+/**
+ * True when this invocation came from a cron schedule rather than an event.
+ *
+ * Prefer this to any test on `event.data`. The cron payload is a POPULATED
+ * object (`{ cron: "25 2,8,14,20 * * *" }`), so truthiness cannot distinguish
+ * the two paths — and a strict Zod parse of it throws on every scheduled run.
+ * Where a function needs a domain payload with a cron fallback, discriminate
+ * on SHAPE with `safeParse` (see resolveRedditIntel*Data in ./events.ts);
+ * where it only needs to know which trigger fired, use this.
+ */
 export function isCronTick(event: { name?: string } | undefined): boolean {
   return event?.name === CRON_TICK_EVENT;
 }
@@ -176,7 +176,7 @@ export function withAxiomLogging<TResult>(
     // in preview for testing. INNGEST_ALLOW_NONPROD_CRONS=true forces a cron
     // to run off-prod when you genuinely need to exercise a cron-only fn.
     if (
-      ctx.event?.name === CRON_TICK_EVENT &&
+      isCronTick(ctx.event) &&
       !isProductionDeployment() &&
       !readBoolEnv("INNGEST_ALLOW_NONPROD_CRONS")
     ) {

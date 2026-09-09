@@ -336,7 +336,27 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
 
       // TRIGGERED and survives replay.
 
-      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+      //
+      // elapsedSinceTrigger returns null when event.ts is unusable, and the
+      // first version of this guard wrote `?? 0` — turning "unknowable" back
+      // into the confident zero it exists to avoid, so the guard could never
+      // fire on such a run. Degrade instead: fall back to a clock captured
+      // here. That clock resets on replay, so it bounds only the current
+      // segment, but a segment bound is strictly safer than no bound. Warned
+      // once so a degraded run is distinguishable from a healthy one.
+      const segmentStartMs = Date.now();
+      let degradedWarned = false;
+      const elapsedMs = () => {
+        const sinceTrigger = elapsedSinceTrigger({ event });
+        if (sinceTrigger !== null) return sinceTrigger;
+        if (!degradedWarned) {
+          degradedWarned = true;
+          logger.warn(
+            "clone-watch netcraft-issue: event.ts unusable — wall-clock guard degraded to segment clock",
+          );
+        }
+        return Date.now() - segmentStartMs;
+      };
 
       let uuidsSkippedForTime = 0;
       for (const group of plan.groups) {
@@ -440,7 +460,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         // dead candidates get a non-terminal recheck_after, never a slot.
         // Probe ONLY when the result can matter: live mode (dry-run's widened
         // unavailable states are the DNS-dead worst case — 8s timeouts that
-        // can blow the 5m finish budget at cap 20) and a filable uuid
+        // can blow the 12m finish budget at cap 20) and a filable uuid
         // (has_issues → the slot is already spent; don't GET attacker infra
         // for a decision that's a dead end either way).
         const shouldProbe =
