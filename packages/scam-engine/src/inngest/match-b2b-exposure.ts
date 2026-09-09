@@ -33,6 +33,24 @@ import {
   type ExposureProduct,
 } from "./events";
 import { recordDetections, type DetectionCandidate } from "../vuln-detect";
+import { budgetedStep } from "./step-budget";
+
+/**
+ * In-step wall-clock budget for the detection write phase.
+ *
+ * Bounded by the route's `maxDuration` (300s), not by timeouts.finish — see
+ * ./step-budget.ts for the two bounds. Until #1134 this loop had NO bound of
+ * any kind: `matchTriples` is products (≤1000, per the event schema) x
+ * overlapping CVEs, written one sequential round trip at a time inside a
+ * single step. At ~30-80ms per write that exceeds the request budget on a
+ * large inventory, and exceeding it is not a slow run — Vercel kills the
+ * request, Inngest reports no step output, and the retry does the same work
+ * and dies the same way.
+ *
+ * The writes are now concurrent (DB_WRITE_CONCURRENCY) so the budget should
+ * never fire; it is the backstop, not the mechanism.
+ */
+const DETECTIONS_WALL_CLOCK_MS = 240_000;
 
 const SEVERITY_RANK: Record<string, number> = {
   critical: 4,
@@ -150,6 +168,14 @@ export const matchB2bExposure = inngest.createFunction(
     id: "match-b2b-exposure",
     name: "Vuln intel: match B2B product inventory against vulnerability DB",
     concurrency: { limit: 3 },
+    // ADR-0019's circuit breaker, absent until #1134.
+    //
+    // inngest-finish-budget: 5 boundaries — 2 static step.run sites plus up to
+    // 3 step.sendEvent sites (only one executes per path, but the regex counts
+    // step.run only and would pass a floor nobody checked); 5 x 30s queue wait
+    // = 150s; inline 240s DETECTIONS_WALL_CLOCK_MS; 60s slack = 450s.
+    // Declared 8m (480s).
+    timeouts: { finish: "8m" },
     // Throttle to keep the GIN query path cheap if a customer fans out
     // hundreds of requests. 200/min is well above expected steady-state.
     throttle: { limit: 200, period: "1m" },
@@ -239,26 +265,48 @@ export const matchB2bExposure = inngest.createFunction(
     // Step 3 — record detections. Inngest retries the step on failure, so
     // we don't need waitUntil here. recordDetections is idempotent (ON
     // CONFLICT DO NOTHING) so retries don't dupe rows.
-    await step.run("record-detections", async () => {
-      const detections: DetectionCandidate[] = matchTriples.map(
-        ({ vuln, product }) => ({
-          identifier: vuln.identifier,
-          scanner: "scam-engine",
-          targetType: "npm_package",
-          targetValue: product.name,
-          targetVersion: product.version,
-          evidence: {
-            orgId: data.orgId,
-            requestId: data.requestId,
-            cvssScore: vuln.cvss_score,
-            severity: vuln.severity,
-            cisaKev: vuln.cisa_kev,
-          },
-          scanId: data.requestId,
-        }),
-      );
-      await recordDetections(detections);
-    });
+    const detectionOutcome = await budgetedStep(
+      step,
+      "record-detections",
+      DETECTIONS_WALL_CLOCK_MS,
+      async (budget) => {
+        const detections: DetectionCandidate[] = matchTriples.map(
+          ({ vuln, product }) => ({
+            identifier: vuln.identifier,
+            scanner: "scam-engine",
+            targetType: "npm_package",
+            targetValue: product.name,
+            targetVersion: product.version,
+            evidence: {
+              orgId: data.orgId,
+              requestId: data.requestId,
+              cvssScore: vuln.cvss_score,
+              severity: vuln.severity,
+              cisaKev: vuln.cisa_kev,
+            },
+            scanId: data.requestId,
+          }),
+        );
+        return await recordDetections(detections, { budget });
+      },
+    );
+
+    // ERROR, not warn. Every other worklist in the fleet is self-healing, so a
+    // truncated run is a deferral. This one is keyed
+    // `idempotency: event.data.requestId`, so a re-fire of the same request is
+    // DEDUPED rather than resumed — a detection the budget did not reach is
+    // gone. If this ever fires, the fix is upstream (cap the inventory or
+    // split the request), not a bigger budget.
+    if (detectionOutcome.notReached > 0) {
+      logger.error("match-b2b-exposure: detections dropped, not recoverable", {
+        requestId: data.requestId,
+        orgId: data.orgId,
+        attempted: detectionOutcome.attempted,
+        written: detectionOutcome.written,
+        failed: detectionOutcome.failed,
+        notReached: detectionOutcome.notReached,
+      });
+    }
 
     // Step 4 — emit the summary event. matches[] is capped at 500 (matches
     // the schema limit); excess detections still live in the DB and can be
@@ -282,8 +330,18 @@ export const matchB2bExposure = inngest.createFunction(
       orgId: data.orgId,
       candidates: candidates.length,
       matches: matchTriples.length,
+      // Write Outcome: attempted - written - failed - skipped = notReached.
+      detectionsAttempted: detectionOutcome.attempted,
+      detectionsWritten: detectionOutcome.written,
+      detectionsFailed: detectionOutcome.failed,
+      detectionsSkipped: detectionOutcome.skipped,
+      detectionsNotReached: detectionOutcome.notReached,
     });
 
-    return { matched: matchTriples.length, candidates: candidates.length };
+    return {
+      matched: matchTriples.length,
+      candidates: candidates.length,
+      detections: detectionOutcome,
+    };
   }),
 );

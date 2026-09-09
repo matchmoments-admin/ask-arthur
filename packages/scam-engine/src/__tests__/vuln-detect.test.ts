@@ -183,8 +183,13 @@ describe("recordDetection — graceful skip paths", () => {
   });
 });
 
-describe("recordDetection — error paths never throw", () => {
-  it("logs and swallows errors when the lookup fails", async () => {
+describe("recordDetection — error paths never throw, and are reported", () => {
+  // Since #1134 recordDetection RETURNS what happened instead of void, so a
+  // bulk caller can count it. The distinction these two pin is the one that
+  // used to collapse: a failed lookup and a not-in-the-table lookup both
+  // returned null, so a connection reset would have been booked as a benign
+  // skip. Go-red: return "skipped" for the { kind: "error" } branch.
+  it("reports a failed lookup as failed, not skipped", async () => {
     createServiceClientMock.mockReturnValue(
       makeFakeClient({
         vulnRow: null,
@@ -199,13 +204,14 @@ describe("recordDetection — error paths never throw", () => {
         targetType: "npm_package",
         targetValue: "mcp-remote",
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("failed");
 
     expect(upsertMock).not.toHaveBeenCalled();
+    // One error line, from the lookup itself — the caller adds no second.
     expect(loggerMock.error).toHaveBeenCalledTimes(1);
   });
 
-  it("logs and swallows errors when the upsert fails", async () => {
+  it("reports a failed upsert as failed", async () => {
     createServiceClientMock.mockReturnValue(
       makeFakeClient({
         vulnRow: { id: 1 },
@@ -220,7 +226,7 @@ describe("recordDetection — error paths never throw", () => {
         targetType: "npm_package",
         targetValue: "mcp-remote",
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("failed");
 
     expect(loggerMock.error).toHaveBeenCalledTimes(1);
     expect(loggerMock.error.mock.calls[0][0]).toMatch(/insert failed/);
@@ -293,5 +299,74 @@ describe("recordDetections — bulk", () => {
     // Two upserts (the missing identifier was skipped, not failed)
     expect(upsertMock).toHaveBeenCalledTimes(2);
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a Write Outcome whose parts account for every candidate", async () => {
+    // attempted - written - failed - skipped = notReached. Before #1134 this
+    // returned void, so a batch that wrote nothing was indistinguishable from
+    // one that wrote everything.
+    createServiceClientMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "vulnerabilities") {
+          return {
+            select: () => ({ eq: () => ({ maybeSingle: maybeSingleMock }) }),
+          };
+        }
+        return { upsert: upsertMock };
+      },
+    });
+    maybeSingleMock
+      .mockResolvedValueOnce({ data: { id: 1 }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    upsertMock.mockResolvedValue({ error: null });
+
+    const r = await recordDetections([
+      {
+        identifier: "CVE-A",
+        scanner: "mcp-audit",
+        targetType: "npm_package",
+        targetValue: "pkg-a",
+      },
+      {
+        identifier: "CVE-MISSING",
+        scanner: "mcp-audit",
+        targetType: "npm_package",
+        targetValue: "pkg-b",
+      },
+    ]);
+
+    expect(r).toEqual({
+      attempted: 2,
+      written: 1,
+      failed: 0,
+      skipped: 1,
+      notReached: 0,
+      deadlineHit: false,
+    });
+    expect(r.attempted - r.written - r.failed - r.skipped).toBe(r.notReached);
+  });
+
+  it("stops at an expired budget and counts what it never reached", async () => {
+    // The bound that did not exist. matchTriples is products (<=1000) x
+    // overlapping CVEs with no constant capping it, inside ONE step bounded by
+    // the route's 300s maxDuration. Go-red: drop the budget check in the loop.
+    createServiceClientMock.mockReturnValue({
+      from: () => ({ upsert: upsertMock }),
+    });
+
+    const r = await recordDetections(
+      Array.from({ length: 5 }, (_, i) => ({
+        identifier: `CVE-${i}`,
+        scanner: "mcp-audit" as const,
+        targetType: "npm_package" as const,
+        targetValue: `pkg-${i}`,
+      })),
+      { budget: { expired: () => true, remainingMs: () => 0 } },
+    );
+
+    expect(r.notReached).toBe(5);
+    expect(r.written).toBe(0);
+    expect(r.deadlineHit).toBe(true);
+    expect(upsertMock).not.toHaveBeenCalled();
   });
 });
