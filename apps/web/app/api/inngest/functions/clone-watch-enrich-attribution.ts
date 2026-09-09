@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -17,7 +18,12 @@ import {
 } from "@/lib/clone-watch/enrich-attribution";
 import { computeCampaignKey } from "@/lib/clone-watch/campaign-fingerprint";
 import { searchURLScan } from "@askarthur/scam-engine/urlscan-search";
-import { shapeKitSiblings, noIpKitSiblings } from "@/lib/clone-watch/kit-pivot";
+import {
+  NO_KIT_PIVOTS,
+  runKitPivots,
+  type KitPivotOutcome,
+  type KitPivotRow,
+} from "@/lib/clone-watch/kit-pivot";
 
 /**
  * Clone-watch attribution enricher (Phase 2). Builds the per-clone dossier —
@@ -51,6 +57,25 @@ const BACKFILL_CAP = 500;
 // confirmed-phishing clones per run.
 const KIT_PIVOT_RUN_CAP = 10;
 
+/**
+ * In-step wall-clock budget for the kit-pivot loop, in milliseconds.
+ *
+ * IN-STEP, not spanning: the loop lives wholly inside ONE `step.run`, so its
+ * bound is the route's `maxDuration` (Vercel kills the request), not
+ * `timeouts.finish`. The clock therefore starts at step entry, which
+ * `budgetedStep` guarantees by construction — see step-budget.ts.
+ *
+ * Worst case today is ~81s: KIT_PIVOT_RUN_CAP (10) rows x an 8s
+ * `searchURLScan` abort plus one DB write each, sequential. 120s is enough
+ * that a healthy run never sees it and small enough that a pathological one
+ * cannot approach the 300s request budget. It is a backstop, not the
+ * mechanism — the run cap is what sizes this step.
+ *
+ * Stopping early is safe: a row the budget did not reach keeps
+ * `kit_siblings IS NULL` and is selected again tomorrow.
+ */
+const KIT_PIVOT_WALL_CLOCK_MS = 120_000;
+
 interface PendingAlert {
   id: number;
   candidate_domain: string;
@@ -60,6 +85,21 @@ interface PendingAlert {
 // inngest-finish-budget: 64 boundaries — 4 static + 1 per-item enrich step x
 // ENRICH_RUN_CAP (60). The single largest per-item fan-out in the lane;
 // batching it is the highest-value fold available. See #1074.
+//
+// The floor is therefore 64 x 30s = 1920s of queue wait + 120s inline
+// (KIT_PIVOT_WALL_CLOCK_MS) + 60s slack = 2100s. The declared 33m WAS the
+// floor exactly, with zero headroom, so adding the kit-pivot budget in #1136
+// pushed the floor past it and the guard went red — as designed. Raised to
+// 35m rather than shaving the budget, because a finish sitting on its own
+// floor cancels healthy runs and a cancellation gets no retry, no error and
+// no telemetry (#1069).
+//
+// Folding the 60-step enrich fan-out into one batched step would take this to
+// ~5 boundaries and ~8m — still the largest step-run reduction available in
+// the fleet. Deliberately not done here: per-item steps checkpoint completed
+// rows, so folding re-runs up to 60 rows of PAID lookups (whois/RDAP/CT/
+// AbuseIPDB) on a mid-batch retry under retries: 2. It wants an idempotency
+// read-back first. Tracked in BACKLOG.md.
 export const cloneWatchEnrichAttribution = inngest.createFunction(
   {
     id: "clone-watch-enrich-attribution",
@@ -68,7 +108,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     // concurrency slots (~30–60s each under contention); the old budget
     // cancelled healthy runs. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "33m" },
+    timeouts: { finish: "35m" },
     retries: 2,
     // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
     // manual-trigger must have a throttle AND a same-window cooldown, or
@@ -204,121 +244,74 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // so the row crosses the `kit_siblings IS NULL` predicate and is never
       // re-searched; a 429 (quota) writes nothing and aborts the batch, leaving
       // rows eligible tomorrow.
-      let kitPivots: WriteOutcome = { ...NO_WRITES };
+      let kitPivots: KitPivotOutcome = { ...NO_KIT_PIVOTS };
       if (featureFlags.cloneWatchKitPivots && process.env.URLSCAN_API_KEY) {
-        kitPivots = await step.run("kit-pivots", async () => {
-          const sb = createServiceClient();
-          if (!sb) return { ...NO_WRITES };
-          const since = new Date(
-            Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-          ).toISOString();
-          const { data } = await sb
-            .from("shopfront_clone_alerts")
-            .select("id, candidate_domain, urlscan_evidence, attribution")
-            .eq("urlscan_classification", "likely_phishing")
-            .not("attribution", "is", null)
-            .is("attribution->kit_siblings", null)
-            .gte("first_seen_at", since)
-            // Newest first so a backlog of un-pivotable (no-IP) rows can't
-            // monopolise the cap and starve fresh rows that DO have an IP.
-            .order("first_seen_at", { ascending: false })
-            .limit(KIT_PIVOT_RUN_CAP);
-          const rows = (data ?? []) as Array<{
-            id: number;
-            candidate_domain: string;
-            urlscan_evidence: { server?: { ip?: string | null } } | null;
-            attribution: Record<string, unknown> | null;
-          }>;
-          // A Write Outcome, per row. This loop was `if (!error) n += 1` with
-          // no log and no counter — forty lines above the backfill loop #1121
-          // fixed for exactly that. Sequential on purpose (one urlscan search
-          // per row, quota-bounded), unbudgeted for now — see BACKLOG.md.
-          let written = 0;
-          let failed = 0;
-          let notReachedQuota = 0;
-          for (const [i, r] of rows.entries()) {
-            const ip = r.urlscan_evidence?.server?.ip ?? null;
-            if (!ip) {
-              // No IP to pivot on — write a sentinel so the row crosses the
-              // kit_siblings-IS-NULL predicate and isn't re-selected forever
-              // (op-review rule). Costs no urlscan search.
-              const { error } = await sb
-                .from("shopfront_clone_alerts")
-                .update({
-                  attribution: {
-                    ...(r.attribution ?? {}),
-                    kit_siblings: noIpKitSiblings(),
-                  },
-                })
-                .eq("id", r.id);
-              if (error) {
-                failed += 1;
-                logger.warn(
-                  "clone-watch enrich: kit-pivot sentinel write failed",
-                  {
-                    alertId: r.id,
-                    error: error.message,
-                  },
-                );
-              } else {
-                written += 1;
-              }
-              continue;
-            }
-            const outcome = await searchURLScan(`page.ip:"${ip}"`, 50);
-            if (!outcome.ok) {
-              if (outcome.error === "rate_limited") {
-                // Quota — stop the run; the rest are eligible tomorrow. Counted
-                // as never reached, NOT as failed: a 429 is not evidence about
-                // the row.
-                notReachedQuota = rows.length - i;
-                break;
-              }
-              // Transient — leave the row, retry next tick. It was tried and
-              // did not land, so it is a failure of THIS run.
-              failed += 1;
-              logger.warn("clone-watch enrich: kit-pivot search failed", {
-                alertId: r.id,
-                error: outcome.error,
-              });
-              continue;
-            }
-            const block = shapeKitSiblings(
-              r.candidate_domain,
-              ip,
-              outcome.results,
-            );
-            const { error } = await sb
+        kitPivots = await budgetedStep(
+          step,
+          "kit-pivots",
+          KIT_PIVOT_WALL_CLOCK_MS,
+          async (budget) => {
+            const sb = createServiceClient();
+            if (!sb) return { ...NO_KIT_PIVOTS };
+            const since = new Date(
+              Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+            ).toISOString();
+            const { data } = await sb
               .from("shopfront_clone_alerts")
-              .update({
-                attribution: { ...(r.attribution ?? {}), kit_siblings: block },
-              })
-              .eq("id", r.id);
-            if (error) {
-              failed += 1;
-              logger.warn("clone-watch enrich: kit-pivot write failed", {
-                alertId: r.id,
-                error: error.message,
-              });
-            } else {
-              written += 1;
-            }
-          }
-          if (failed > 0 || notReachedQuota > 0) {
-            logger.warn("clone-watch enrich: kit-pivot rows left unwritten", {
-              attempted: rows.length,
-              written,
-              failed,
-              notReachedQuota,
+              .select("id, candidate_domain, urlscan_evidence, attribution")
+              .eq("urlscan_classification", "likely_phishing")
+              .not("attribution", "is", null)
+              .is("attribution->kit_siblings", null)
+              .gte("first_seen_at", since)
+              // Newest first so a backlog of un-pivotable (no-IP) rows can't
+              // monopolise the cap and starve fresh rows that DO have an IP.
+              .order("first_seen_at", { ascending: false })
+              .limit(KIT_PIVOT_RUN_CAP);
+            const rows = (data ?? []) as KitPivotRow[];
+
+            // The decision — which rows are written, failed, abandoned to
+            // quota, or never reached — lives in runKitPivots so it can be
+            // tested by calling it. This step owns only the I/O it injects.
+            const outcome = await runKitPivots({
+              rows,
+              budget,
+              search: (ip) => searchURLScan(`page.ip:"${ip}"`, 50),
+              write: async (row, block) => {
+                const { error } = await sb
+                  .from("shopfront_clone_alerts")
+                  .update({
+                    attribution: {
+                      ...(row.attribution ?? {}),
+                      kit_siblings: block,
+                    },
+                  })
+                  .eq("id", row.id);
+                if (error) {
+                  logger.warn("clone-watch enrich: kit-pivot write failed", {
+                    alertId: row.id,
+                    error: error.message,
+                  });
+                }
+                return { ok: !error };
+              },
             });
-          }
-          return {
-            attempted: rows.length,
-            written,
-            failed,
-            deadlineHit: false,
-          };
-        });
+
+            if (
+              outcome.failed > 0 ||
+              outcome.notReachedQuota > 0 ||
+              outcome.notReachedBudget > 0
+            ) {
+              logger.warn("clone-watch enrich: kit-pivot rows left unwritten", {
+                attempted: outcome.attempted,
+                written: outcome.written,
+                failed: outcome.failed,
+                notReachedQuota: outcome.notReachedQuota,
+                notReachedBudget: outcome.notReachedBudget,
+              });
+            }
+            return outcome;
+          },
+        );
       }
 
       // Converging backfill: stamp campaign_key on already-enriched rows that
@@ -416,6 +409,10 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         kitPivoted: kitPivots.written,
         kitPivotFailed: kitPivots.failed,
         kitPivotAttempted: kitPivots.attempted,
+        // The gap, in the shape a consumer reads rather than only in a log
+        // line. attempted - written - failed - these two = 0.
+        kitPivotNotReachedQuota: kitPivots.notReachedQuota,
+        kitPivotNotReachedBudget: kitPivots.notReachedBudget,
       });
       return {
         ok: true,
@@ -426,6 +423,8 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         kitPivoted: kitPivots.written,
         kitPivotFailed: kitPivots.failed,
         kitPivotAttempted: kitPivots.attempted,
+        kitPivotNotReachedQuota: kitPivots.notReachedQuota,
+        kitPivotNotReachedBudget: kitPivots.notReachedBudget,
       };
     },
   ),
