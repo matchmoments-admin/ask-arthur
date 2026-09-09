@@ -128,7 +128,11 @@ export interface KitPivotRow {
  * extract it as a pure function so the test has something to call".
  *
  * I/O is injected. `search` and `write` are the only two things this needs
- * from the outside world, and the caller owns both.
+ * from the outside world, and the caller owns both. `search` receives the ROW
+ * as well as the ip so the caller can attribute a failure to an alert id: the
+ * extraction first passed only the ip, which silently dropped the per-row
+ * `kit-pivot search failed` warn the inline loop used to emit and left a run
+ * reporting `failed: 7` with no ids and no error kinds to chase.
  *
  * SEQUENTIAL ON PURPOSE — do not parallelise. A 429 must abandon the REST of
  * the batch, and that semantic only holds if rows are visited in order
@@ -139,7 +143,7 @@ export interface KitPivotRow {
 export async function runKitPivots(args: {
   rows: readonly KitPivotRow[];
   budget: BudgetClock;
-  search: (ip: string) => Promise<UrlscanSearchOutcome>;
+  search: (ip: string, row: KitPivotRow) => Promise<UrlscanSearchOutcome>;
   write: (
     row: KitPivotRow,
     block: KitSiblingsBlock,
@@ -174,7 +178,7 @@ export async function runKitPivots(args: {
       continue;
     }
 
-    const outcome = await search(ip);
+    const outcome = await search(ip, row);
     if (!outcome.ok) {
       if (outcome.error === "rate_limited") {
         notReachedQuota = rows.length - i;

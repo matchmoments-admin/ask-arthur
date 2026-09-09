@@ -152,9 +152,17 @@ export async function recordDetection(
   try {
     const supabase = createServiceClient();
     if (!supabase) {
-      // Local dev without supabase env vars — silent no-op, matches the rest
-      // of the scam-engine package.
-      return "skipped";
+      // A missing service client is a FAULT, not a benign skip. Returning
+      // "skipped" here would re-create one layer up exactly the collapse the
+      // discriminated VulnLookup was added to remove: in a deploy with the
+      // Supabase env vars missing or misnamed, every candidate books as a
+      // benign skip and the batch reports written 0, failed 0, skipped N — a
+      // clean-looking run that wrote nothing.
+      logger.error("recordDetection: no service client", {
+        identifier: c.identifier,
+        scanner: c.scanner,
+      });
+      return "failed";
     }
 
     const lookup = await lookupVulnerabilityId(supabase, c.identifier);

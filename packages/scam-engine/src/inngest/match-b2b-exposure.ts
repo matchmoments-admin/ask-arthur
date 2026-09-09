@@ -50,7 +50,12 @@ import { budgetedStep } from "./step-budget";
  * The writes are now concurrent (DB_WRITE_CONCURRENCY) so the budget should
  * never fire; it is the backstop, not the mechanism.
  */
-const DETECTIONS_WALL_CLOCK_MS = 240_000;
+// 200s, not the 240s ceiling itself. budgetedStep only refuses a budget ABOVE
+// MAX_IN_STEP_WALL_CLOCK_MS, so 240_000 passed by exactly zero margin — and if
+// the budget then fired, the remaining 60s had to absorb the in-flight wave of
+// 8 concurrent writes, the step output and the handler return. Consuming the
+// whole allowance leaves none of the headroom the 0.8 share exists to reserve.
+const DETECTIONS_WALL_CLOCK_MS = 200_000;
 
 const SEVERITY_RANK: Record<string, number> = {
   critical: 4,

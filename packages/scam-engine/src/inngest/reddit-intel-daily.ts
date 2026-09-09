@@ -135,6 +135,11 @@ export const CLASSIFY_MAX_TOKENS = 14_000;
 // (smaller BATCH_SIZE) or to stream; tracked in BACKLOG.md -> Ops.
 export const CLASSIFY_TIMEOUT_MS = 280_000;
 
+// Floor for the schema-retry's share of CLASSIFY_TIMEOUT_MS. Below this a
+// second call cannot produce a usable response, so rethrowing and letting
+// Inngest retry with a FRESH request beats burning the remainder here.
+const RETRY_MIN_TIMEOUT_MS = 60_000;
+
 // INPUT budget, per post. Distinct from the scraper's BODY_MD_MAX_CHARS
 // (20,000) which bounds what we STORE — this bounds what we SEND.
 //
@@ -432,21 +437,56 @@ export async function classifyWithRetry<TSchema extends z.ZodType<unknown>>(
     args: CallClaudeJsonArgs<TSchema>,
   ) => Promise<CallClaudeJsonReturn<z.infer<TSchema>>> = callClaudeJson,
 ): Promise<ClassifyResult<z.infer<TSchema>>> {
+  const startedAt = Date.now();
   try {
     const first = await callFn(callArgs);
     return { ...first, retried: false };
   } catch (err) {
     if (!isSchemaRetryableError(err)) throw err;
     const errMsg = err.message;
+
+    // THE RETRY SHARES THE BUDGET, it does not double it.
+    //
+    // Both calls happen inside ONE step.run, and a step is one HTTP request
+    // that Vercel kills at maxDuration (300s). Passing the same timeoutMs to
+    // the second call made the step's worst case 2 x timeoutMs — 560s at the
+    // current 280s — so a first call that failed schema validation slowly
+    // could put the pair past the request budget and produce the unattributed
+    // 504 this constant exists to avoid. The existing guard only compared
+    // 2 x timeout against Inngest's 15-minute FUNCTION ceiling, never against
+    // the 300s REQUEST that actually carries it.
+    //
+    // The second call therefore gets what is left of the first call's
+    // allowance. If that is less than a generation could plausibly use, skip
+    // the retry and rethrow: Inngest's own retries get a fresh request, which
+    // is a better use of the remaining time than a truncated second call.
+    // Only applies when the caller declared a timeout. With none there is no
+    // budget to share and nothing to overrun, so the retry is unchanged.
+    const declaredTimeoutMs = callArgs.timeoutMs;
+    const elapsedMs = Date.now() - startedAt;
+    const remainingMs =
+      typeof declaredTimeoutMs === "number" && declaredTimeoutMs > 0
+        ? declaredTimeoutMs - elapsedMs
+        : null;
+    if (remainingMs !== null && remainingMs < RETRY_MIN_TIMEOUT_MS) {
+      logger.warn(
+        "classifyWithRetry: no room for a retry inside the request budget",
+        { elapsedMs, remainingMs, errorMessage: errMsg },
+      );
+      throw err;
+    }
+
     logger.warn(
       "classifyWithRetry: first call failed schema validation, retrying once",
       {
         errorMessage: errMsg,
+        retryTimeoutMs: remainingMs,
       },
     );
     const correctedArgs: CallClaudeJsonArgs<TSchema> = {
       ...callArgs,
       user: buildCorrectionUser(callArgs.user, errMsg),
+      ...(remainingMs !== null ? { timeoutMs: remainingMs } : {}),
     };
     const second = await callFn(correctedArgs);
     return {

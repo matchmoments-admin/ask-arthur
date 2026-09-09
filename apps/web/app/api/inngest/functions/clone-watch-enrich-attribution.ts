@@ -89,10 +89,13 @@ interface PendingAlert {
 // The floor is therefore 64 x 30s = 1920s of queue wait + 120s inline
 // (KIT_PIVOT_WALL_CLOCK_MS) + 60s slack = 2100s. The declared 33m WAS the
 // floor exactly, with zero headroom, so adding the kit-pivot budget in #1136
-// pushed the floor past it and the guard went red — as designed. Raised to
-// 35m rather than shaving the budget, because a finish sitting on its own
-// floor cancels healthy runs and a cancellation gets no retry, no error and
-// no telemetry (#1069).
+// pushed the floor past it and the guard went red — as designed.
+//
+// 36m, not 35m: 35m is 2100s, which is the new floor EXACTLY, so #1136 fixed
+// a budget-sitting-on-its-floor by moving it onto its next floor — the same
+// property it faulted 33m for, caught in review (#1138). 36m leaves a real
+// minute of headroom, and a finish tuned to the exact worst case cancels
+// healthy runs with no retry, no error and no telemetry (#1069).
 //
 // Folding the 60-step enrich fan-out into one batched step would take this to
 // ~5 boundaries and ~8m — still the largest step-run reduction available in
@@ -108,7 +111,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     // concurrency slots (~30–60s each under contention); the old budget
     // cancelled healthy runs. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "35m" },
+    timeouts: { finish: "36m" },
     retries: 2,
     // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
     // manual-trigger must have a throttle AND a same-window cooldown, or
@@ -275,7 +278,19 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
             const outcome = await runKitPivots({
               rows,
               budget,
-              search: (ip) => searchURLScan(`page.ip:"${ip}"`, 50),
+              search: async (ip, row) => {
+                const res = await searchURLScan(`page.ip:"${ip}"`, 50);
+                // Per-row attribution: a run reporting `failed: 7` is
+                // uninvestigable without the ids and the error kinds.
+                if (!res.ok && res.error !== "rate_limited") {
+                  logger.warn("clone-watch enrich: kit-pivot search failed", {
+                    alertId: row.id,
+                    domain: row.candidate_domain,
+                    error: res.error,
+                  });
+                }
+                return res;
+              },
               write: async (row, block) => {
                 const { error } = await sb
                   .from("shopfront_clone_alerts")

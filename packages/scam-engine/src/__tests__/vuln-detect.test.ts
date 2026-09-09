@@ -151,18 +151,25 @@ describe("recordDetection — happy path", () => {
 });
 
 describe("recordDetection — graceful skip paths", () => {
-  it("returns silently when createServiceClient() returns null (no env)", async () => {
+  it("reports a missing service client as a failure, not a benign skip", async () => {
+    // #1138: returning "skipped" here re-created one layer up the collapse
+    // the discriminated VulnLookup removed — in a deploy with the Supabase
+    // env vars missing, every candidate would book as benign and the batch
+    // would report written 0, failed 0, skipped N: a clean-looking run that
+    // wrote nothing. Go-red: return "skipped".
     createServiceClientMock.mockReturnValue(null);
 
-    await recordDetection({
-      identifier: "CVE-2025-6514",
-      scanner: "mcp-audit",
-      targetType: "npm_package",
-      targetValue: "mcp-remote",
-    });
+    await expect(
+      recordDetection({
+        identifier: "CVE-2025-6514",
+        scanner: "mcp-audit",
+        targetType: "npm_package",
+        targetValue: "mcp-remote",
+      }),
+    ).resolves.toBe("failed");
 
+    expect(loggerMock.error).toHaveBeenCalledTimes(1);
     expect(upsertMock).not.toHaveBeenCalled();
-    expect(loggerMock.error).not.toHaveBeenCalled();
   });
 
   it("warns and skips when identifier is unknown to vulnerabilities table", async () => {

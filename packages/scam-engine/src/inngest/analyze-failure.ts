@@ -12,6 +12,34 @@ import { logger } from "@askarthur/utils/logger";
 
 const ANALYZE_FUNCTION_ID_PREFIX = "analyze-";
 
+// `inngest/function.failed` carries the ABSOLUTE function id — the app id and
+// the function id joined by a hyphen. InngestFunction.id(prefix) is
+// `[prefix, opts.id].filter(Boolean).join("-")` and the SDK's own onFailure
+// trigger compares `event.data.function_id == '<prefixed id>'`, so with
+// `new Inngest({ id: "askarthur" })` the value is
+// "askarthur-analyze-report", not "analyze-report".
+//
+// THAT MEANS THE FAMILY FILTER NEVER MATCHED. `fnId.startsWith("analyze-")`
+// was false for every real event, so this subscriber has logged NOTHING since
+// it was written — it returned `{ filtered: true }` for the entire fleet
+// including the analyze functions it exists for. The self-exclusion added in
+// #1135 was inert for the same reason. Strip the prefix before either test.
+const APP_ID_PREFIX = "askarthur-";
+
+/**
+ * The function id with the app prefix removed, if present.
+ *
+ * EXPORTED so the filter it feeds can be tested by calling it. The bug it
+ * fixes was invisible from inside this file: both the family filter and the
+ * self-exclusion read correct, and both compared against a string shape the
+ * platform never sends.
+ */
+export function bareFunctionId(fnId: string): string {
+  return fnId.startsWith(APP_ID_PREFIX)
+    ? fnId.slice(APP_ID_PREFIX.length)
+    : fnId;
+}
+
 // This function's OWN id, excluded below. "analyze-failure-subscriber" starts
 // with the prefix it filters on, so its own final-retry failure matched its
 // own filter and was logged as an analyze-pipeline failure — a subscriber
@@ -76,10 +104,11 @@ export const onAnalyzeFailed = inngest.createFunction(
       };
 
       const fnId = data.function_id ?? "unknown";
-      if (fnId === SELF_FUNCTION_ID) {
+      const bareId = bareFunctionId(fnId);
+      if (bareId === SELF_FUNCTION_ID) {
         return { filtered: true, fnId, reason: "self" };
       }
-      if (!fnId.startsWith(ANALYZE_FUNCTION_ID_PREFIX)) {
+      if (!bareId.startsWith(ANALYZE_FUNCTION_ID_PREFIX)) {
         // Out of scope — another subscriber can handle other function
         // families. Returning early is cheaper than filtering server-side
         // (Inngest doesn't have a prefix match in `event` filters).

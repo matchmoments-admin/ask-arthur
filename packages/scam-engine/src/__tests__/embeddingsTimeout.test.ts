@@ -4,7 +4,9 @@ import {
   embed,
   EMBED_REQUEST_TIMEOUT_MS_DEFAULT,
   embedRequestTimeoutMs,
+  __testing,
 } from "../embeddings";
+import { MAX_IN_STEP_WALL_CLOCK_MS } from "../inngest/step-budget";
 
 /**
  * An embedding call must not be able to hang forever.
@@ -26,21 +28,19 @@ import {
 
 /** A fetch that never resolves on its own but honours an abort, like the real one. */
 function hangingFetch() {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(
-      (_url: RequestInfo | URL, init?: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          const signal = init?.signal;
-          if (!signal) return; // no signal → hangs forever, as it used to
-          signal.addEventListener("abort", () =>
-            reject(
-              signal.reason ??
-                Object.assign(new Error("aborted"), { name: "AbortError" }),
-            ),
-          );
-        }),
-    );
+  return vi.spyOn(globalThis, "fetch").mockImplementation(
+    (_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return; // no signal → hangs forever, as it used to
+        signal.addEventListener("abort", () =>
+          reject(
+            signal.reason ??
+              Object.assign(new Error("aborted"), { name: "AbortError" }),
+          ),
+        );
+      }),
+  );
 }
 
 describe("embedding requests are bounded", () => {
@@ -111,4 +111,35 @@ describe("embedRequestTimeoutMs — a bad override cannot disable the bound", ()
       expect(embedRequestTimeoutMs()).toBe(EMBED_REQUEST_TIMEOUT_MS_DEFAULT);
     },
   );
+});
+
+describe("the per-request timeout composes inside a single step", () => {
+  /**
+   * A per-socket bound is not a per-step bound. Chunks run SEQUENTIALLY, so a
+   * caller's worst case inside one `step.run` is ceil(texts / chunk) x the
+   * timeout — and the two backfill embedders bound themselves with SPANNING
+   * budgets, which are checked between steps and cap nothing inside one.
+   *
+   * At the original 30s the largest batch in the repo (acnc, 200 texts = 10
+   * chunks) came to 300s against a 300s maxDuration: the exact
+   * "HTTP 504, no step output produced" this timeout was added to prevent,
+   * reachable by a slow-but-not-hung provider (caught in review, #1138).
+   *
+   * Go-red: restore EMBED_REQUEST_TIMEOUT_MS_DEFAULT = 30_000.
+   */
+  // acnc-charity-backfill-embed's BATCH_SIZE, the largest single embed() call
+  // made anywhere in the repo.
+  const LARGEST_BATCH_TEXTS = 200;
+
+  it("keeps the largest batch's worst case inside the in-step ceiling", () => {
+    const chunks = Math.ceil(LARGEST_BATCH_TEXTS / __testing.EMBED_CHUNK_TEXTS);
+    const worstCaseMs = chunks * EMBED_REQUEST_TIMEOUT_MS_DEFAULT;
+    expect(
+      worstCaseMs,
+      `${LARGEST_BATCH_TEXTS} texts is ${chunks} sequential chunks, so the ` +
+        `worst case inside one step is ${worstCaseMs}ms against an in-step ` +
+        `ceiling of ${MAX_IN_STEP_WALL_CLOCK_MS}ms. Lower the timeout, lower ` +
+        `the batch size, or give that step its own budget.`,
+    ).toBeLessThanOrEqual(MAX_IN_STEP_WALL_CLOCK_MS);
+  });
 });
