@@ -4,6 +4,7 @@ import {
   DB_WRITE_CONCURRENCY,
   groupBy,
   mapWithConcurrency,
+  NO_WRITES,
 } from "../concurrency";
 
 describe("mapWithConcurrency", () => {
@@ -12,12 +13,16 @@ describe("mapWithConcurrency", () => {
     // unbounded Promise.all is how the 2026-05-09 pooler incident started.
     let inFlight = 0;
     let peak = 0;
-    await mapWithConcurrency(Array.from({ length: 50 }, (_, i) => i), 8, async () => {
-      inFlight++;
-      peak = Math.max(peak, inFlight);
-      await new Promise((r) => setTimeout(r, 1));
-      inFlight--;
-    });
+    await mapWithConcurrency(
+      Array.from({ length: 50 }, (_, i) => i),
+      8,
+      async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 1));
+        inFlight--;
+      },
+    );
     expect(peak).toBeLessThanOrEqual(8);
     expect(peak).toBeGreaterThan(1); // and it really is parallel
   });
@@ -31,7 +36,9 @@ describe("mapWithConcurrency", () => {
   });
 
   it("handles an empty list and a width wider than the list", async () => {
-    await expect(mapWithConcurrency([], 8, async () => {})).resolves.toBeUndefined();
+    await expect(
+      mapWithConcurrency([], 8, async () => {}),
+    ).resolves.toBeUndefined();
     let n = 0;
     await mapWithConcurrency([1], 100, async () => {
       n++;
@@ -76,6 +83,18 @@ describe("groupBy", () => {
 
   it("returns an empty map for no items", () => {
     expect(groupBy([], (x) => x).size).toBe(0);
+  });
+});
+
+describe("NO_WRITES", () => {
+  it("is a complete, frozen Write Outcome", () => {
+    expect(NO_WRITES).toEqual({
+      attempted: 0,
+      written: 0,
+      failed: 0,
+      deadlineHit: false,
+    });
+    expect(Object.isFrozen(NO_WRITES)).toBe(true);
   });
 });
 

@@ -8,6 +8,8 @@ import {
   DB_WRITE_CONCURRENCY,
   groupBy,
   mapWithConcurrency,
+  NO_WRITES,
+  type WriteOutcome,
 } from "@askarthur/utils/concurrency";
 import {
   enrichCloneAttribution,
@@ -202,11 +204,11 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // so the row crosses the `kit_siblings IS NULL` predicate and is never
       // re-searched; a 429 (quota) writes nothing and aborts the batch, leaving
       // rows eligible tomorrow.
-      let kitPivoted = 0;
+      let kitPivots: WriteOutcome = { ...NO_WRITES };
       if (featureFlags.cloneWatchKitPivots && process.env.URLSCAN_API_KEY) {
-        kitPivoted = await step.run("kit-pivots", async () => {
+        kitPivots = await step.run("kit-pivots", async () => {
           const sb = createServiceClient();
-          if (!sb) return 0;
+          if (!sb) return { ...NO_WRITES };
           const since = new Date(
             Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
           ).toISOString();
@@ -227,8 +229,14 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
             urlscan_evidence: { server?: { ip?: string | null } } | null;
             attribution: Record<string, unknown> | null;
           }>;
-          let n = 0;
-          for (const r of rows) {
+          // A Write Outcome, per row. This loop was `if (!error) n += 1` with
+          // no log and no counter — forty lines above the backfill loop #1121
+          // fixed for exactly that. Sequential on purpose (one urlscan search
+          // per row, quota-bounded), unbudgeted for now — see BACKLOG.md.
+          let written = 0;
+          let failed = 0;
+          let notReachedQuota = 0;
+          for (const [i, r] of rows.entries()) {
             const ip = r.urlscan_evidence?.server?.ip ?? null;
             if (!ip) {
               // No IP to pivot on — write a sentinel so the row crosses the
@@ -243,13 +251,37 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
                   },
                 })
                 .eq("id", r.id);
-              if (!error) n += 1;
+              if (error) {
+                failed += 1;
+                logger.warn(
+                  "clone-watch enrich: kit-pivot sentinel write failed",
+                  {
+                    alertId: r.id,
+                    error: error.message,
+                  },
+                );
+              } else {
+                written += 1;
+              }
               continue;
             }
             const outcome = await searchURLScan(`page.ip:"${ip}"`, 50);
             if (!outcome.ok) {
-              if (outcome.error === "rate_limited") break; // quota — stop the run
-              continue; // transient — leave the row, retry next tick
+              if (outcome.error === "rate_limited") {
+                // Quota — stop the run; the rest are eligible tomorrow. Counted
+                // as never reached, NOT as failed: a 429 is not evidence about
+                // the row.
+                notReachedQuota = rows.length - i;
+                break;
+              }
+              // Transient — leave the row, retry next tick. It was tried and
+              // did not land, so it is a failure of THIS run.
+              failed += 1;
+              logger.warn("clone-watch enrich: kit-pivot search failed", {
+                alertId: r.id,
+                error: outcome.error,
+              });
+              continue;
             }
             const block = shapeKitSiblings(
               r.candidate_domain,
@@ -262,9 +294,30 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
                 attribution: { ...(r.attribution ?? {}), kit_siblings: block },
               })
               .eq("id", r.id);
-            if (!error) n += 1;
+            if (error) {
+              failed += 1;
+              logger.warn("clone-watch enrich: kit-pivot write failed", {
+                alertId: r.id,
+                error: error.message,
+              });
+            } else {
+              written += 1;
+            }
           }
-          return n;
+          if (failed > 0 || notReachedQuota > 0) {
+            logger.warn("clone-watch enrich: kit-pivot rows left unwritten", {
+              attempted: rows.length,
+              written,
+              failed,
+              notReachedQuota,
+            });
+          }
+          return {
+            attempted: rows.length,
+            written,
+            failed,
+            deadlineHit: false,
+          };
         });
       }
 
@@ -272,11 +325,11 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // predate this feature. Bounded per run; the "insufficient" sentinel means
       // weak-attribution rows also cross the predicate, so it drains to zero over
       // a few days. One batched step (no per-row fan-out).
-      let backfilled = 0;
+      let backfill: WriteOutcome = { ...NO_WRITES };
       if (featureFlags.cloneCampaigns) {
-        backfilled = await step.run("backfill-campaign-keys", async () => {
+        backfill = await step.run("backfill-campaign-keys", async () => {
           const sb = createServiceClient();
-          if (!sb) return 0;
+          if (!sb) return { ...NO_WRITES };
           const { data } = await sb
             .from("shopfront_clone_alerts")
             .select("id, attribution")
@@ -346,22 +399,33 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
               },
             );
           }
-          return n;
+          return {
+            attempted: rows.length,
+            written: n,
+            failed: failures,
+            deadlineHit: false,
+          };
         });
       }
 
       logger.info("clone-watch enrich: complete", {
         candidates: pending.length,
         enriched,
-        backfilled,
-        kitPivoted,
+        backfilled: backfill.written,
+        backfillFailed: backfill.failed,
+        kitPivoted: kitPivots.written,
+        kitPivotFailed: kitPivots.failed,
+        kitPivotAttempted: kitPivots.attempted,
       });
       return {
         ok: true,
         candidates: pending.length,
         enriched,
-        backfilled,
-        kitPivoted,
+        backfilled: backfill.written,
+        backfillFailed: backfill.failed,
+        kitPivoted: kitPivots.written,
+        kitPivotFailed: kitPivots.failed,
+        kitPivotAttempted: kitPivots.attempted,
       };
     },
   ),

@@ -532,6 +532,7 @@ export const reportBrandStewardship = inngest.createFunction(
         if (!sb)
           return {
             prepared: 0,
+            failed: 0,
             skipped_no_contact: 0,
             clones_attached: 0,
             reddit_attached: 0,
@@ -630,6 +631,10 @@ export const reportBrandStewardship = inngest.createFunction(
         let preparedCount = 0;
         let clonesAttached = 0;
         let redditAttached = 0;
+        // Upserts that did not land. Previously `logger.error; continue;` —
+        // counted only by absence from `prepared`, which is indistinguishable
+        // from a brand that was skipped on purpose.
+        let failed = 0;
         const nowIso = new Date().toISOString();
 
         for (const [key, e] of byKey) {
@@ -687,6 +692,7 @@ export const reportBrandStewardship = inngest.createFunction(
               period: periodMonth,
               error: error.message,
             });
+            failed += 1;
             continue;
           }
           preparedCount += 1;
@@ -742,6 +748,7 @@ export const reportBrandStewardship = inngest.createFunction(
               period: periodMonth,
               error: error.message,
             });
+            failed += 1;
             continue;
           }
           noContactCount += 1;
@@ -751,6 +758,7 @@ export const reportBrandStewardship = inngest.createFunction(
 
         return {
           prepared: preparedCount,
+          failed,
           skipped_no_contact: skippedNoContact,
           clones_attached: clonesAttached,
           reddit_attached: redditAttached,
@@ -769,6 +777,11 @@ export const reportBrandStewardship = inngest.createFunction(
           `…of which carry Reddit mentions: <b>${prepared.reddit_attached}</b> (reddit-active brands: ${redditAgg.size})`,
           `Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
         ];
+        if (prepared.failed > 0) {
+          lines.push(
+            `⚠️ <b>${prepared.failed} report row(s) failed to write</b> — see brand-stewardship logs`,
+          );
+        }
         // Manual-outreach nudge: clone-targeted brands we can't email (no contact).
         if (prepared.no_contact_clone_brands > 0) {
           lines.push(
