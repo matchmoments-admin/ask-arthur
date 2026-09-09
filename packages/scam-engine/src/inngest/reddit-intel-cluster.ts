@@ -43,6 +43,7 @@ import {
   DB_WRITE_CONCURRENCY,
   groupBy,
   mapWithConcurrency,
+  type WriteOutcome,
 } from "@askarthur/utils/concurrency";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
@@ -450,7 +451,13 @@ export const CLUSTER_BATCH_WALL_CLOCK_MS = 240_000;
 export const NAMING_WALL_CLOCK_MS = 240_000;
 const NAMING_MODEL_TIMEOUT_MS = 60_000;
 
-export interface PersistResult {
+/**
+ * A Write Outcome (per-POST units) plus what the clustering write phase knows
+ * about WHY. `failed` is the sum of the three named partitions below; the
+ * invariant `attempted − written − failed = posts never reached` holds, and is
+ * non-zero only when `deadlineHit`.
+ */
+export interface PersistResult extends WriteOutcome {
   newThemeCount: number;
   joinedThemeCount: number;
   /** Posts dropped because their seed theme could not be created OR adopted. */
@@ -459,12 +466,6 @@ export interface PersistResult {
   joinFailures: number;
   /** Posts whose theme was written but whose own theme_id update failed. */
   linkFailures: number;
-  /**
-   * True when the wall-clock budget stopped the run before every assignment was
-   * written. The remainder is NOT lost — it stays in the worklist for the next
-   * run — but a partial run must not read as a small one.
-   */
-  deadlineHit: boolean;
   /**
    * Milliseconds left on the step's budget when the write phase returned — how
    * close the run came. A run that finishes with 2 s to spare is one slow
@@ -530,6 +531,9 @@ export async function persistAssignments(
 
   if (assignments.length === 0) {
     return {
+      attempted: 0,
+      written: 0,
+      failed: 0,
       newThemeCount: 0,
       joinedThemeCount: 0,
       seedFailures,
@@ -559,6 +563,9 @@ export async function persistAssignments(
   const pending = assignments.filter((a) => !donePostIds.has(a.postId));
   if (pending.length === 0) {
     return {
+      attempted: 0,
+      written: 0,
+      failed: 0,
       newThemeCount: 0,
       joinedThemeCount: 0,
       seedFailures,
@@ -737,6 +744,9 @@ export async function persistAssignments(
   }
 
   return {
+    attempted: pending.length,
+    written: linkedPostIds.length,
+    failed: seedFailures + joinFailures + linkFailures,
     newThemeCount,
     joinedThemeCount,
     seedFailures,
@@ -924,6 +934,9 @@ export const redditIntelCluster = inngest.createFunction(
               distinctJoinedThemes: 0,
               newThemeCount: 0,
               joinedThemeCount: 0,
+              attempted: 0,
+              written: 0,
+              failed: 0,
               seedFailures: 0,
               joinFailures: 0,
               linkFailures: 0,
@@ -1291,6 +1304,10 @@ export const redditIntelCluster = inngest.createFunction(
         // A partial run must not read as a quiet one: the budget stopped it,
         // and the remainder is waiting in the worklist for the next tick.
         deadlineHit: batch.deadlineHit,
+        // Write Outcome: attempted − written − failed = posts never reached.
+        postsAttempted: batch.attempted,
+        postsWritten: batch.written,
+        postsFailed: batch.failed,
         budgetRemainingMs: batch.budgetRemainingMs,
         namingDeadlineHit: namingResult.deadlineHit,
         seedFailures: batch.seedFailures,

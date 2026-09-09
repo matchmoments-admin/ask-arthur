@@ -51,6 +51,46 @@ export async function mapWithConcurrency<T>(
   await Promise.all(workers);
 }
 
+/**
+ * The outcome of one batched write, in per-ITEM units.
+ *
+ * WHY ONE SHAPE. Four sites reported the same fact four ways: a typed result
+ * with three named counters (clustering), a local `failures` int with a warn
+ * (campaign-key backfill), `if (!error) n += 1; continue;` with no log and no
+ * counter (kit-pivots — forty lines above a loop #1121 had just fixed for
+ * exactly that), and `logger.error; continue;` counted only by absence
+ * (brand stewardship). Reading "how much of this run landed?" meant reading
+ * the loop. A shared shape makes the question answerable from the summary,
+ * and the invariant below makes a silent drop arithmetically visible:
+ *
+ *     attempted − written − failed  =  items never reached
+ *
+ * which is non-zero only when something stopped the loop early — a wall-clock
+ * budget (`deadlineHit`) or, at a site that says so, an external quota.
+ */
+export interface WriteOutcome {
+  /** Items the write set out to handle, after any idempotency skip. */
+  attempted: number;
+  /** Items whose write landed. */
+  written: number;
+  /** Items whose write was tried and did not land — logged at the site. */
+  failed: number;
+  /**
+   * True when a wall-clock budget stopped the write before every item was
+   * reached. The remainder is NOT lost — a self-healing worklist selects it
+   * next run — but a partial run must not read as a small one.
+   */
+  deadlineHit: boolean;
+}
+
+/** A write that did nothing. Spread it, never mutate it. */
+export const NO_WRITES: Readonly<WriteOutcome> = Object.freeze({
+  attempted: 0,
+  written: 0,
+  failed: 0,
+  deadlineHit: false,
+});
+
 /** Group items by a derived key, preserving insertion order within each group. */
 export function groupBy<T, K>(
   items: readonly T[],

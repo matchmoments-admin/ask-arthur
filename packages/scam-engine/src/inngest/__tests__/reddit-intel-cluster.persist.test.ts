@@ -37,6 +37,40 @@ const ample: BudgetClock = { expired: () => false, remainingMs: () => 60_000 };
 const spent: BudgetClock = { expired: () => true, remainingMs: () => 0 };
 
 /**
+ * The Write Outcome invariant: attempted − written − failed = posts never
+ * reached, non-zero only when the budget stopped the run. Go-red: return
+ * `failed: seedFailures` alone → the link-failure case reads 2 − 0 − 0 = 2
+ * "never reached" on a run that reached everything.
+ */
+function expectOutcome(
+  r: {
+    attempted: number;
+    written: number;
+    failed: number;
+    deadlineHit: boolean;
+  },
+  expected: {
+    attempted: number;
+    written: number;
+    failed: number;
+    notReached?: number;
+  },
+) {
+  expect({
+    attempted: r.attempted,
+    written: r.written,
+    failed: r.failed,
+  }).toEqual({
+    attempted: expected.attempted,
+    written: expected.written,
+    failed: expected.failed,
+  });
+  const notReached = r.attempted - r.written - r.failed;
+  expect(notReached).toBe(expected.notReached ?? 0);
+  if (notReached > 0) expect(r.deadlineHit).toBe(true);
+}
+
+/**
  * The smallest fake that can express the outcomes we care about.
  *
  * It models the SET-BASED call shapes persistAssignments uses since the write
@@ -150,6 +184,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     expect(r.seedFailures).toBe(0);
     expect(calls.linkedPostIds).toEqual(["post-1"]);
     expect(calls.membershipRows).toBe(1);
+    expectOutcome(r, { attempted: 1, written: 1, failed: 0 });
   });
 
   it("adopts a theme a prior attempt already created", async () => {
@@ -209,6 +244,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     // exist to show.
     expect(r.newThemeCount).toBe(2);
     expect(r.linkFailures).toBe(2);
+    expectOutcome(r, { attempted: 2, written: 0, failed: 2 });
   });
 
   it("counts join failures per post when a theme's centroid update fails", async () => {
@@ -228,6 +264,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     expect(r.joinFailures).toBe(40);
     expect(r.joinedThemeCount).toBe(0);
     expect(r.linkFailures).toBe(0);
+    expectOutcome(r, { attempted: 40, written: 0, failed: 40 });
   });
 
   it("skips posts a prior attempt already linked", async () => {
@@ -239,6 +276,8 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
 
     expect(r.newThemeCount).toBe(0);
     expect(calls.seedUpsertRows).toBe(0);
+    // Already linked is not attempted — the idempotency skip is not a write.
+    expectOutcome(r, { attempted: 0, written: 0, failed: 0 });
   });
 
   it("collapses many posts joining one theme into a single update", async () => {
@@ -325,6 +364,8 @@ describe("persistAssignments respects the step's wall-clock budget", () => {
     expect(r.deadlineHit).toBe(true);
     expect(r.joinedThemeCount).toBe(0);
     expect(calls.themeUpdates).toBe(0);
+    // Twenty posts, none written, none failed: all twenty "never reached".
+    expectOutcome(r, { attempted: 20, written: 0, failed: 0, notReached: 20 });
     // Nothing was linked, so nothing is claimed as done — the rows keep
     // theme_id NULL and the next run selects them again.
     expect(calls.linkedPostIds).toEqual([]);
