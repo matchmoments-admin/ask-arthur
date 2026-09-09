@@ -191,10 +191,29 @@ table) AND in the fake (it cannot omit a method). The real client still passes
 unchanged — `SupabaseClient` satisfies the structural type.
 
 Rules: write the fake as a typed `Tables` object and `from: (t) => tables[t]`,
-never a cast; put the type beside the function, exported for its test; do not
-retro-fit the other wide-typed injections (`vuln-detect`, `billing-ingest-nightly`,
-`stripe/webhook`, `brand-aliases`, `onward/submit`, …) in one sweep — narrow
-each the next time its test is touched.
+never a cast; put the type beside the function, exported for its test; narrow
+each seam the next time its test is touched rather than in one sweep.
+
+**Which seams this reaches, corrected 2026-09-10 (#1137).** The note this
+replaced named "nine other modules" as candidates. Most were never injected
+seams at all: `whois-cached`, `vuln-detect`'s `recordDetections`,
+`cost-daily-check` and `scraper-brake-alert` call `createServiceClient()`
+themselves and their tests mock the module factory, so there is no parameter to
+narrow. Converting one to take a client is a deliberate refactor with its own
+justification, not an application of this convention.
+
+**And one shape it cannot reach: a PostgREST filter chain.** `supabase-js`
+parses the `.select()` string at the TYPE level, so a structural interface
+modelling `from().select().eq().gte().order().limit()` makes the compiler
+compare that parser against the interface at every link — `getBrandCloneSample`
+(a nine-column select) produced `TS2589: Type instantiation is excessively deep`
+at the call site that passes the real client. Narrowing works where the surface
+is small and non-generic: `auth.getUser()` only (`AuthGetUserClient` in
+`apps/web/lib/auth.ts` is the reference), an RPC-only client, or a per-table
+lookup like `PersistTables` where each method returns a plain result rather than
+a chainable builder. Where a long filter chain is genuinely the dependency, the
+honest seam is a **fetcher function** (`(args) => Promise<Rows>`) with the wide
+client confined to a one-line factory — again, a deliberate refactor.
 
 ### React
 

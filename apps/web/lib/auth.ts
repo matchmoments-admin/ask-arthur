@@ -1,7 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
-import type { SupabaseClient, User as SupabaseUser } from "@supabase/supabase-js";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { logger } from "@askarthur/utils/logger";
@@ -109,9 +109,23 @@ export const getUser = cache(async (): Promise<AuthUser | null> => {
  * Uses the same AUTH_TIMEOUT_MS budget as getUser() so middleware,
  * server components, and API routes all see the same degraded-Auth
  * threshold.
+ *
+ * TAKES A NARROW CLIENT, not the whole SupabaseClient. This function reads
+ * exactly one thing — `authClient.auth.getUser()` — and no table at all, so
+ * the wide type was ~all surface and no contract. Its cost was concrete: the
+ * test had to write `authClient as never`, switching the type system off at
+ * the one seam the test exists to exercise. AuthGetUserClient is satisfied by
+ * the real client unchanged and by a two-property fake with no cast.
+ * CONVENTIONS.md -> "Injected clients: narrow to what is called".
  */
+export interface AuthGetUserClient {
+  auth: {
+    getUser(): Promise<{ data: { user: SupabaseUser | null } }>;
+  };
+}
+
 export async function getSupabaseUserOrThrow(
-  authClient: SupabaseClient,
+  authClient: AuthGetUserClient,
 ): Promise<SupabaseUser | null> {
   const result = await raceAuthTimeout(authClient.auth.getUser());
 
