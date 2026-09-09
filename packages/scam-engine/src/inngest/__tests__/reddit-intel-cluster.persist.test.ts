@@ -1,14 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-import {
-  __testing,
-  persistAssignments,
-  type Assignment,
-} from "../reddit-intel-cluster";
+import { persistAssignments, type Assignment } from "../reddit-intel-cluster";
 import type { BudgetClock } from "../step-budget";
-
-const { parsePgVector } = __testing;
 
 vi.mock("@askarthur/utils/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -307,29 +301,6 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     await persistAssignments(client, [a], ample);
 
     expect(a.themeId).toBe("");
-  });
-});
-
-describe("parsePgVector rejects rather than propagates", () => {
-  it("parses a well-formed vector", () => {
-    expect(parsePgVector("[1.5,2.5,3]")).toEqual([1.5, 2.5, 3]);
-  });
-
-  it("returns null for a vector that parses to NaN", () => {
-    // Previously `[abc,def]` became [NaN, NaN] — length 2, so it survived the
-    // caller's `.length > 0` filter. NaN compares false against everything, so
-    // the post matched no theme, seeded, and wrote an all-NaN centroid that
-    // pgvector rejects; the insert error was warned and skipped. The cause was
-    // three steps from the symptom.
-    expect(parsePgVector("[abc,def]")).toBeNull();
-    expect(parsePgVector("[1,NaN,3]")).toBeNull();
-  });
-
-  it("returns null for an empty vector rather than the number zero", () => {
-    // Number("") is 0, not NaN, so "[]" used to parse to [0] — a length-1
-    // vector that silently fails every dimension check downstream.
-    expect(parsePgVector("[]")).toBeNull();
-    expect(parsePgVector(null)).toBeNull();
   });
 });
 

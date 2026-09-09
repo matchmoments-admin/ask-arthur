@@ -46,6 +46,11 @@ import {
   type WriteOutcome,
 } from "@askarthur/utils/concurrency";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import {
+  cosineSimilarity,
+  parsePgVector,
+  vectorToPgString,
+} from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
 import {
@@ -125,56 +130,6 @@ const NAMING_PROMPT_VERSION = "reddit-cluster-naming-v1@2026-05-01";
 //     so it can't keep absorbing before the historical rebuild runs.
 const CENTROID_FREEZE_AT = 50;
 const MAX_THEME_MEMBERS_FOR_JOIN = 250;
-
-// ── Vector helpers ────────────────────────────────────────────────────────
-
-/**
- * Parse pgvector's `[1.234,5.678,...]` wire form.
- *
- * Returns null for anything that is not a usable vector, INCLUDING a string
- * that parses to the right shape but the wrong numbers. The previous version
- * was `inner.split(",").map(Number)` with no validation, and every malformed
- * input survived it as a non-empty array:
- *
- *   "[abc,def]"  -> [NaN, NaN]   length 2, passes a `.length > 0` filter
- *   "[]"         -> [0]          Number("") is 0, not NaN
- *
- * Both then poison the caller silently rather than failing. A NaN embedding
- * makes every `sim > bestSim` comparison false — NaN compares false against
- * everything — so the post matches no theme, takes the seed branch, and writes
- * a centroid of `[NaN,NaN,...]` that pgvector rejects on insert. The insert
- * error is caught, warned, and `continue`d, so the post is skipped on that run
- * and on every run after it. The failure presents as an unexplained orphan,
- * three steps from its cause.
- */
-function parsePgVector(s: string | null): number[] | null {
-  if (!s) return null;
-  const inner = s.startsWith("[") ? s.slice(1, -1) : s;
-  if (inner.trim() === "") return null;
-  const parsed = inner.split(",").map(Number);
-  // Reject rather than propagate: a wrong vector is worse than a missing one,
-  // because the caller counts a missing one.
-  if (!parsed.every(Number.isFinite)) return null;
-  return parsed;
-}
-
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb);
-  return denom === 0 ? 0 : dot / denom;
-}
 
 // Online centroid update: keeps a running mean as members are added one by
 // one without storing every member vector. Bounded floating-point drift
@@ -411,12 +366,6 @@ export function assignPostsToThemes(
  * invisible forever.
  */
 const CLUSTER_POSTS_PER_RUN = 500;
-
-/**
- * Internals exposed for tests only. parsePgVector's rejection behaviour is the
- * difference between a dropped row and a poisoned centroid, and it had no test.
- */
-export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
 
 /**
  * In-step wall-clock budgets, in milliseconds. Both are bounded by the route's

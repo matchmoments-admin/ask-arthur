@@ -23,6 +23,7 @@ import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 import {
   embedQuery,
   type EmbeddingDomain,
@@ -89,10 +90,6 @@ function selectDomain(scamType: string | null): EmbeddingDomain {
   return FINANCE_SCAM_TYPES.has(scamType.toLowerCase()) ? "finance" : "generic";
 }
 
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
-}
-
 export async function POST(req: NextRequest) {
   const guard = await guardV1(req);
   if (!guard.ok) return guard.error;
@@ -123,11 +120,12 @@ export async function POST(req: NextRequest) {
   }
   const query = body.query.trim().slice(0, MAX_QUERY_LEN);
 
-  const scamTypeHint =
-    typeof body.scamType === "string" ? body.scamType : null;
+  const scamTypeHint = typeof body.scamType === "string" ? body.scamType : null;
 
   const scope =
-    body.scope === "verified" || body.scope === "both" || body.scope === "reports"
+    body.scope === "verified" ||
+    body.scope === "both" ||
+    body.scope === "reports"
       ? body.scope
       : "both";
 
@@ -207,10 +205,7 @@ export async function POST(req: NextRequest) {
     });
     if (error) {
       logger.error("match_scam_reports RPC failed", { error: error.message });
-      return NextResponse.json(
-        { error: "Search RPC failed" },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Search RPC failed" }, { status: 500 });
     }
     reports = (data ?? []) as ScamReportRow[];
   }
@@ -223,10 +218,7 @@ export async function POST(req: NextRequest) {
     });
     if (error) {
       logger.error("match_verified_scams RPC failed", { error: error.message });
-      return NextResponse.json(
-        { error: "Search RPC failed" },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Search RPC failed" }, { status: 500 });
     }
     verified = (data ?? []) as VerifiedScamRow[];
   }

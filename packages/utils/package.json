@@ -11,7 +11,8 @@
     "./feature-flags": "./src/feature-flags.ts",
     "./rate-limit": "./src/rate-limit.ts",
     "./request-id": "./src/request-id.ts",
-    "./concurrency": "./src/concurrency.ts"
+    "./concurrency": "./src/concurrency.ts",
+    "./pgvector": "./src/pgvector.ts"
   },
   "scripts": {
     "test": "vitest run --passWithNoTests",

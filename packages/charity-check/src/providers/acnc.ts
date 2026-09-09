@@ -37,11 +37,15 @@
 //   - semantic_match (string | null), semantic_similarity (number | null)
 
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { embedQuery } from "@askarthur/scam-engine/embeddings";
 import { logCost } from "@askarthur/scam-engine/cost-log";
 
-import { unavailablePillar, type CharityProviderContract } from "../provider-contract";
+import {
+  unavailablePillar,
+  type CharityProviderContract,
+} from "../provider-contract";
 import type { CharityCheckInput, CharityPillarResult } from "../types";
 
 const PROVIDER_ID = "acnc";
@@ -102,7 +106,10 @@ export const acncProvider: CharityProviderContract = {
   async run(input: CharityCheckInput): Promise<CharityPillarResult> {
     const supa = createServiceClient();
     if (!supa) {
-      return unavailablePillar("acnc_registration", "supabase_client_unavailable");
+      return unavailablePillar(
+        "acnc_registration",
+        "supabase_client_unavailable",
+      );
     }
 
     try {
@@ -117,7 +124,9 @@ export const acncProvider: CharityProviderContract = {
           .maybeSingle<AcncCharityRow>();
 
         if (error) {
-          logger.warn("acnc lookup by ABN failed", { error: String(error.message) });
+          logger.warn("acnc lookup by ABN failed", {
+            error: String(error.message),
+          });
           return unavailablePillar("acnc_registration", "rpc_error");
         }
 
@@ -331,7 +340,9 @@ export const acncProvider: CharityProviderContract = {
           available: true,
           detail: {
             registered: false,
-            reason: typosquatMatch ? "typosquat_near_match" : "no_exact_name_match",
+            reason: typosquatMatch
+              ? "typosquat_near_match"
+              : "no_exact_name_match",
             nearest_match: surfaceTop?.charity_legal_name ?? null,
             nearest_match_abn: surfaceTop?.abn ?? null,
             nearest_match_similarity: surfaceTop?.similarity ?? null,
@@ -404,15 +415,6 @@ async function runSemanticMatch(
 }
 
 /**
- * pgvector wire format — bracketed text `[1,2,3]` rather than the JSON
- * array supabase-js would otherwise serialise. PostgREST forwards it as a
- * string and pgvector parses it on receipt.
- */
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
-}
-
-/**
  * True if either string contains the other after normalisation. Used to
  * distinguish "less-specific name match" (legitimate) from "paraphrase
  * impersonator" (suspicious). Example:
@@ -449,11 +451,7 @@ export function levenshtein(a: string, b: string): number {
     curr[0] = j;
     for (let i = 1; i <= m; i++) {
       const cost = shorter[i - 1] === longer[j - 1] ? 0 : 1;
-      curr[i] = Math.min(
-        curr[i - 1] + 1,
-        prev[i] + 1,
-        prev[i - 1] + cost,
-      );
+      curr[i] = Math.min(curr[i - 1] + 1, prev[i] + 1, prev[i - 1] + cost);
     }
     [prev, curr] = [curr, prev];
   }

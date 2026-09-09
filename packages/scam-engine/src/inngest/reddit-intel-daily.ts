@@ -956,7 +956,8 @@ export const redditIntelDaily = inngest.createFunction(
         return { skipped: "flag_off" as const, ready: 0, suppressed: 0 };
       }
       const supabase = createServiceClient();
-      if (!supabase) return { skipped: "no_client" as const, ready: 0, suppressed: 0 };
+      if (!supabase)
+        return { skipped: "no_client" as const, ready: 0, suppressed: 0 };
 
       const feedItemIds = validPerPost.map((e) => e.feedItemId);
       const { data: rows, error } = await supabase

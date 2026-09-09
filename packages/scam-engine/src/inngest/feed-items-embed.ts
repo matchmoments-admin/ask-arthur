@@ -14,6 +14,7 @@
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
 import { embed } from "../embeddings";
@@ -42,10 +43,6 @@ function buildEmbedText(row: UnembeddedRow): string {
   if (row.description) parts.push(row.description);
   if (row.body_md) parts.push(row.body_md.slice(0, 4000));
   return parts.join(" | ");
-}
-
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
 }
 
 async function logCost(args: {

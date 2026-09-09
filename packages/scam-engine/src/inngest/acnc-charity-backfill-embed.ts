@@ -29,6 +29,7 @@
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
@@ -62,10 +63,6 @@ function buildEmbedText(row: CharityRowForEmbed): string {
   // cases where a charity has dozens of trading-name variants and the
   // embedded text drifts from "name signal" to "list of past names".
   return parts.join("\n").slice(0, 512);
-}
-
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
 }
 
 async function logCost(args: {
