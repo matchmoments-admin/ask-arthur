@@ -10,12 +10,14 @@
  * MIDDLEWARE_INVOCATION_TIMEOUT 504 the way it did during incident
  * 2026-05-09. Without this, no automated check exercises the helper's
  * own timer logic; future edits could silently break the race.
+ *
+ * The fakes below carry NO `as never` since #1137. The helper takes
+ * AuthGetUserClient — the one method it actually calls — so a fake that
+ * models it satisfies the parameter outright, and a fake that stops modelling
+ * it is a compile error here rather than a runtime surprise.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  AuthUnavailableError,
-  getSupabaseUserOrThrow,
-} from "@/lib/auth";
+import { AuthUnavailableError, getSupabaseUserOrThrow } from "@/lib/auth";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -37,7 +39,7 @@ describe("getSupabaseUserOrThrow — Promise.race contract", () => {
       },
     };
 
-    const result = await getSupabaseUserOrThrow(authClient as never);
+    const result = await getSupabaseUserOrThrow(authClient);
     expect(result).toEqual(fakeUser);
   });
 
@@ -46,7 +48,13 @@ describe("getSupabaseUserOrThrow — Promise.race contract", () => {
     const authClient = {
       auth: {
         // Promise that never resolves — simulates Supabase Auth degradation.
-        getUser: vi.fn(() => new Promise(() => {})),
+        // Return type annotated because the parameter is now AuthGetUserClient
+        // rather than the whole SupabaseClient: an un-annotated
+        // `new Promise(() => {})` infers Promise<unknown>, and the compiler
+        // rejects it here instead of the old `as never` accepting anything.
+        getUser: vi.fn(
+          (): Promise<{ data: { user: null } }> => new Promise(() => {}),
+        ),
       },
     };
 
@@ -54,9 +62,7 @@ describe("getSupabaseUserOrThrow — Promise.race contract", () => {
     // can flush microtasks before vitest's `expect(...).rejects` matcher
     // would attach its own handler, producing a spurious unhandled-rejection
     // warning even when the assertion would have passed.
-    const pending = getSupabaseUserOrThrow(authClient as never).catch(
-      (e: unknown) => e,
-    );
+    const pending = getSupabaseUserOrThrow(authClient).catch((e: unknown) => e);
     // Race-loser path: advance just past the 5s budget so the helper's
     // internal setTimeout wins the Promise.race.
     await vi.advanceTimersByTimeAsync(5001);
