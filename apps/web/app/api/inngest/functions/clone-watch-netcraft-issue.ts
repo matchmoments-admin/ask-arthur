@@ -1,10 +1,8 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
-import {
-  elapsedSinceTrigger,
-  withAxiomLogging,
-} from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -326,41 +324,15 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         }
       };
 
-      // Replay-safe: this loop awaits step.run per item, so it spans step
-
-      // boundaries and Inngest re-executes the handler from the top at each
-
-      // one. A Date.now() captured here would reset on every replay and the
-
-      // guard below could never fire. event.ts is set when the run is
-
-      // TRIGGERED and survives replay.
-
-      //
-      // elapsedSinceTrigger returns null when event.ts is unusable, and the
-      // first version of this guard wrote `?? 0` — turning "unknowable" back
-      // into the confident zero it exists to avoid, so the guard could never
-      // fire on such a run. Degrade instead: fall back to a clock captured
-      // here. That clock resets on replay, so it bounds only the current
-      // segment, but a segment bound is strictly safer than no bound. Warned
-      // once so a degraded run is distinguishable from a healthy one.
-      const segmentStartMs = Date.now();
-      let degradedWarned = false;
-      const elapsedMs = () => {
-        const sinceTrigger = elapsedSinceTrigger({ event });
-        if (sinceTrigger !== null) return sinceTrigger;
-        if (!degradedWarned) {
-          degradedWarned = true;
-          logger.warn(
-            "clone-watch netcraft-issue: event.ts unusable — wall-clock guard degraded to segment clock",
-          );
-        }
-        return Date.now() - segmentStartMs;
-      };
+      // Spanning budget: this loop awaits step.run per item, so it crosses
+      // step boundaries and is bounded by timeouts.finish, with event.ts as
+      // its clock (survives replay; see step-budget.ts for the two bounds and
+      // the degraded mode when event.ts is unusable).
+      const budget = spanningBudget({ event }, ISSUE_WALL_CLOCK_MS, logger);
 
       let uuidsSkippedForTime = 0;
       for (const group of plan.groups) {
-        if (elapsedMs() > ISSUE_WALL_CLOCK_MS) {
+        if (budget.expired()) {
           // Leftovers drain next run rather than the whole run being cancelled
           // mid-loop (a cancellation gets no retry and no telemetry, #1069).
           uuidsSkippedForTime = plan.groups.length - plan.groups.indexOf(group);

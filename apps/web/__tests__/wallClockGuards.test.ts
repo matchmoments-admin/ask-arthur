@@ -20,28 +20,23 @@ import path from "node:path";
  * THE DISTINCTION THIS ENCODES, because getting it wrong nearly caused four
  * correct numbers to be "fixed":
  *
- *   - A guard whose loop sits INSIDE one step.run may use a local Date.now().
- *     No replay happens within a step. Its budget is bounded by the route's
- *     `maxDuration` (a single HTTP request) — see PERSIST_BUDGET_MS in
- *     reddit-intel-cluster, covered by inngestMaxDurationDrift.test.ts.
- *   - A guard whose loop SPANS step boundaries must read `event.ts` via
- *     elapsedSinceTrigger. Its budget is bounded by the function's
+ *   - A guard whose loop sits INSIDE one step.run is bounded by the route's
+ *     `maxDuration` (a single HTTP request). It obtains its budget from
+ *     `budgetedStep`, whose clock starts at step entry by construction —
+ *     see reddit-intel-cluster, covered by inngestMaxDurationDrift.test.ts.
+ *   - A guard whose loop SPANS step boundaries is bounded by the function's
  *     `timeouts.finish` (the whole run), NOT by maxDuration — which is why
- *     420_000ms against a 12m finish is correct, not a bug.
+ *     420_000ms against a 12m finish is correct, not a bug. It obtains its
+ *     budget from `spanningBudget`, whose clock is `event.ts`.
+ *
+ * Both constructors live in @askarthur/scam-engine/inngest/step-budget.
  *
  * WHAT THIS DOES NOT CATCH: a guard that spans boundaries using some third
  * replay-unsafe source this pattern does not match. It asserts the absence of
  * the one shape that has actually bitten — see docs/agents/defect-shapes.md
  * shape N on the limits of source-level guards.
  */
-const FN_DIR = path.join(
-  __dirname,
-  "..",
-  "app",
-  "api",
-  "inngest",
-  "functions",
-);
+const FN_DIR = path.join(__dirname, "..", "app", "api", "inngest", "functions");
 
 const files = fs
   .readdirSync(FN_DIR)
@@ -104,6 +99,30 @@ describe("wall-clock guards survive Inngest step replay", () => {
         offenders.map((o) => `  - ${o}`).join("\n") +
         "\n\nDegrade to a segment clock and warn once instead — or use " +
         "spanningBudget from @askarthur/scam-engine/inngest/step-budget.",
+    ).toEqual([]);
+  });
+
+  it("every declared budget is consumed through a Step Budget constructor", () => {
+    // A `*_WALL_CLOCK_MS` constant with no spanningBudget(/budgetedStep( in
+    // the same file is a number that bounds nothing — or one wired to a local
+    // Date.now() that the first assertion may not match. Go-red: rename the
+    // spanningBudget( call in any clone-watch file.
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = stripComments(fs.readFileSync(file, "utf8"));
+      if (!/_WALL_CLOCK_MS\s*=/.test(src)) continue;
+      if (!/\b(spanningBudget|budgetedStep)\(/.test(src)) {
+        offenders.push(path.basename(file));
+      }
+    }
+    expect(
+      offenders,
+      "These files declare a *_WALL_CLOCK_MS budget but never construct a " +
+        "Step Budget from it:\n" +
+        offenders.map((o) => `  - ${o}`).join("\n") +
+        "\n\nUse spanningBudget({ event }, X_WALL_CLOCK_MS, logger) for a loop " +
+        "that awaits step.run,\nor budgetedStep(step, name, X_WALL_CLOCK_MS, fn) " +
+        "for work inside one step.",
     ).toEqual([]);
   });
 

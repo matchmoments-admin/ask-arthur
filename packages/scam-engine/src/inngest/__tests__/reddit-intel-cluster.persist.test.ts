@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 import {
   __testing,
   persistAssignments,
-  PERSIST_BUDGET_MS,
   type Assignment,
 } from "../reddit-intel-cluster";
+import type { BudgetClock } from "../step-budget";
 
 const { parsePgVector } = __testing;
 
@@ -29,6 +29,12 @@ vi.mock("@askarthur/utils/logger", () => ({
  */
 
 type Row = Record<string, unknown>;
+
+// persistAssignments depends on the budget's INTERFACE, not its constructor,
+// so the already-expired path needs no fake clock — and no way to invent an
+// origin of its own, which was the defect (see step-budget.ts).
+const ample: BudgetClock = { expired: () => false, remainingMs: () => 60_000 };
+const spent: BudgetClock = { expired: () => true, remainingMs: () => 0 };
 
 /**
  * The smallest fake that can express the outcomes we care about.
@@ -138,7 +144,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
   it("seeds a theme and links the post on the happy path", async () => {
     const { client, calls } = fakeSupabase({});
 
-    const r = await persistAssignments(client, [seedAssignment()]);
+    const r = await persistAssignments(client, [seedAssignment()], ample);
 
     expect(r.newThemeCount).toBe(1);
     expect(r.seedFailures).toBe(0);
@@ -158,7 +164,11 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     // exactly as it does for new ones. This asserts the post still gets linked.
     const { client, calls } = fakeSupabase({ resolveSlugs: "all" });
 
-    const r = await persistAssignments(client, [seedAssignment("post-9")]);
+    const r = await persistAssignments(
+      client,
+      [seedAssignment("post-9")],
+      ample,
+    );
 
     expect(r.seedFailures).toBe(0);
     expect(calls.linkedPostIds).toEqual(["post-9"]);
@@ -178,7 +188,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
   it("counts a seed failure when the theme is neither created nor found", async () => {
     const { client } = fakeSupabase({ resolveSlugs: "none" });
 
-    const r = await persistAssignments(client, [seedAssignment()]);
+    const r = await persistAssignments(client, [seedAssignment()], ample);
 
     expect(r.newThemeCount).toBe(0);
     expect(r.seedFailures).toBe(1);
@@ -189,10 +199,11 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
       postUpdateError: { message: "deadlock detected" },
     });
 
-    const r = await persistAssignments(client, [
-      seedAssignment("a"),
-      seedAssignment("b"),
-    ]);
+    const r = await persistAssignments(
+      client,
+      [seedAssignment("a"), seedAssignment("b")],
+      ample,
+    );
 
     // Themes were created, posts were not linked — the asymmetry the counters
     // exist to show.
@@ -212,7 +223,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
       joinAssignment(`p${i}`, "theme-hot"),
     );
 
-    const r = await persistAssignments(client, joins);
+    const r = await persistAssignments(client, joins, ample);
 
     expect(r.joinFailures).toBe(40);
     expect(r.joinedThemeCount).toBe(0);
@@ -224,7 +235,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
       alreadyLinked: [{ id: "post-1", theme_id: "theme-existing" }],
     });
 
-    const r = await persistAssignments(client, [seedAssignment()]);
+    const r = await persistAssignments(client, [seedAssignment()], ample);
 
     expect(r.newThemeCount).toBe(0);
     expect(calls.seedUpsertRows).toBe(0);
@@ -239,7 +250,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
       joinAssignment(`p${i}`, "theme-hot"),
     );
 
-    const r = await persistAssignments(client, joins);
+    const r = await persistAssignments(client, joins, ample);
 
     expect(r.joinedThemeCount).toBe(1);
     expect(calls.themeUpdates).toBe(1); // not 50
@@ -254,7 +265,7 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     const { client } = fakeSupabase({});
     const a = seedAssignment();
 
-    await persistAssignments(client, [a]);
+    await persistAssignments(client, [a], ample);
 
     expect(a.themeId).toBe("");
   });
@@ -295,15 +306,21 @@ describe("parsePgVector rejects rather than propagates", () => {
  * whole batch AND the retry redoes identical work and times out identically.
  * A loop, not a degradation. Stopping early converts that into partial
  * progress, which the self-healing worklist finishes on the next run.
+ *
+ * THE ORIGIN DEFECT, as a behaviour. Until #1130 this function defaulted its
+ * own deadline to `Date.now() + 240 s` at ITS entry — after cluster-batch had
+ * already loaded 500 posts and 500 centroids and run the matcher. A step that
+ * arrived here with its budget already spent still got a fresh 240 s. Now the
+ * budget is the step's, and a spent one writes nothing.
  */
-describe("persistAssignments respects a wall-clock budget", () => {
-  it("stops before writing when the deadline has already passed", async () => {
+describe("persistAssignments respects the step's wall-clock budget", () => {
+  it("writes nothing when the step's budget is already spent at entry", async () => {
     const { client, calls } = fakeSupabase({});
     const joins = Array.from({ length: 20 }, (_, i) =>
       joinAssignment(`p${i}`, `theme-${i}`),
     );
 
-    const r = await persistAssignments(client, joins, Date.now() - 1);
+    const r = await persistAssignments(client, joins, spent);
 
     expect(r.deadlineHit).toBe(true);
     expect(r.joinedThemeCount).toBe(0);
@@ -319,20 +336,18 @@ describe("persistAssignments respects a wall-clock budget", () => {
       joinAssignment(`p${i}`, `theme-${i}`),
     );
 
-    const r = await persistAssignments(client, joins, Date.now() + 60_000);
+    const r = await persistAssignments(client, joins, ample);
 
     expect(r.deadlineHit).toBe(false);
     expect(r.joinedThemeCount).toBe(5);
     expect(calls.themeUpdates).toBe(5);
   });
 
-  it("has a positive default budget", async () => {
-    // Deliberately NOT asserting a bound against a literal 300_000 here. The
-    // first version of this test did, which was a third copy of the same number
-    // and would have passed even if the route dropped to 60s — the exact case
-    // the guard exists for. The route-vs-budget relationship is enforced by
-    // apps/web/__tests__/inngestMaxDurationDrift.test.ts, which reads the
-    // declared maxDuration rather than restating it.
-    expect(PERSIST_BUDGET_MS).toBeGreaterThan(0);
+  it("reports how much budget was left, so a near-miss is visible", async () => {
+    const { client } = fakeSupabase({});
+
+    const r = await persistAssignments(client, [seedAssignment()], ample);
+
+    expect(r.budgetRemainingMs).toBe(60_000);
   });
 });

@@ -57,6 +57,7 @@ import {
   logFunctionError,
   isRedditIntelBraked,
 } from "./reddit-intel-error-log";
+import { budgetedStep, type BudgetClock } from "./step-budget";
 import { withAxiomLogging } from "./with-axiom-logging";
 
 const COSINE_THRESHOLD = 0.62;
@@ -417,37 +418,37 @@ const CLUSTER_POSTS_PER_RUN = 500;
 export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
 
 /**
- * Wall-clock budget for the write phase, in milliseconds.
+ * In-step wall-clock budgets, in milliseconds. Both are bounded by the route's
+ * `maxDuration`, NOT by `timeouts.finish` — see ./step-budget.ts for the two
+ * bounds and why an in-step budget can only be obtained from budgetedStep.
  *
- * The Inngest route declares `export const maxDuration = 300`
- * (apps/web/app/api/inngest/route.ts). Exceeding it is not a slow run — Vercel
- * kills the request and Inngest reports "HTTP 504 before the SDK responded, no
- * step output was produced". That happened on 2026-09-07: at the then-current
- * 0.87s/post the 500-post batch needed ~435s against a 300s budget.
+ * CLUSTER_BATCH covers load + match + write as ONE step (#1117: vectors must
+ * not cross a step boundary — 4 MB output cap). Exceeding maxDuration is not a
+ * slow run: Vercel kills the request and the retry redoes identical work and
+ * dies identically (2026-09-07: at 0.87 s/post a 500-post batch needed ~435 s
+ * against 300 s). The write phase checks the budget per item and stops; the
+ * worklist is self-healing (theme_id stays NULL, #1105), so stopping early is
+ * partial progress, not loss.
  *
- * Since #1117 the load, match and write are ONE step, so a timeout loses the
- * entire batch and the retry redoes identical work and times out identically —
- * a loop rather than a degradation. 80% leaves headroom to finish the wave in
- * flight, write the run summary and return.
+ * Until this constant existed the 240 s clock started INSIDE
+ * persistAssignments — after the load and the match — so the real headroom
+ * was 300 − (load + match) − 240, which can be negative. It now starts at step
+ * entry, by construction, and the summary reports how much was left.
  *
- * Stopping early is safe because the worklist is self-healing: an unprocessed
- * post keeps `theme_id IS NULL` and the next run selects it again (#1105).
- * This grants permission to stop; it needs no resumption machinery.
+ * NAMING covers the sample selects, the Sonnet call and the title updates,
+ * which were unbudgeted: sequential per-row awaits inside a step convert row
+ * count directly into slot-seconds (ADR-0019). The model call is dispatched
+ * only with NAMING_MODEL_TIMEOUT_MS still in hand.
  *
- * ROUTE_MAX_DURATION_S IS A COPY, and it is only safe because a test enforces
- * the copy. scam-engine cannot import from apps/web (wrong dependency
- * direction) and Next.js requires `maxDuration` to be a statically analysable
- * literal, so the number genuinely has to exist twice.
- * `inngestMaxDurationDrift.test.ts` reads the literal out of
- * apps/web/app/api/inngest/route.ts and fails if the two disagree. Without
- * that test this comment would be describing a control that does not exist —
- * which is what the first version of it did.
+ * The 0.8 share is enforced at runtime by budgetedStep (throws above the
+ * ceiling) and at test time by apps/web/__tests__/inngestMaxDurationDrift,
+ * which reads the route's literal. inngestFinishBudgets.test.ts sums these
+ * into the finish-timeout floor, which is why they carry the _WALL_CLOCK_MS
+ * suffix and live in this file rather than in the Module.
  */
-const ROUTE_MAX_DURATION_S = 300;
-const PERSIST_BUDGET_SHARE = 0.8;
-export const PERSIST_BUDGET_MS = Math.floor(
-  ROUTE_MAX_DURATION_S * 1000 * PERSIST_BUDGET_SHARE,
-);
+export const CLUSTER_BATCH_WALL_CLOCK_MS = 240_000;
+export const NAMING_WALL_CLOCK_MS = 240_000;
+const NAMING_MODEL_TIMEOUT_MS = 60_000;
 
 export interface PersistResult {
   newThemeCount: number;
@@ -464,6 +465,12 @@ export interface PersistResult {
    * run — but a partial run must not read as a small one.
    */
   deadlineHit: boolean;
+  /**
+   * Milliseconds left on the step's budget when the write phase returned — how
+   * close the run came. A run that finishes with 2 s to spare is one slow
+   * query away from the 504, and nothing else in the summary would say so.
+   */
+  budgetRemainingMs: number;
 }
 
 /**
@@ -504,12 +511,16 @@ export interface PersistResult {
 export async function persistAssignments(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   assignments: Assignment[],
-  /** Absolute epoch ms after which no new write wave starts. */
-  deadlineAt: number = Date.now() + PERSIST_BUDGET_MS,
+  /**
+   * The enclosing step's budget — obtained from budgetedStep by the caller,
+   * never invented here. The previous default parameter started the clock at
+   * this function's entry, which is after the load and the match.
+   */
+  budget: BudgetClock,
 ): Promise<PersistResult> {
   let deadlineHit = false;
   const outOfTime = () => {
-    if (Date.now() < deadlineAt) return false;
+    if (!budget.expired()) return false;
     deadlineHit = true;
     return true;
   };
@@ -525,6 +536,7 @@ export async function persistAssignments(
       joinFailures,
       linkFailures,
       deadlineHit,
+      budgetRemainingMs: budget.remainingMs(),
     };
   }
 
@@ -553,6 +565,7 @@ export async function persistAssignments(
       joinFailures,
       linkFailures,
       deadlineHit,
+      budgetRemainingMs: budget.remainingMs(),
     };
   }
 
@@ -730,6 +743,7 @@ export async function persistAssignments(
     joinFailures,
     linkFailures,
     deadlineHit,
+    budgetRemainingMs: budget.remainingMs(),
   };
 }
 
@@ -747,6 +761,18 @@ export const redditIntelCluster = inngest.createFunction(
     // cohort events — serialize correctly instead of racing. Cluster runs are
     // infrequent, so limit:1 costs nothing in the steady state.
     concurrency: { limit: 1 },
+    // ADR-0019's circuit breaker. Until #1130 this function had none, so with
+    // retries: 3 a hung run could hold its slot for three attempts.
+    //
+    // inngest-finish-budget: 7 boundaries — 7 static step.run sites × 30 s
+    // queue wait = 210 s; inline 240 s cluster-batch + 240 s
+    // name-pending-themes = 480 s; 60 s slack = 750 s. Declared 13m (780 s).
+    // Raising either _WALL_CLOCK_MS without raising this goes red in
+    // inngestFinishBudgets.test.ts. retries: 3 sits outside the formula —
+    // acceptable because cluster-batch is idempotent (#520 H5) and the
+    // worklist self-heals, so a cancelled run's remainder is picked up next
+    // tick.
+    timeouts: { finish: "13m" },
   },
   // Dual trigger, same reasoning as reddit-intel-embed: the event keeps the
   // chain responsive, the cron guarantees the backlog drains even when no
@@ -778,152 +804,162 @@ export const redditIntelCluster = inngest.createFunction(
       const data = resolveRedditIntelEmbeddedData(event?.data);
 
       // ── Step 1: load unassigned embedded posts + themes ──────────────────
-      const batch = await step.run("cluster-batch", async () => {
-        const supabase = createServiceClient();
-        if (!supabase) throw new Error("Supabase service client unavailable");
+      const batch = await budgetedStep(
+        step,
+        "cluster-batch",
+        CLUSTER_BATCH_WALL_CLOCK_MS,
+        async (budget) => {
+          const supabase = createServiceClient();
+          if (!supabase) throw new Error("Supabase service client unavailable");
 
-        // NOT scoped to this event's cohort — the same correction made one
-        // stage upstream in reddit-intel-embed, for the same reason.
-        //
-        // `theme_id IS NULL AND embedding IS NOT NULL` IS the worklist: it
-        // describes rows that need clustering. Adding a processed_at window
-        // made it describe rows belonging to whichever event fired, and no
-        // other job anywhere looks for unclustered posts — so a row that
-        // missed its window was orphaned permanently.
-        //
-        // Measured: after the embedding backlog was drained, 976 rows had a
-        // valid 1024-dim vector and still no theme, and no future run would
-        // ever have considered them. Fixing the embed stage alone produced a
-        // pipeline that looked healthier than it was.
-        //
-        // Third instance of one pattern in this pipeline — classify, embed,
-        // cluster each keyed on the triggering event rather than the work
-        // outstanding. CLAUDE.md's clone-watch v224 lesson, one stage at a
-        // time.
-        //
-        // Oldest first so a backlog drains in arrival order rather than
-        // starving behind new posts.
-        const { data: postRows, error: postErr } = await supabase
-          .from("reddit_post_intel")
-          .select("id, embedding, embedding_model_version")
-          .is("theme_id", null)
-          .not("embedding", "is", null)
-          .order("processed_at", { ascending: true })
-          .limit(CLUSTER_POSTS_PER_RUN);
+          // NOT scoped to this event's cohort — the same correction made one
+          // stage upstream in reddit-intel-embed, for the same reason.
+          //
+          // `theme_id IS NULL AND embedding IS NOT NULL` IS the worklist: it
+          // describes rows that need clustering. Adding a processed_at window
+          // made it describe rows belonging to whichever event fired, and no
+          // other job anywhere looks for unclustered posts — so a row that
+          // missed its window was orphaned permanently.
+          //
+          // Measured: after the embedding backlog was drained, 976 rows had a
+          // valid 1024-dim vector and still no theme, and no future run would
+          // ever have considered them. Fixing the embed stage alone produced a
+          // pipeline that looked healthier than it was.
+          //
+          // Third instance of one pattern in this pipeline — classify, embed,
+          // cluster each keyed on the triggering event rather than the work
+          // outstanding. CLAUDE.md's clone-watch v224 lesson, one stage at a
+          // time.
+          //
+          // Oldest first so a backlog drains in arrival order rather than
+          // starving behind new posts.
+          const { data: postRows, error: postErr } = await supabase
+            .from("reddit_post_intel")
+            .select("id, embedding, embedding_model_version")
+            .is("theme_id", null)
+            .not("embedding", "is", null)
+            .order("processed_at", { ascending: true })
+            .limit(CLUSTER_POSTS_PER_RUN);
 
-        if (postErr) throw new Error(`load posts: ${postErr.message}`);
+          if (postErr) throw new Error(`load posts: ${postErr.message}`);
 
-        // Deliberately NOT filtered on is_active. v300 ages a theme out after
-        // 90 quiet days, and is_active gates the B2B API and the RAG
-        // retrieval — it is a VISIBILITY state. Using it here too would make
-        // deactivation one-way and self-fulfilling: a dormant theme could
-        // never be matched, so its last_seen_at could never advance, so
-        // v300's reactivation branch could never fire. A campaign resurging
-        // in month four would seed a duplicate theme from scratch and orphan
-        // its own history, and the corpus would accumulate duplicates
-        // indefinitely. Matching against a dormant theme and reviving it is
-        // the entire point of tracking themes over time.
-        const { data: themeRows, error: themeErr } = await supabase
-          .from("reddit_intel_themes")
-          .select("id, centroid_embedding, member_count")
-          .not("centroid_embedding", "is", null)
-          .limit(500);
+          // Deliberately NOT filtered on is_active. v300 ages a theme out after
+          // 90 quiet days, and is_active gates the B2B API and the RAG
+          // retrieval — it is a VISIBILITY state. Using it here too would make
+          // deactivation one-way and self-fulfilling: a dormant theme could
+          // never be matched, so its last_seen_at could never advance, so
+          // v300's reactivation branch could never fire. A campaign resurging
+          // in month four would seed a duplicate theme from scratch and orphan
+          // its own history, and the corpus would accumulate duplicates
+          // indefinitely. Matching against a dormant theme and reviving it is
+          // the entire point of tracking themes over time.
+          const { data: themeRows, error: themeErr } = await supabase
+            .from("reddit_intel_themes")
+            .select("id, centroid_embedding, member_count")
+            .not("centroid_embedding", "is", null)
+            .limit(500);
 
-        if (themeErr) throw new Error(`load themes: ${themeErr.message}`);
+          if (themeErr) throw new Error(`load themes: ${themeErr.message}`);
 
-        const posts: NewPost[] = (postRows ?? [])
-          .map((r) => ({
-            id: r.id as string,
-            embedding: parsePgVector(r.embedding as string | null) ?? [],
-            embeddingModelVersion:
-              (r.embedding_model_version as string | null) ?? null,
-          }))
-          .filter((p) => p.embedding.length > 0);
+          const posts: NewPost[] = (postRows ?? [])
+            .map((r) => ({
+              id: r.id as string,
+              embedding: parsePgVector(r.embedding as string | null) ?? [],
+              embeddingModelVersion:
+                (r.embedding_model_version as string | null) ?? null,
+            }))
+            .filter((p) => p.embedding.length > 0);
 
-        // A row the DB worklist counted (embedding IS NOT NULL) but that did
-        // not survive parsing is invisible everywhere else: it stays in the
-        // worklist forever and is silently absent from this run. Count it so
-        // the summary can say so — see the run summary at the end of the fn.
-        const droppedPosts = (postRows ?? []).length - posts.length;
+          // A row the DB worklist counted (embedding IS NOT NULL) but that did
+          // not survive parsing is invisible everywhere else: it stays in the
+          // worklist forever and is silently absent from this run. Count it so
+          // the summary can say so — see the run summary at the end of the fn.
+          const droppedPosts = (postRows ?? []).length - posts.length;
 
-        const themes: ActiveTheme[] = (themeRows ?? [])
-          .map((r) => ({
-            id: r.id as string,
-            centroid:
-              parsePgVector(r.centroid_embedding as string | null) ?? [],
-            memberCount: (r.member_count as number) ?? 0,
-          }))
-          .filter((t) => t.centroid.length > 0);
-        const droppedThemes = (themeRows ?? []).length - themes.length;
+          const themes: ActiveTheme[] = (themeRows ?? [])
+            .map((r) => ({
+              id: r.id as string,
+              centroid:
+                parsePgVector(r.centroid_embedding as string | null) ?? [],
+              memberCount: (r.member_count as number) ?? 0,
+            }))
+            .filter((t) => t.centroid.length > 0);
+          const droppedThemes = (themeRows ?? []).length - themes.length;
 
-        if (droppedPosts > 0 || droppedThemes > 0) {
-          // warn, not info: INFO is sampled at 10% in Axiom, and this is a
-          // rare high-value event that must not be sampled away.
-          logger.warn("cluster: rows dropped as unparseable", {
-            droppedPosts,
-            droppedThemes,
-          });
-        }
+          if (droppedPosts > 0 || droppedThemes > 0) {
+            // warn, not info: INFO is sampled at 10% in Axiom, and this is a
+            // rare high-value event that must not be sampled away.
+            logger.warn("cluster: rows dropped as unparseable", {
+              droppedPosts,
+              droppedThemes,
+            });
+          }
 
-        // ── Assign + persist, INSIDE this step ───────────────────────────
-        //
-        // The load, the match and the write are one step ON PURPOSE. Each post
-        // and each theme carries a 1024-dimension vector, and a step's return
-        // value is serialised and durably stored by Inngest — so returning
-        // `{ posts, themes }` across the boundary meant ~19.5 MB against a 4 MB
-        // step-output limit, and the function failed `output_too_large` on
-        // every run (prod, 2026-09-06/07), growing the backlog it exists to
-        // drain.
-        //
-        // Note the ceiling this hit is NOT a function of the batch size alone:
-        // 200 themes x 1024 dims is already ~3.9 MB, so the split-step shape
-        // could never have survived theme growth regardless. Vectors are an
-        // implementation detail of clustering and must not cross a step
-        // boundary. Only scalars are returned below.
-        //
-        // Merging also cuts three step-runs per invocation to one, which
-        // matters against the Inngest step-run budget (ADR-0019).
-        if (posts.length === 0) {
+          // ── Assign + persist, INSIDE this step ───────────────────────────
+          //
+          // The load, the match and the write are one step ON PURPOSE. Each post
+          // and each theme carries a 1024-dimension vector, and a step's return
+          // value is serialised and durably stored by Inngest — so returning
+          // `{ posts, themes }` across the boundary meant ~19.5 MB against a 4 MB
+          // step-output limit, and the function failed `output_too_large` on
+          // every run (prod, 2026-09-06/07), growing the backlog it exists to
+          // drain.
+          //
+          // Note the ceiling this hit is NOT a function of the batch size alone:
+          // 200 themes x 1024 dims is already ~3.9 MB, so the split-step shape
+          // could never have survived theme growth regardless. Vectors are an
+          // implementation detail of clustering and must not cross a step
+          // boundary. Only scalars are returned below.
+          //
+          // Merging also cuts three step-runs per invocation to one, which
+          // matters against the Inngest step-run budget (ADR-0019).
+          if (posts.length === 0) {
+            return {
+              postsConsidered: 0,
+              droppedPosts,
+              droppedThemes,
+              threshold: resolveClusterThreshold(),
+              oversizedThemeCount: 0,
+              newThemeSeeds: 0,
+              distinctJoinedThemes: 0,
+              newThemeCount: 0,
+              joinedThemeCount: 0,
+              seedFailures: 0,
+              joinFailures: 0,
+              linkFailures: 0,
+              deadlineHit: false,
+              budgetRemainingMs: budget.remainingMs(),
+            };
+          }
+
+          // Pure and unit-tested (reddit-intel-cluster.assign.test.ts); the
+          // anti-runaway guards live inside it so the collapse is reproducible
+          // without a DB. It resolves the threshold itself — read here only to
+          // report it in the run summary.
+          const { assignments, oversizedThemeCount } = assignPostsToThemes(
+            posts,
+            themes,
+          );
+          const persisted = await persistAssignments(
+            supabase,
+            assignments,
+            budget,
+          );
+
           return {
-            postsConsidered: 0,
+            postsConsidered: posts.length,
             droppedPosts,
             droppedThemes,
             threshold: resolveClusterThreshold(),
-            oversizedThemeCount: 0,
-            newThemeSeeds: 0,
-            distinctJoinedThemes: 0,
-            newThemeCount: 0,
-            joinedThemeCount: 0,
-            seedFailures: 0,
-            joinFailures: 0,
-            linkFailures: 0,
-            deadlineHit: false,
+            oversizedThemeCount,
+            newThemeSeeds: assignments.filter((a) => a.isNewTheme).length,
+            distinctJoinedThemes: new Set(
+              assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
+            ).size,
+            ...persisted,
           };
-        }
-
-        // Pure and unit-tested (reddit-intel-cluster.assign.test.ts); the
-        // anti-runaway guards live inside it so the collapse is reproducible
-        // without a DB. It resolves the threshold itself — read here only to
-        // report it in the run summary.
-        const { assignments, oversizedThemeCount } = assignPostsToThemes(
-          posts,
-          themes,
-        );
-        const persisted = await persistAssignments(supabase, assignments);
-
-        return {
-          postsConsidered: posts.length,
-          droppedPosts,
-          droppedThemes,
-          threshold: resolveClusterThreshold(),
-          oversizedThemeCount,
-          newThemeSeeds: assignments.filter((a) => a.isNewTheme).length,
-          distinctJoinedThemes: new Set(
-            assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
-          ).size,
-          ...persisted,
-        };
-      });
+        },
+      );
 
       if (batch.postsConsidered === 0) {
         logger.info("reddit-intel-cluster: nothing to cluster", {
@@ -971,152 +1007,186 @@ export const redditIntelCluster = inngest.createFunction(
       // Only themes where member_count ≥ 3 AND title still 'Pending naming'.
       // Skipping naming when there are no candidates avoids a wasted Sonnet call.
 
-      const namingResult = await step.run("name-pending-themes", async () => {
-        const supabase = createServiceClient();
-        if (!supabase) throw new Error("Supabase service client unavailable");
+      const namingResult = await budgetedStep(
+        step,
+        "name-pending-themes",
+        NAMING_WALL_CLOCK_MS,
+        async (budget) => {
+          const supabase = createServiceClient();
+          if (!supabase) throw new Error("Supabase service client unavailable");
 
-        const { data: pending, error: pendErr } = await supabase
-          .from("reddit_intel_themes")
-          .select("id, member_count")
-          .eq("title", "Pending naming")
-          .gte("member_count", MIN_MEMBERS_FOR_NAMING)
-          // Ordered, because .limit() without .order() lets PostgREST return
-          // an arbitrary 20. Harmless while the eligible set is smaller than
-          // the limit; undefined drain order the moment it is not. Largest
-          // first: the themes most worth naming are the ones with most members.
-          .order("member_count", { ascending: false })
-          .limit(20);
-
-        if (pendErr) throw new Error(`pending themes: ${pendErr.message}`);
-        if (!pending || pending.length === 0) {
-          return { named: 0 };
-        }
-
-        const themeIds = pending.map((t) => t.id as string);
-
-        // For each pending theme, fetch up to 5 sample post intel rows so
-        // Sonnet has rich context to write the title from.
-        const samples: Record<
-          string,
-          Array<{
-            intentLabel: string;
-            brands: string[];
-            modusOperandi: string | null;
-            narrativeSummary: string | null;
-            tactics: string[];
-          }>
-        > = {};
-
-        for (const tid of themeIds) {
-          const { data: members } = await supabase
-            .from("reddit_post_intel")
-            .select(
-              "intent_label, brands_impersonated, modus_operandi, narrative_summary, tactic_tags",
-            )
-            .eq("theme_id", tid)
-            .limit(5);
-          samples[tid] = (members ?? []).map((m) => ({
-            intentLabel: m.intent_label as string,
-            brands: (m.brands_impersonated as string[]) ?? [],
-            modusOperandi: (m.modus_operandi as string | null) ?? null,
-            narrativeSummary: (m.narrative_summary as string | null) ?? null,
-            tactics: (m.tactic_tags as string[] | null) ?? [],
-          }));
-        }
-
-        // Wrap Sonnet naming so any failure (model rejecting prefill, schema
-        // validation fail, JSON parse fail, rate-limit) lands in cost_telemetry
-        // feature='reddit-intel-error' for SQL-queryable triage. Inngest still
-        // retries via the function-level retries: 3 — the catch is additive.
-        let namingResponse;
-        try {
-          namingResponse = await callClaudeJson<
-            z.infer<typeof NamingOutputSchema>
-          >({
-            model: "SONNET_4_6",
-            system: NAMING_SYSTEM_PROMPT,
-            user: JSON.stringify({
-              instruction:
-                "Name each theme cluster. Match the input themeIds exactly.",
-              themes: themeIds.map((tid) => ({
-                themeId: tid,
-                samples: samples[tid],
-              })),
-            }),
-            schema: NamingOutputSchema,
-            maxTokens: 4_000,
-            timeoutMs: 60_000,
-            cacheSystem: true,
-          });
-        } catch (err) {
-          await logFunctionError({
-            step: "name-pending-themes",
-            cohortDate: data.cohortDate,
-            postCount: themeIds.length,
-            error: err,
-            promptVersion: NAMING_PROMPT_VERSION,
-            extra: { theme_count: themeIds.length },
-          });
-          throw err;
-        }
-
-        let named = 0;
-        const validInputIds = new Set(themeIds);
-        for (const named_theme of namingResponse.result.themes) {
-          if (!validInputIds.has(named_theme.themeId)) {
-            logger.warn("cluster: Sonnet returned themeId not in input", {
-              themeId: named_theme.themeId,
-            });
-            continue;
-          }
-          const slug = kebabSlug(named_theme.title);
-          // Aggregate the most frequent social-engineering tactics across the
-          // theme's sampled posts (v186) so the RAG prompt can surface them.
-          // Sample-based (the same ≤5 members fetched for naming context) — it
-          // self-heals on the next naming pass as a cluster grows.
-          const tacticCounts = new Map<string, number>();
-          for (const s of samples[named_theme.themeId] ?? []) {
-            for (const tag of s.tactics) {
-              tacticCounts.set(tag, (tacticCounts.get(tag) ?? 0) + 1);
-            }
-          }
-          const topTactics = [...tacticCounts.entries()]
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 4)
-            .map(([tag]) => tag);
-          const { error } = await supabase
+          const { data: pending, error: pendErr } = await supabase
             .from("reddit_intel_themes")
-            .update({
-              title: named_theme.title,
-              slug,
-              narrative: named_theme.narrative,
-              modus_operandi: named_theme.modusOperandi ?? null,
-              representative_brands: named_theme.representativeBrands,
-              top_tactic_tags: topTactics.length > 0 ? topTactics : null,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", named_theme.themeId);
-          if (error) {
-            logger.warn("cluster: theme rename update failed", {
-              themeId: named_theme.themeId,
-              error: error.message,
-            });
-            continue;
+            .select("id, member_count")
+            .eq("title", "Pending naming")
+            .gte("member_count", MIN_MEMBERS_FOR_NAMING)
+            // Ordered, because .limit() without .order() lets PostgREST return
+            // an arbitrary 20. Harmless while the eligible set is smaller than
+            // the limit; undefined drain order the moment it is not. Largest
+            // first: the themes most worth naming are the ones with most members.
+            .order("member_count", { ascending: false })
+            .limit(20);
+
+          if (pendErr) throw new Error(`pending themes: ${pendErr.message}`);
+          if (!pending || pending.length === 0) {
+            return { named: 0, deadlineHit: false };
           }
-          named++;
-        }
 
-        // Cost log
-        await logNamingCost({
-          estimatedCostUsd: namingResponse.estimatedCostUsd,
-          inputTokens: namingResponse.usage.inputTokens,
-          outputTokens: namingResponse.usage.outputTokens,
-          modelId: namingResponse.modelId,
-          themeCount: themeIds.length,
-        });
+          const themeIds = pending.map((t) => t.id as string);
 
-        return { named };
-      });
+          // For each pending theme, fetch up to 5 sample post intel rows so
+          // Sonnet has rich context to write the title from.
+          const samples: Record<
+            string,
+            Array<{
+              intentLabel: string;
+              brands: string[];
+              modusOperandi: string | null;
+              narrativeSummary: string | null;
+              tactics: string[];
+            }>
+          > = {};
+
+          // Bounded parallelism, budget checked per item (this was twenty
+          // sequential selects with no budget). A theme whose samples were
+          // skipped is NOT sent for naming — Sonnet would title it from nothing;
+          // it stays "Pending naming" and is selected again next run.
+          await mapWithConcurrency(
+            themeIds,
+            DB_WRITE_CONCURRENCY,
+            async (tid) => {
+              if (budget.expired()) return;
+              const { data: members } = await supabase
+                .from("reddit_post_intel")
+                .select(
+                  "intent_label, brands_impersonated, modus_operandi, narrative_summary, tactic_tags",
+                )
+                .eq("theme_id", tid)
+                .limit(5);
+              samples[tid] = (members ?? []).map((m) => ({
+                intentLabel: m.intent_label as string,
+                brands: (m.brands_impersonated as string[]) ?? [],
+                modusOperandi: (m.modus_operandi as string | null) ?? null,
+                narrativeSummary:
+                  (m.narrative_summary as string | null) ?? null,
+                tactics: (m.tactic_tags as string[] | null) ?? [],
+              }));
+            },
+          );
+          const sampled = themeIds.filter((tid) => tid in samples);
+
+          // The model call gets its own timeout; dispatching it with less than
+          // that in hand is a call that cannot finish inside the step. Skip and
+          // say so — the themes are still pending next run.
+          if (
+            sampled.length === 0 ||
+            budget.remainingMs() <= NAMING_MODEL_TIMEOUT_MS
+          ) {
+            return { named: 0, deadlineHit: true };
+          }
+
+          // Wrap Sonnet naming so any failure (model rejecting prefill, schema
+          // validation fail, JSON parse fail, rate-limit) lands in cost_telemetry
+          // feature='reddit-intel-error' for SQL-queryable triage. Inngest still
+          // retries via the function-level retries: 3 — the catch is additive.
+          let namingResponse;
+          try {
+            namingResponse = await callClaudeJson<
+              z.infer<typeof NamingOutputSchema>
+            >({
+              model: "SONNET_4_6",
+              system: NAMING_SYSTEM_PROMPT,
+              user: JSON.stringify({
+                instruction:
+                  "Name each theme cluster. Match the input themeIds exactly.",
+                themes: sampled.map((tid) => ({
+                  themeId: tid,
+                  samples: samples[tid],
+                })),
+              }),
+              schema: NamingOutputSchema,
+              maxTokens: 4_000,
+              timeoutMs: NAMING_MODEL_TIMEOUT_MS,
+              cacheSystem: true,
+            });
+          } catch (err) {
+            await logFunctionError({
+              step: "name-pending-themes",
+              cohortDate: data.cohortDate,
+              postCount: sampled.length,
+              error: err,
+              promptVersion: NAMING_PROMPT_VERSION,
+              extra: { theme_count: sampled.length },
+            });
+            throw err;
+          }
+
+          let named = 0;
+          const validInputIds = new Set(sampled);
+          // Bounded parallelism again (was twenty sequential updates). A title
+          // skipped for time costs one more Sonnet call next run, which is
+          // cheaper than a 504 that loses all twenty.
+          await mapWithConcurrency(
+            namingResponse.result.themes,
+            DB_WRITE_CONCURRENCY,
+            async (named_theme) => {
+              if (!validInputIds.has(named_theme.themeId)) {
+                logger.warn("cluster: Sonnet returned themeId not in input", {
+                  themeId: named_theme.themeId,
+                });
+                return;
+              }
+              if (budget.expired()) return;
+              const slug = kebabSlug(named_theme.title);
+              // Aggregate the most frequent social-engineering tactics across the
+              // theme's sampled posts (v186) so the RAG prompt can surface them.
+              // Sample-based (the same ≤5 members fetched for naming context) — it
+              // self-heals on the next naming pass as a cluster grows.
+              const tacticCounts = new Map<string, number>();
+              for (const s of samples[named_theme.themeId] ?? []) {
+                for (const tag of s.tactics) {
+                  tacticCounts.set(tag, (tacticCounts.get(tag) ?? 0) + 1);
+                }
+              }
+              const topTactics = [...tacticCounts.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4)
+                .map(([tag]) => tag);
+              const { error } = await supabase
+                .from("reddit_intel_themes")
+                .update({
+                  title: named_theme.title,
+                  slug,
+                  narrative: named_theme.narrative,
+                  modus_operandi: named_theme.modusOperandi ?? null,
+                  representative_brands: named_theme.representativeBrands,
+                  top_tactic_tags: topTactics.length > 0 ? topTactics : null,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", named_theme.themeId);
+              if (error) {
+                logger.warn("cluster: theme rename update failed", {
+                  themeId: named_theme.themeId,
+                  error: error.message,
+                });
+                return;
+              }
+              named++;
+            },
+          );
+
+          // Cost log
+          await logNamingCost({
+            estimatedCostUsd: namingResponse.estimatedCostUsd,
+            inputTokens: namingResponse.usage.inputTokens,
+            outputTokens: namingResponse.usage.outputTokens,
+            modelId: namingResponse.modelId,
+            themeCount: sampled.length,
+          });
+
+          return { named, deadlineHit: budget.expired() };
+        },
+      );
 
       // ── Step 5: recompute theme health ───────────────────────────────────
       // signal_strength / wow_delta_pct / is_active had no writer until v300:
@@ -1221,6 +1291,8 @@ export const redditIntelCluster = inngest.createFunction(
         // A partial run must not read as a quiet one: the budget stopped it,
         // and the remainder is waiting in the worklist for the next tick.
         deadlineHit: batch.deadlineHit,
+        budgetRemainingMs: batch.budgetRemainingMs,
+        namingDeadlineHit: namingResult.deadlineHit,
         seedFailures: batch.seedFailures,
         joinFailures: batch.joinFailures,
         linkFailures: batch.linkFailures,

@@ -227,12 +227,14 @@ absence from Axiom was a telemetry loss, not a dead function (§ above).
 
 ## What has already been done
 
-| PR    | change                                                                                                 |
-| ----- | ------------------------------------------------------------------------------------------------------ |
-| #1117 | clustering: load+assign+persist in one step (vectors must not cross a step boundary — 4 MB cap)        |
-| #1119 | clustering writes set-based; round trips scale with distinct themes, not posts                         |
-| #1120 | `elapsedSinceTriggerMs` + `finalSegmentMs` + `attempt` — the measurement this doc depends on           |
-| #1121 | campaign-key backfill grouped; `mapWithConcurrency`/`groupBy` shared in `@askarthur/utils/concurrency` |
+| PR    | change                                                                                                                                                                                                                                                                                                          |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #1117 | clustering: load+assign+persist in one step (vectors must not cross a step boundary — 4 MB cap)                                                                                                                                                                                                                 |
+| #1119 | clustering writes set-based; round trips scale with distinct themes, not posts                                                                                                                                                                                                                                  |
+| #1120 | `elapsedSinceTriggerMs` + `finalSegmentMs` + `attempt` — the measurement this doc depends on                                                                                                                                                                                                                    |
+| #1121 | campaign-key backfill grouped; `mapWithConcurrency`/`groupBy` shared in `@askarthur/utils/concurrency`                                                                                                                                                                                                          |
+| #1129 | the four converted wall-clock guards read `elapsedSinceTrigger(…) ?? 0` — fail-open on an unusable `event.ts`; degraded to a segment clock                                                                                                                                                                      |
+| #1130 | Step Budget Module (`step-budget.ts`): `budgetedStep` (in-step, clock at step entry by construction) + `spanningBudget` (across boundaries, clock `event.ts`); clustering's 240 s no longer starts after the load; naming step budgeted; `reddit-intel-cluster` gets its first `timeouts.finish` (13m, derived) |
 
 ## Standing rule
 
