@@ -34,9 +34,9 @@ import { runSpendingBackfill } from "@askarthur/scam-engine/backfill";
 import { embed } from "@askarthur/scam-engine/embeddings";
 import {
   buildEmbedText,
-  vectorToPgString,
   type IntelRowForEmbed,
 } from "@askarthur/scam-engine/inngest/reddit-intel-embed";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 const COUNT = Number(process.argv[2] ?? 100);
 const DRY = process.argv.includes("--dry");

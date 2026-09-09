@@ -18,6 +18,7 @@
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import { inngest } from "./client";
@@ -65,14 +66,6 @@ export function buildEmbedText(row: IntelRowForEmbed): string {
     parts.push(row.narrative_summary);
   }
   return parts.join(" | ");
-}
-
-// pgvector wire format. supabase-js serialises a JS array as a JSON array
-// which PostgREST then sends as Postgres array syntax `{...}` — wrong for
-// vector columns. The unambiguous-everywhere format is the bracketed text
-// `[1,2,3]` which pgvector accepts on insert / update.
-export function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
 }
 
 async function logCost(args: {

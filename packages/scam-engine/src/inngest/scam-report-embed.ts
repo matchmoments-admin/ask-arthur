@@ -19,6 +19,7 @@
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
 import { SCAM_REPORT_STORED_EVENT, parseScamReportStoredData } from "./events";
@@ -62,10 +63,6 @@ function buildEmbedText(args: {
   if (args.impersonated_brand) parts.push(`brand:${args.impersonated_brand}`);
   parts.push(args.scrubbed_content);
   return parts.join(" | ").slice(0, 4000);
-}
-
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
 }
 
 async function logCost(args: {

@@ -27,6 +27,7 @@
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
@@ -53,10 +54,6 @@ const FINANCE_SCAM_TYPES = new Set<string>([
 function selectDomain(scamType: string | null | undefined): EmbeddingDomain {
   if (!scamType) return "generic";
   return FINANCE_SCAM_TYPES.has(scamType.toLowerCase()) ? "finance" : "generic";
-}
-
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
 }
 
 interface ScamReportRow {

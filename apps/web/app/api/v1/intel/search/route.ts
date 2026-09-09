@@ -28,6 +28,7 @@ import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { vectorToPgString } from "@askarthur/utils/pgvector";
 import { embedQuery } from "@askarthur/scam-engine/embeddings";
 import { rerank } from "@askarthur/scam-engine/rerank";
 import { logCost } from "@/lib/cost-telemetry";
@@ -86,10 +87,6 @@ const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 25;
 const ANN_TOP_N = 50;
 const DEFAULT_MIN_SIMILARITY = 0.55;
-
-function vectorToPgString(vec: number[]): string {
-  return "[" + vec.join(",") + "]";
-}
 
 export async function POST(req: NextRequest) {
   const guard = await guardV1(req);
@@ -201,10 +198,7 @@ export async function POST(req: NextRequest) {
     });
     if (error) {
       logger.error("match_reddit_intel RPC failed", { error: error.message });
-      return NextResponse.json(
-        { error: "Search RPC failed" },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Search RPC failed" }, { status: 500 });
     }
     posts = (data ?? []) as PostMatchRow[];
   }
@@ -216,11 +210,10 @@ export async function POST(req: NextRequest) {
       p_min_similarity: minSimilarity,
     });
     if (error) {
-      logger.error("match_reddit_intel_themes RPC failed", { error: error.message });
-      return NextResponse.json(
-        { error: "Search RPC failed" },
-        { status: 500 },
-      );
+      logger.error("match_reddit_intel_themes RPC failed", {
+        error: error.message,
+      });
+      return NextResponse.json({ error: "Search RPC failed" }, { status: 500 });
     }
     themes = (data ?? []) as ThemeMatchRow[];
   }
@@ -267,12 +260,10 @@ export async function POST(req: NextRequest) {
         topK: limit,
         requestId: auth.keyHash ?? undefined,
       });
-      const reordered = rr.results
-        .slice(0, limit)
-        .map((r) => ({
-          ...posts[r.index],
-          relevance_score: r.relevanceScore,
-        }));
+      const reordered = rr.results.slice(0, limit).map((r) => ({
+        ...posts[r.index],
+        relevance_score: r.relevanceScore,
+      }));
       posts = reordered as Array<PostMatchRow & { relevance_score: number }>;
       rerankTokens = rr.totalTokens;
       rerankCostUsd = rr.estimatedCostUsd;

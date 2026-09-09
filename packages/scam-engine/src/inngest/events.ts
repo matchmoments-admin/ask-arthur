@@ -263,7 +263,6 @@ export function parseRedditIntelSummarisedData(
   return RedditIntelSummarisedDataSchema.parse(raw);
 }
 
-
 // ── Cron-vs-event payload resolution ─────────────────────────────────────
 //
 // Both reddit-intel-embed and reddit-intel-cluster carry TWO triggers: the
