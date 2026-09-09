@@ -37,6 +37,28 @@ export const VONAGE_BACKFILL_MONITOR_EVENT =
 
 const PAGE_SIZE = 100;
 
+/**
+ * Pages per run, and therefore the run's boundary count.
+ *
+ * LOWERED 1000 -> 20 in #1139. The old value was a runaway guard ("so a
+ * runaway loop dies safely"), never a data bound — but the loop spends TWO
+ * step boundaries per page, so 1000 pages is 2,000 boundaries, and ADR-0019's
+ * floor (boundaries x 30s queue wait) makes an honest finish timeout for that
+ * about sixteen hours. A sixteen-hour circuit breaker is not one, so the
+ * ceiling had to become a real bound before a real budget could exist.
+ *
+ * 20 pages x PAGE_SIZE (100) = 2,000 monitors, against a feature with ZERO
+ * lifetime usage (NORTH_STAR.md — Phone Footprint is mothballed). The loop
+ * already exits on the first short page, so a realistic run is one boundary
+ * pair. Exceeding the cap is now reported rather than silent.
+ *
+ * RE-DERIVE BOTH THIS AND timeouts.finish before un-mothballing: if the
+ * monitor table is ever larger than 2,000 the pager needs a resumable cursor,
+ * not a bigger number — it emits one event per monitor, so its fan-out is the
+ * thing to size first.
+ */
+const MAX_PAGES = 20;
+
 interface MonitorRow {
   id: number;
   user_id: string | null;
@@ -49,54 +71,87 @@ interface MonitorRow {
 // Stage 1 — pager
 // =============================================================================
 
+// inngest-finish-budget: 43 boundaries — this FILE holds two functions and the
+// floor test reads the first finish timeout it finds, so the count covers both:
+// the pager's 2 interpolated steps x MAX_PAGES (20) = 40, plus the monitor's 3
+// static steps. 43 x 30s queue wait = 1290s; no inline wall-clock budget; 60s
+// slack = 1350s. Declared 24m (1440s) on the pager, clear of the 22.5m floor.
+//
+// The monitor's own 5m is therefore NOT covered by the floor check — the test
+// is per file, not per function. Stated so the gap is known rather than
+// assumed closed.
 export const phoneFootprintVonageBackfillPager = inngest.createFunction(
   {
     id: "phone-footprint-vonage-backfill-pager",
     name: "Phone Footprint: Vonage backfill — page monitors",
     idempotency: "event.data.requestId",
     retries: 2,
+    // ADR-0019's circuit breaker, absent until #1139. See the derivation
+    // above; it depends on MAX_PAGES, so lowering that number without
+    // revisiting this one is safe and raising it is not.
+    timeouts: { finish: "24m" },
     concurrency: { limit: 1 },
   },
   { event: VONAGE_BACKFILL_REQUESTED_EVENT },
-  withAxiomLogging({ fnId: "phone-footprint-vonage-backfill-pager" }, async ({ event, step }) => {
-    const { requestId } = event.data as { requestId: string };
-    if (!requestId) {
-      return { error: "missing_request_id" };
-    }
+  withAxiomLogging(
+    { fnId: "phone-footprint-vonage-backfill-pager" },
+    async ({ event, step }) => {
+      const { requestId } = event.data as { requestId: string };
+      if (!requestId) {
+        return { error: "missing_request_id" };
+      }
 
-    let cursor: number | null = null;
-    let totalEmitted = 0;
-    let pageCount = 0;
-    const maxPages = 1000; // Hard ceiling so a runaway loop dies safely.
+      let cursor: number | null = null;
+      let totalEmitted = 0;
+      let pageCount = 0;
 
-    while (pageCount < maxPages) {
-      pageCount++;
-      const page = await step.run(`page-${pageCount}`, async () =>
-        loadPage(cursor),
-      );
-      if (page.length === 0) break;
-
-      // Emit one event per monitor — Inngest dedups via idempotency on
-      // each consumer, and a single failing monitor doesn't block the
-      // others.
-      await step.run(`emit-${pageCount}`, async () => {
-        await Promise.all(
-          page.map((m) =>
-            inngest.send({
-              name: VONAGE_BACKFILL_MONITOR_EVENT,
-              data: { monitorId: m.id, requestId },
-            }),
-          ),
+      while (pageCount < MAX_PAGES) {
+        pageCount++;
+        const page = await step.run(`page-${pageCount}`, async () =>
+          loadPage(cursor),
         );
-      });
+        if (page.length === 0) break;
 
-      totalEmitted += page.length;
-      cursor = page[page.length - 1].id;
-      if (page.length < PAGE_SIZE) break;
-    }
+        // Emit one event per monitor — Inngest dedups via idempotency on
+        // each consumer, and a single failing monitor doesn't block the
+        // others.
+        await step.run(`emit-${pageCount}`, async () => {
+          await Promise.all(
+            page.map((m) =>
+              inngest.send({
+                name: VONAGE_BACKFILL_MONITOR_EVENT,
+                data: { monitorId: m.id, requestId },
+              }),
+            ),
+          );
+        });
 
-    return { totalEmitted, pageCount };
-  }),
+        totalEmitted += page.length;
+        cursor = page[page.length - 1].id;
+        if (page.length < PAGE_SIZE) break;
+      }
+
+      // Hitting the page cap means monitors were left un-emitted. Loud, because
+      // nothing else would say so: the loop simply stops and the run returns a
+      // success-shaped result. Not self-healing either — this function is fired
+      // by an operator event, so the remainder is not picked up by anything.
+      const truncated = pageCount >= MAX_PAGES;
+      if (truncated) {
+        logger.warn(
+          "vonage-backfill pager: page cap reached, monitors skipped",
+          {
+            requestId,
+            pageCount,
+            maxPages: MAX_PAGES,
+            totalEmitted,
+            lastCursor: cursor,
+          },
+        );
+      }
+
+      return { totalEmitted, pageCount, truncated };
+    },
+  ),
 );
 
 async function loadPage(cursor: number | null): Promise<MonitorRow[]> {
@@ -112,7 +167,9 @@ async function loadPage(cursor: number | null): Promise<MonitorRow[]> {
   if (cursor !== null) query = query.gt("id", cursor);
   const { data, error } = await query;
   if (error) {
-    logger.warn("vonage backfill page failed", { error: String(error.message) });
+    logger.warn("vonage backfill page failed", {
+      error: String(error.message),
+    });
     return [];
   }
   return (data ?? []) as MonitorRow[];
@@ -131,50 +188,59 @@ export const phoneFootprintVonageBackfillMonitor = inngest.createFunction(
     // if Inngest retries.
     idempotency: "event.data.requestId + ':' + event.data.monitorId",
     retries: 1,
+    // ADR-0019's circuit breaker, absent until #1139. 3 static step.run sites:
+    // 3 x 30s queue wait + 60s slack = 150s. `orchestrate` calls
+    // buildPhoneFootprint, which fans out provider lookups with their own
+    // timeouts. Declared 5m (300s). NOTE this one is not covered by the floor
+    // check — see the file-level derivation above the pager.
+    timeouts: { finish: "5m" },
     // Capped at 3 (PR-B rebalance, down from 5): reserves ≥2 of Hobby's 5
     // concurrent slots for the latency-sensitive analyze fan-out.
     concurrency: { limit: 3 },
   },
   { event: VONAGE_BACKFILL_MONITOR_EVENT },
-  withAxiomLogging({ fnId: "phone-footprint-vonage-backfill-monitor" }, async ({ event, step }) => {
-    const { monitorId, requestId } = event.data as {
-      monitorId: number;
-      requestId: string;
-    };
+  withAxiomLogging(
+    { fnId: "phone-footprint-vonage-backfill-monitor" },
+    async ({ event, step }) => {
+      const { monitorId, requestId } = event.data as {
+        monitorId: number;
+        requestId: string;
+      };
 
-    const monitor = await step.run("load-monitor", () =>
-      loadMonitor(monitorId),
-    );
-    if (!monitor) return { skipped: true, reason: "monitor_not_found" };
+      const monitor = await step.run("load-monitor", () =>
+        loadMonitor(monitorId),
+      );
+      if (!monitor) return { skipped: true, reason: "monitor_not_found" };
 
-    // Re-run the orchestrator at the monitor's current tier. The
-    // user-facing `requestId` is included so the snapshot row's
-    // request_id traces back to this specific backfill batch — useful
-    // for forensics if the backfill produces unexpected results.
-    const footprint = await step.run("orchestrate", () =>
-      buildPhoneFootprint(monitor.msisdn_e164, {
-        tier: monitor.tier,
-        userId: monitor.user_id ?? undefined,
-        orgId: monitor.org_id ?? undefined,
-        ownershipProven: true, // monitor existence implies prior OTP
-        requestId: `vonage-backfill-${requestId}-monitor-${monitorId}`,
-      }),
-    );
+      // Re-run the orchestrator at the monitor's current tier. The
+      // user-facing `requestId` is included so the snapshot row's
+      // request_id traces back to this specific backfill batch — useful
+      // for forensics if the backfill produces unexpected results.
+      const footprint = await step.run("orchestrate", () =>
+        buildPhoneFootprint(monitor.msisdn_e164, {
+          tier: monitor.tier,
+          userId: monitor.user_id ?? undefined,
+          orgId: monitor.org_id ?? undefined,
+          ownershipProven: true, // monitor existence implies prior OTP
+          requestId: `vonage-backfill-${requestId}-monitor-${monitorId}`,
+        }),
+      );
 
-    const newId = await step.run("persist", () =>
-      persistAndLink(footprint, monitor),
-    );
-    if (!newId) {
-      throw new Error("persist_failed"); // Inngest retries via retries:1
-    }
+      const newId = await step.run("persist", () =>
+        persistAndLink(footprint, monitor),
+      );
+      if (!newId) {
+        throw new Error("persist_failed"); // Inngest retries via retries:1
+      }
 
-    return {
-      ok: true,
-      monitorId,
-      newFootprintId: newId,
-      vonageCoverage: footprint.coverage.vonage,
-    };
-  }),
+      return {
+        ok: true,
+        monitorId,
+        newFootprintId: newId,
+        vonageCoverage: footprint.coverage.vonage,
+      };
+    },
+  ),
 );
 
 async function loadMonitor(id: number): Promise<MonitorRow | null> {
@@ -192,7 +258,7 @@ async function loadMonitor(id: number): Promise<MonitorRow | null> {
     user_id: (data.user_id as string | null) ?? null,
     org_id: (data.org_id as string | null) ?? null,
     msisdn_e164: data.msisdn_e164 as string,
-    tier: (data.tier as "basic" | "full"),
+    tier: data.tier as "basic" | "full",
   };
 }
 
@@ -210,7 +276,12 @@ async function persistAndLink(
       org_id: monitor.org_id,
       msisdn_e164: fp.msisdn_e164,
       msisdn_hash: fp.msisdn_hash,
-      tier_generated: fp.tier === "teaser" ? "teaser" : fp.tier === "basic" ? "basic" : "full",
+      tier_generated:
+        fp.tier === "teaser"
+          ? "teaser"
+          : fp.tier === "basic"
+            ? "basic"
+            : "full",
       composite_score: fp.composite_score,
       band: fp.band,
       pillar_scores: fp.pillars,
@@ -225,7 +296,10 @@ async function persistAndLink(
     .select("id")
     .single();
   if (error || !insRow) {
-    logger.warn("vonage backfill persist failed", { error: String(error?.message), monitorId: monitor.id });
+    logger.warn("vonage backfill persist failed", {
+      error: String(error?.message),
+      monitorId: monitor.id,
+    });
     return null;
   }
 

@@ -104,6 +104,15 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
     id: "shopfront-clone-notify-brand",
     name: "Clone-Watch: Notify brand",
     retries: 3,
+    // ADR-0019's circuit breaker, absent until #1139. 8 static step.run
+    // sites, none in a loop and none interpolated, so the floor test counts
+    // them itself: 8 x 30s queue wait + 60s slack = 300s. No inline
+    // wall-clock budget — every step is one DB read/write or one Telegram
+    // send, and only a branch of the eight runs on any given alert.
+    // Declared 6m (360s) rather than the 5m floor: a finish sitting on its
+    // own floor cancels healthy runs, and a cancellation gets no retry, no
+    // error and no telemetry (#1069).
+    timeouts: { finish: "6m" },
     concurrency: { limit: 4 },
     idempotency: "event.data.alertId",
     rateLimit: {

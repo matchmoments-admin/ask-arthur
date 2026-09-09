@@ -30,6 +30,13 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     id: "shopfront-clone-weekly-digest",
     name: "Clone-Watch: Weekly digest + LinkedIn-post draft",
     retries: 2,
+    // ADR-0019's circuit breaker, absent until #1139. 7 static step.run
+    // sites, none interpolated: 7 x 30s queue wait + 60s slack = 270s. The
+    // three `for` loops inside the fetch steps iterate rows already in
+    // memory to build aggregates — no await per row, so no inline
+    // wall-clock budget is needed and no spanning-budget replay hazard
+    // exists (#1138). Declared 6m (360s), clear of the 4.5m floor.
+    timeouts: { finish: "6m" },
     concurrency: { limit: 1 },
   },
   // Two triggers: cron + manual-trigger event for ad-hoc rerun.

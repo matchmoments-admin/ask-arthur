@@ -207,6 +207,15 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
     name: "Phone Footprint: refresh one monitor",
     idempotency: "event.data.claimKey", // one refresh per CLAIM (queueId+claimedAt), so a reclaim after a failed run re-fires; a duplicate emit of the same claim still dedups
     retries: 2,
+    // ADR-0019's circuit breaker, absent until #1139. 7 static step.run
+    // sites in THIS function, none interpolated: 7 x 30s queue wait + 60s
+    // slack = 270s. Declared 6m (360s).
+    //
+    // It was missed by the #1135 sweep because that guard reads one finish
+    // timeout PER FILE, and this file's first function already had one — so a
+    // second function beneath it was invisible. The guard is per-function as
+    // of #1139, which is what surfaced this.
+    timeouts: { finish: "6m" },
     // Capped at 3 (PR-B rebalance, down from 5): reserves ≥2 of Hobby's 5
     // concurrent slots for the latency-sensitive analyze fan-out so a refresh
     // burst can't starve user-facing analysis. Lower parallelism just queues
