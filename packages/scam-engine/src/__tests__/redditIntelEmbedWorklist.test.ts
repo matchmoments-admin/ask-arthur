@@ -46,12 +46,29 @@ const SOURCE = new URL("../inngest/reddit-intel-embed.ts", import.meta.url);
 function worklistSource(): string {
   const src = readFileSync(SOURCE, "utf8");
   const start = src.indexOf('step.run("load-unembedded"');
-  expect(start, "load-unembedded step not found — was it renamed?").toBeGreaterThan(-1);
+  expect(
+    start,
+    "load-unembedded step not found — was it renamed?",
+  ).toBeGreaterThan(-1);
   const end = src.indexOf("});", start);
   return src
     .slice(start, end)
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/[^\n]*/g, "");
+}
+
+/**
+ * Locate a step site by NAME whether it is `step.run("name"` or
+ * `budgetedStep(step, "name"` (the in-step Step Budget constructor, #1130).
+ * `step "name"` in a stage entry means "the step called name".
+ */
+function stepSite(src: string, anchor: string): number {
+  const m = /^step "([^"]+)"$/.exec(anchor);
+  if (!m) return src.indexOf(anchor);
+  const re = new RegExp(
+    `\\b(?:step\\.run|budgetedStep)\\(\\s*(?:step,\\s*)?"${m[1]}"`,
+  );
+  return src.search(re);
 }
 
 describe("reddit-intel-embed worklist", () => {
@@ -63,7 +80,12 @@ describe("reddit-intel-embed worklist", () => {
 
   it("is not narrowed to the triggering cohort", () => {
     const body = worklistSource();
-    for (const scoping of ["cohortStart", "cohortEnd", 'gte("processed_at"', 'lt("processed_at"']) {
+    for (const scoping of [
+      "cohortStart",
+      "cohortEnd",
+      'gte("processed_at"',
+      'lt("processed_at"',
+    ]) {
       expect(
         body.includes(scoping),
         `the worklist filters on ${scoping} again. That makes it a function ` +
@@ -75,7 +97,7 @@ describe("reddit-intel-embed worklist", () => {
   });
 
   it("drains oldest first so a backlog cannot starve behind new arrivals", () => {
-    expect(worklistSource()).toContain('ascending: true');
+    expect(worklistSource()).toContain("ascending: true");
   });
 
   it("does not pace inside a step, and is sized so it need not", () => {
@@ -149,7 +171,10 @@ describe("no pipeline stage scopes its worklist to the triggering cohort", () =>
     },
     {
       file: "../inngest/reddit-intel-cluster.ts",
-      step: 'step.run("cluster-batch"',
+      // Since #1130 this is a budgetedStep, not a bare step.run — the anchor
+      // is the step NAME, found via STEP_SITE below, so a change of
+      // constructor cannot silently make this guard inert.
+      step: 'step "cluster-batch"',
       worklist: "theme_id IS NULL AND embedding IS NOT NULL",
     },
   ];
@@ -158,7 +183,7 @@ describe("no pipeline stage scopes its worklist to the triggering cohort", () =>
     const name = stage.file.split("/").pop();
     it(`${name} selects on work outstanding, not on the event`, () => {
       const src = readFileSync(new URL(stage.file, import.meta.url), "utf8");
-      const start = src.indexOf(stage.step);
+      const start = stepSite(src, stage.step);
       expect(
         start,
         `${stage.step} not found in ${name} — renamed? this guard is inert`,
@@ -424,16 +449,18 @@ describe("clustering keeps its vectors inside one step", () => {
 
   it("loads, assigns and persists within the same step.run", () => {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
-    const start = src.indexOf('step.run("cluster-batch"');
+    const start = stepSite(src, 'step "cluster-batch"');
     expect(
       start,
       "cluster-batch step not found — renamed? this guard is inert",
     ).toBeGreaterThan(-1);
 
-    // The step body ends where the NEXT step begins; using the next step.run
-    // as the terminator avoids trying to brace-match a 150-line callback.
-    const nextStep = src.indexOf("step.run(", start + 10);
-    const body = src.slice(start, nextStep > -1 ? nextStep : undefined);
+    // The step body ends where the NEXT step begins; using the next step
+    // site as the terminator avoids trying to brace-match a 150-line callback.
+    const rest = src.slice(start + 10);
+    const next = rest.search(/\b(step\.run|budgetedStep)\(/);
+    const body =
+      next > -1 ? src.slice(start, start + 10 + next) : src.slice(start);
 
     for (const call of ["assignPostsToThemes(", "persistAssignments("]) {
       expect(
@@ -474,14 +501,26 @@ describe("no dual-trigger function truthiness-tests its payload", () => {
   const dirs = [
     path.join(__dirname, "..", "inngest"),
     path.join(
-      __dirname, "..", "..", "..", "..",
-      "apps", "web", "app", "api", "inngest", "functions",
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "..",
+      "apps",
+      "web",
+      "app",
+      "api",
+      "inngest",
+      "functions",
     ),
   ];
 
   const files = dirs.flatMap((d) =>
     fs.existsSync(d)
-      ? fs.readdirSync(d).filter((f) => f.endsWith(".ts")).map((f) => path.join(d, f))
+      ? fs
+          .readdirSync(d)
+          .filter((f) => f.endsWith(".ts"))
+          .map((f) => path.join(d, f))
       : [],
   );
 
@@ -510,7 +549,8 @@ describe("no dual-trigger function truthiness-tests its payload", () => {
     expect(
       offenders,
       "These functions have BOTH a cron trigger and a truthiness test on " +
-        "event.data:\n" + offenders.map((o) => `  - ${o}`).join("\n") +
+        "event.data:\n" +
+        offenders.map((o) => `  - ${o}`).join("\n") +
         "\n\nA cron tick carries `data: { cron }` — truthy — so the parse " +
         "branch runs and throws on every scheduled run.\nUse safeParse (see " +
         "resolveRedditIntelSummarisedData in inngest/events.ts) or isCronTick " +

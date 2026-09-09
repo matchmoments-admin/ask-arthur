@@ -168,6 +168,10 @@ When a clone alert's Canonical Brand is also a live Watchlist Candidate (Reddit 
 **Brand Register** (`brand_register`, "brand 360", Phase 3):
 The per-brand rollup that aligns the three streams — one row per Canonical Brand with 30-day scam/reddit/clone counts, watchlist membership, curation status, and a `cross_stream_priority` (an additive ordering hint, not a clone severity). Pure-derived, rebuilt nightly by `brand-register-refresh`; a `DROP TABLE` is lossless. **Distinct from** the ADR-0018 _Brand Stewardship ledger_ (a monthly proof-of-reporting artifact over `onward_report_log`) and from a _Scam Cluster_ (a report graph keyed by shared entities).
 
+**Step Budget** (`packages/scam-engine/src/inngest/step-budget.ts`, #1130):
+The wall-clock allowance for work inside one Inngest run, with two distinct bounds that must not be confused. Inside a single `step.run` the bound is the route's `maxDuration` — Vercel kills the request, and the retry redoes identical work and dies identically; across step boundaries it is `timeouts.finish` — Inngest cancels the run silently, with no retry, error or telemetry. A budget is obtained from one of two constructors, one per bound: `budgetedStep` (in-step; the clock starts at step entry by construction because the budget only exists inside the callback) and `spanningBudget` (across boundaries; the clock is `event.ts`, never handler entry, because the handler is re-executed at every boundary). When `event.ts` is unusable a spanning budget is _degraded_ — segment clock, one warning — rather than fail-open or fail-closed. Each function keeps its own `*_WALL_CLOCK_MS` constant so `inngestFinishBudgets.test.ts` can sum them into the finish-timeout floor.
+_Avoid_: "timeout" (ambiguous between the two bounds), "deadline" alone (says nothing about which clock), "budget" for a cost cap (that is a brake — see `docs/inngest-brakes.md`).
+
 ## Relationships
 
 - An **Analysis Result** produces exactly one **Verdict**.

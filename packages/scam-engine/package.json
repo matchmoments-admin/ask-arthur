@@ -32,6 +32,7 @@
     "./inngest/functions": "./src/inngest/functions.ts",
     "./inngest/events": "./src/inngest/events.ts",
     "./inngest/with-axiom-logging": "./src/inngest/with-axiom-logging.ts",
+    "./inngest/step-budget": "./src/inngest/step-budget.ts",
     "./redirect-resolver": "./src/redirect-resolver.ts",
     "./html-sanitize": "./src/html-sanitize.ts",
     "./report-store": "./src/report-store.ts",

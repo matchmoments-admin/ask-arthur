@@ -3,10 +3,8 @@ import {
   CLONE_WATCH_WEAPONISED_EVENT,
   type CloneWatchWeaponisedData,
 } from "@askarthur/scam-engine/inngest/events";
-import {
-  elapsedSinceTrigger,
-  withAxiomLogging,
-} from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -145,32 +143,11 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       // A wall-clock guard breaks the loop before the 10m finish budget so
       // worst-case external latency (40 rows × urlscan GET) can't force a
       // full-batch replay — leftovers drain next tick (worklist is idempotent).
-      // Replay-safe: this loop awaits step.run per item, so it spans step
-      // boundaries and Inngest re-executes the handler from the top at each
-      // one. A Date.now() captured here would reset on every replay and the
-      // guard below could never fire. event.ts is set when the run is
-      // TRIGGERED and survives replay.
-      //
-      // elapsedSinceTrigger returns null when event.ts is unusable, and the
-      // first version of this guard wrote `?? 0` — turning "unknowable" back
-      // into the confident zero it exists to avoid, so the guard could never
-      // fire on such a run. Degrade instead: fall back to a clock captured
-      // here. That clock resets on replay, so it bounds only the current
-      // segment, but a segment bound is strictly safer than no bound. Warned
-      // once so a degraded run is distinguishable from a healthy one.
-      const segmentStartMs = Date.now();
-      let degradedWarned = false;
-      const elapsedMs = () => {
-        const sinceTrigger = elapsedSinceTrigger({ event });
-        if (sinceTrigger !== null) return sinceTrigger;
-        if (!degradedWarned) {
-          degradedWarned = true;
-          logger.warn(
-            "clone-watch urlscan retrieve: event.ts unusable — wall-clock guard degraded to segment clock",
-          );
-        }
-        return Date.now() - segmentStartMs;
-      };
+      // Spanning budget: this loop awaits step.run per item, so it crosses
+      // step boundaries and is bounded by timeouts.finish, with event.ts as
+      // its clock (survives replay; see step-budget.ts for the two bounds and
+      // the degraded mode when event.ts is unusable).
+      const budget = spanningBudget({ event }, BATCH_WALL_CLOCK_MS, logger);
 
       const batch = await step.run("retrieve-batch", async () => {
         let classified = 0;
@@ -182,7 +159,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         let quotaExhausted = false;
 
         for (const [idx, row] of pending.entries()) {
-          if (elapsedMs() > BATCH_WALL_CLOCK_MS) break;
+          if (budget.expired()) break;
           try {
             const reputation = reputationFromEvidence(row.urlscan_evidence);
             const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);

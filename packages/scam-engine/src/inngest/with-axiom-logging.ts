@@ -115,13 +115,14 @@ async function flushBounded(log: {
  * Returns null rather than 0 when `ts` is absent — `ts` is optional in the SDK
  * type, and a confident zero is the failure mode this whole change is about.
  *
- * EXPORTED for wall-clock guards. A loop that awaits `step.run` per item spans
- * step boundaries, so a `Date.now()` captured in the handler body is reset by
- * every replay and the guard can never fire — measured across four clone-watch
- * functions on 2026-09-07, each with a detailed comment describing protection
- * it was not providing. A guard whose loop sits INSIDE a single step does not
- * have this problem and may use a local timestamp (see PERSIST_BUDGET_MS in
- * reddit-intel-cluster).
+ * EXPORTED for wall-clock guards, via ./step-budget. A loop that awaits
+ * `step.run` per item spans step boundaries, so a `Date.now()` captured in the
+ * handler body is reset by every replay and the guard can never fire —
+ * measured across four clone-watch functions on 2026-09-07, each with a
+ * detailed comment describing protection it was not providing. Those guards
+ * now construct a `spanningBudget`, which reads this; a guard whose loop sits
+ * INSIDE a single step uses `budgetedStep`, whose clock starts at step entry
+ * by construction. Both live in ./step-budget.ts.
  */
 export function elapsedSinceTrigger(ctx: {
   event?: { ts?: number } | undefined;

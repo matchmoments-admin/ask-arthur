@@ -2,10 +2,18 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-import { PERSIST_BUDGET_MS } from "@askarthur/scam-engine/inngest/reddit-intel-cluster";
+import {
+  CLUSTER_BATCH_WALL_CLOCK_MS,
+  NAMING_WALL_CLOCK_MS,
+} from "@askarthur/scam-engine/inngest/reddit-intel-cluster";
+import {
+  IN_STEP_BUDGET_SHARE,
+  MAX_IN_STEP_WALL_CLOCK_MS,
+  ROUTE_MAX_DURATION_S,
+} from "@askarthur/scam-engine/inngest/step-budget";
 
 /**
- * The clustering write budget must track the route's declared maxDuration.
+ * Every in-step budget must fit inside the route's declared maxDuration.
  *
  * WHY THIS EXISTS. Exceeding `maxDuration` is not a slow run — Vercel kills the
  * request and Inngest reports "HTTP 504 before the SDK responded, no step
@@ -16,57 +24,121 @@ import { PERSIST_BUDGET_MS } from "@askarthur/scam-engine/inngest/reddit-intel-c
  * The number has to exist twice: scam-engine cannot import from apps/web
  * (wrong dependency direction), and Next.js requires `maxDuration` to be a
  * statically analysable literal, so it cannot be an imported const either.
+ * Since #1130 the ONE scam-engine copy is `ROUTE_MAX_DURATION_S` in
+ * step-budget.ts; every in-step budget derives from it through budgetedStep's
+ * ceiling, which throws at runtime above 0.8 × maxDuration.
  *
  * WHAT THIS REPLACED, and why it matters. The first version of this guard
  * asserted only `PERSIST_BUDGET_MS < 300_000` — a THIRD copy of the same
  * number, which would still have passed if the route dropped to 60s, i.e. in
- * exactly the case the guard exists for. The commit message claimed the budget
- * was "derived from one number"; it was not. See docs/agents/defect-shapes.md
- * shape N — a guard asserting a proxy for the behaviour rather than the
- * behaviour.
+ * exactly the case the guard exists for. See docs/agents/defect-shapes.md
+ * shape N. The second version enforced one constant; this one enforces the
+ * copy AND sweeps every budgetedStep call site so a new in-step budget cannot
+ * be declared above the ceiling without going red here as well as at runtime.
  *
- * This reads the literal out of the route and enforces the relationship, so
- * changing either side alone goes red.
+ * Go-red: set ROUTE_MAX_DURATION_S to 299, or CLUSTER_BATCH_WALL_CLOCK_MS to
+ * 300_000 — both fail.
  */
-describe("clustering budget tracks the Inngest route's maxDuration", () => {
-  const routePath = path.join(
+const routePath = path.join(
+  __dirname,
+  "..",
+  "app",
+  "api",
+  "inngest",
+  "route.ts",
+);
+
+const SCAN_DIRS = [
+  path.join(__dirname, "..", "app", "api", "inngest", "functions"),
+  path.join(
     __dirname,
     "..",
-    "app",
-    "api",
+    "..",
+    "..",
+    "packages",
+    "scam-engine",
+    "src",
     "inngest",
-    "route.ts",
-  );
+  ),
+];
 
-  it("finds the declared maxDuration (guards against a silently inert check)", () => {
-    const src = fs.readFileSync(routePath, "utf8");
+function declaredMaxDuration(): number {
+  const src = fs.readFileSync(routePath, "utf8");
+  const m = /export const maxDuration = (\d+)/.exec(src);
+  expect(
+    m,
+    "app/api/inngest/route.ts no longer declares maxDuration — this guard is " +
+      "inert and every in-step budget is unanchored.",
+  ).not.toBeNull();
+  return Number(m![1]);
+}
+
+describe("in-step budgets track the Inngest route's maxDuration", () => {
+  it("keeps the scam-engine copy equal to the route's literal", () => {
+    const declared = declaredMaxDuration();
     expect(
-      /export const maxDuration = \d+/.test(src),
-      "app/api/inngest/route.ts no longer declares maxDuration — this guard " +
-        "is inert and the clustering budget is unanchored.",
-    ).toBe(true);
-  });
-
-  it("keeps the write budget at 80% of the declared route budget", () => {
-    const src = fs.readFileSync(routePath, "utf8");
-    const declared = Number(/export const maxDuration = (\d+)/.exec(src)![1]);
-
-    expect(
-      PERSIST_BUDGET_MS,
-      `The route declares maxDuration = ${declared}s, so the clustering write ` +
-        `budget should be ${Math.floor(declared * 1000 * 0.8)}ms but is ` +
-        `${PERSIST_BUDGET_MS}ms.\n\nUpdate ROUTE_MAX_DURATION_S in ` +
-        "packages/scam-engine/src/inngest/reddit-intel-cluster.ts to match. " +
+      ROUTE_MAX_DURATION_S,
+      `The route declares maxDuration = ${declared}s but ` +
+        `packages/scam-engine/src/inngest/step-budget.ts says ${ROUTE_MAX_DURATION_S}. ` +
         "The number exists twice by necessity; this test is what makes that safe.",
-    ).toBe(Math.floor(declared * 1000 * 0.8));
+    ).toBe(declared);
   });
 
-  it("leaves real headroom below the hard limit", () => {
-    const src = fs.readFileSync(routePath, "utf8");
-    const declared = Number(/export const maxDuration = (\d+)/.exec(src)![1]);
-    // Headroom is the point: the wave in flight has to finish, the summary has
-    // to be written, and the handler has to return, all inside the remainder.
-    expect(PERSIST_BUDGET_MS).toBeLessThan(declared * 1000);
-    expect(declared * 1000 - PERSIST_BUDGET_MS).toBeGreaterThan(30_000);
+  it("derives the ceiling from that copy and leaves real headroom", () => {
+    const declared = declaredMaxDuration();
+    expect(MAX_IN_STEP_WALL_CLOCK_MS).toBe(
+      Math.floor(declared * 1000 * IN_STEP_BUDGET_SHARE),
+    );
+    // The wave in flight has to finish, the step output has to be written,
+    // and the handler has to return, all inside the remainder.
+    expect(declared * 1000 - MAX_IN_STEP_WALL_CLOCK_MS).toBeGreaterThan(30_000);
+  });
+
+  it("keeps the known in-step budgets at or under the ceiling", () => {
+    expect(CLUSTER_BATCH_WALL_CLOCK_MS).toBeLessThanOrEqual(
+      MAX_IN_STEP_WALL_CLOCK_MS,
+    );
+    expect(NAMING_WALL_CLOCK_MS).toBeLessThanOrEqual(MAX_IN_STEP_WALL_CLOCK_MS);
+  });
+
+  it("every budgetedStep call site passes a same-file literal under the ceiling", () => {
+    // budgetedStep throws above the ceiling at runtime; this catches it at
+    // test time, and refuses a budget it cannot resolve rather than passing a
+    // number nobody checked.
+    const sites: string[] = [];
+    const offenders: string[] = [];
+    for (const dir of SCAN_DIRS) {
+      for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+        if (f.endsWith(".test.ts") || f === "step-budget.ts") continue;
+        const src = fs.readFileSync(path.join(dir, f), "utf8");
+        for (const m of src.matchAll(
+          /budgetedStep\(\s*step,\s*"([^"]+)",\s*(\w+)/g,
+        )) {
+          const [, stepName, ident] = m;
+          sites.push(`${f}:${stepName}`);
+          const lit = new RegExp(`const ${ident} = ([\\d_]+);`).exec(src);
+          if (!lit) {
+            offenders.push(
+              `${f} step "${stepName}": budget ${ident} is not a numeric literal in the same file — declare it as one (inngestFinishBudgets sums *_WALL_CLOCK_MS literals)`,
+            );
+            continue;
+          }
+          const ms = Number(lit[1]!.replaceAll("_", ""));
+          if (ms > MAX_IN_STEP_WALL_CLOCK_MS) {
+            offenders.push(
+              `${f} step "${stepName}": ${ident} = ${ms}ms > ceiling ${MAX_IN_STEP_WALL_CLOCK_MS}ms`,
+            );
+          }
+          if (!ident.endsWith("_WALL_CLOCK_MS")) {
+            offenders.push(
+              `${f} step "${stepName}": ${ident} must end in _WALL_CLOCK_MS or the finish-budget floor cannot see it`,
+            );
+          }
+        }
+      }
+    }
+    // Two in reddit-intel-cluster as of #1130; a sweep that finds none is inert.
+    expect(sites.length).toBeGreaterThanOrEqual(2);
+    expect(offenders).toEqual([]);
   });
 });
