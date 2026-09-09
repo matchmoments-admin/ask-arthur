@@ -187,10 +187,15 @@ describe("analyze-failure-subscriber stays contained", () => {
     expect(src).not.toMatch(/throttle:/);
   });
 
-  it("does not match its own function id", () => {
-    // "analyze-failure-subscriber".startsWith("analyze-") is true, so its own
-    // failures passed its own filter and were logged as pipeline failures.
-    expect(src).toMatch(/fnId === SELF_FUNCTION_ID/);
+  it("compares the app-prefix-stripped id, not the raw one", () => {
+    // function.failed carries the ABSOLUTE id ("askarthur-analyze-report"), so
+    // both the family filter and the self-exclusion have to strip the prefix
+    // first — without it they match nothing at all and the subscriber logs
+    // nothing (#1138). The behaviour itself is covered by calling
+    // bareFunctionId in packages/scam-engine/.../analyze-failure.test.ts; this
+    // only pins that the filters go through it.
+    expect(src).toMatch(/bareId === SELF_FUNCTION_ID/);
+    expect(src).toMatch(/bareId\.startsWith\(ANALYZE_FUNCTION_ID_PREFIX\)/);
   });
 });
 
@@ -222,7 +227,38 @@ describe("Inngest finish budgets tolerate concurrency-queue waits", () => {
         );
       }
 
-      const boundaries = declared ? Number(declared[1]) : staticSites;
+      // A DECLARATION MAY RAISE THE COUNT, AND MAY ONLY LOWER IT WITH A
+      // SPANNING BUDGET. `declared ?? staticSites` let any file cut its own
+      // floor to nothing by writing "inngest-finish-budget: 1 boundaries" —
+      // the guard-that-reads-as-protection shape this file's own docblock
+      // warns about (caught in review, #1138).
+      //
+      // Under-declaring IS legitimate in exactly one case: a spanning budget
+      // caps the run's wall clock, so the structural boundary count cannot
+      // co-occur with it (scam-reports-backfill-embed declares 22 against a
+      // structural 102 because 600s admits ~20 boundaries at the 30s queue
+      // wait — declaring 102 would demand a 62-minute "circuit breaker" for a
+      // run the budget bounds at ~11 minutes). That case is recognised by the
+      // file actually constructing one.
+      const declaredCount = declared ? Number(declared[1]) : null;
+      const hasSpanningBudget = /\bspanningBudget\(/.test(src);
+      if (
+        declaredCount !== null &&
+        declaredCount < staticSites &&
+        !hasSpanningBudget
+      ) {
+        throw new Error(
+          `${file.name}: declares ${declaredCount} boundaries but has ${staticSites} static step.run sites, ` +
+            `which LOWERS its own floor. Under-declaring is only sound when a spanningBudget() caps the run's ` +
+            `wall clock, and this file constructs none. Raise the declaration, or bound the run.`,
+        );
+      }
+      const boundaries =
+        declaredCount === null
+          ? staticSites
+          : hasSpanningBudget
+            ? declaredCount
+            : Math.max(declaredCount, staticSites);
       const required =
         boundaries * QUEUE_WAIT_SECONDS_PER_STEP +
         wallClockSeconds(src) +

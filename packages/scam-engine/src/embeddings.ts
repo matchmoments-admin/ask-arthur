@@ -45,12 +45,21 @@ export const EMBEDDING_DIMENSIONS = 1024;
  * call inside a step is therefore a slot held indefinitely by a hung socket,
  * on the one resource the fleet is measured at 5/5 in use.
  *
- * 30s is roughly fifteen times the observed round trip for a full
- * EMBED_CHUNK_TEXTS (20) chunk, so it cannot fire on a healthy call; it exists
- * to bound a hang, not to pace a slow one. Chunks run sequentially, so the
- * worst case a caller sees is chunks x this value — which is why the callers'
- * own in-step budgets (CLUSTER_BATCH_WALL_CLOCK_MS and friends) are the real
- * ceiling and this is the per-socket floor beneath them.
+ * IT MUST COMPOSE, which the first version of this docblock got wrong. It
+ * claimed the callers' in-step budgets were the real ceiling — true for
+ * reddit-intel-cluster, false for the two backfill embedders, which use
+ * SPANNING budgets checked only between steps and so bound nothing inside one.
+ * Chunks run sequentially at EMBED_CHUNK_TEXTS (20) per request, so a caller's
+ * worst case inside a single step is ceil(texts / 20) x this value. The
+ * largest batch in the repo is acnc-charity-backfill-embed at 200 texts = 10
+ * chunks; at the old 30s that is 300s against a 300s maxDuration — the exact
+ * "HTTP 504, no step output produced" this bound was added to prevent,
+ * reachable by a slow-but-not-hung provider rather than a hang.
+ *
+ * 20s keeps that worst case at 200s, inside the 240s in-step ceiling, and is
+ * still an order of magnitude above the observed round trip for a full chunk.
+ * RAISING THIS REQUIRES CHECKING THE LARGEST BATCH SIZE AGAIN — the guard is
+ * embeddingsTimeout.test.ts, "composes inside a single step".
  *
  * GUARDED PARSE, deliberately. `Number("")` is 0 and `Number("30s")` is NaN,
  * and either would mean "abort immediately" or "never abort" — the same class
@@ -58,7 +67,7 @@ export const EMBEDDING_DIMENSIONS = 1024;
  * non-finite or non-positive override falls back to the default rather than
  * disabling the bound.
  */
-export const EMBED_REQUEST_TIMEOUT_MS_DEFAULT = 30_000;
+export const EMBED_REQUEST_TIMEOUT_MS_DEFAULT = 20_000;
 
 export function embedRequestTimeoutMs(): number {
   const raw = Number(
@@ -358,13 +367,9 @@ async function embedInternal(
  * paid tier makes this faster, not necessary. Both knobs are env-tunable so
  * raising the quota does not need a deploy.
  */
-const EMBED_CHUNK_TEXTS = Number(
-  process.env.EMBED_CHUNK_TEXTS ?? 20,
-);
+const EMBED_CHUNK_TEXTS = Number(process.env.EMBED_CHUNK_TEXTS ?? 20);
 /** Rough char/4 heuristic — enough to keep a chunk under the token ceiling. */
-const EMBED_CHUNK_TOKENS = Number(
-  process.env.EMBED_CHUNK_TOKENS ?? 3_000,
-);
+const EMBED_CHUNK_TOKENS = Number(process.env.EMBED_CHUNK_TOKENS ?? 3_000);
 /**
  * Pacing between chunks. DEFAULT ZERO, and opt-in per call — the split from
  * chunking is deliberate and was a correction.
@@ -399,8 +404,7 @@ function chunkTexts(texts: string[]): string[][] {
     const est = Math.ceil(t.length / 4);
     if (
       current.length > 0 &&
-      (current.length >= EMBED_CHUNK_TEXTS ||
-        tokens + est > EMBED_CHUNK_TOKENS)
+      (current.length >= EMBED_CHUNK_TEXTS || tokens + est > EMBED_CHUNK_TOKENS)
     ) {
       chunks.push(current);
       current = [];

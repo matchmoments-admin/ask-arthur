@@ -332,7 +332,32 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
 
       let uuidsSkippedForTime = 0;
       for (const group of plan.groups) {
-        if (budget.expired()) {
+        const uuid = group.netcraft_uuid;
+        const allIds = group.alerts.map((a) => a.id);
+
+        // Budget checked INSIDE the first step of the iteration, so the
+        // decision is MEMOIZED with that step's output.
+        //
+        // It was at the top of the loop body, before any step.run. Inngest
+        // re-executes the handler from the top at every boundary and a
+        // memoized step returns in microseconds, so on the first replay after
+        // event.ts + ISSUE_WALL_CLOCK_MS the check fired at group 0 and broke
+        // before re-reading ANY memoized uuid — leaving `counts` at all zeros.
+        // The run then wrote a cost_telemetry row and a completion log
+        // claiming it had filed, archived and drained nothing, for work that
+        // HAD happened. At cap 10 uuids x ~5 steps x a 30-60s queue wait per
+        // boundary the 7-minute budget is reached on any full batch, so this
+        // was not a corner case.
+        //
+        // Returning null rather than throwing keeps the decision inside the
+        // step's memoized output. Found by review alongside the same shape in
+        // the two backfill embedders (#1138); same replay-reset class as
+        // #1124, which is what this guard was converted from.
+        const fetched = await step.run(`fetch-${uuid}`, async () => {
+          if (budget.expired()) return null;
+          return await fetchNetcraftSubmissionUrls(uuid, { escalatableStates });
+        });
+        if (fetched === null) {
           // Leftovers drain next run rather than the whole run being cancelled
           // mid-loop (a cancellation gets no retry and no telemetry, #1069).
           uuidsSkippedForTime = plan.groups.length - plan.groups.indexOf(group);
@@ -342,12 +367,6 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           });
           break;
         }
-        const uuid = group.netcraft_uuid;
-        const allIds = group.alerts.map((a) => a.id);
-
-        const fetched = await step.run(`fetch-${uuid}`, () =>
-          fetchNetcraftSubmissionUrls(uuid, { escalatableStates }),
-        );
 
         // BLOCK-2 — archival is authoritative + checked FIRST (a 200 body with
         // is_archived=1 must not build candidates → the POST would 404 forever).

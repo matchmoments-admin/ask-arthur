@@ -179,3 +179,83 @@ describe("resolveClassifyModel — Haiku cost pilot flag", () => {
     expect(resolveClassifyModel()).toBe("SONNET_4_6");
   });
 });
+
+/**
+ * The schema retry must SHARE the call's budget, not double it.
+ *
+ * Both calls happen inside ONE `step.run`, and a step is one HTTP request that
+ * Vercel kills at the route's maxDuration (300s). Passing the same `timeoutMs`
+ * to the retry made the step's worst case 2 x timeoutMs — 560s at the current
+ * 280s — so a first call that failed schema validation slowly could put the
+ * pair past the request budget and produce the unattributed 504 that
+ * CLASSIFY_TIMEOUT_MS exists to avoid. The pre-existing guard only compared
+ * 2 x timeout against Inngest's 15-minute FUNCTION ceiling, never against the
+ * 300s REQUEST that carries it (found in review, #1138).
+ *
+ * Go-red: pass `timeoutMs: callArgs.timeoutMs` to the retry.
+ */
+describe("classifyWithRetry — the retry shares the request budget", () => {
+  it("gives the second call only what is left of the first call's allowance", async () => {
+    // Fake timers so the elapsed time is EXACT. The first version of this test
+    // asserted `second.timeoutMs <= 280_000`, which is true of the defect as
+    // well as the fix — a proxy assertion that passed with the bug reinstated,
+    // which is the one thing docs/agents/defect-shapes.md says a guard must
+    // never do. Asserting the arithmetic is what makes it go red.
+    vi.useFakeTimers();
+    try {
+      const schemaErr = new Error(
+        "Claude output schema mismatch (claude-sonnet-4-6): perPost: Invalid input: expected array, received string",
+      );
+      const callFn = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          vi.advanceTimersByTime(60_000);
+          throw schemaErr;
+        })
+        .mockResolvedValueOnce(successResponse());
+
+      await classifyWithRetry(
+        { ...buildCallArgs(), timeoutMs: 280_000 },
+        callFn,
+      );
+
+      // 280s declared, 60s burned by the failed first call, so the retry gets
+      // 220s — and the pair fits the ONE request that carries them.
+      const second = callFn.mock.calls[1]?.[0];
+      expect(second.timeoutMs).toBe(220_000);
+      expect(60_000 + second.timeoutMs).toBeLessThanOrEqual(280_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips the retry rather than overrunning when too little time is left", async () => {
+    // A retry that cannot produce a usable response is worse than no retry:
+    // Inngest's own retry gets a FRESH request and the full allowance.
+    const schemaErr = new Error(
+      "Claude output schema mismatch (claude-sonnet-4-6): perPost: Invalid input: expected array, received string",
+    );
+    const callFn = vi.fn().mockRejectedValueOnce(schemaErr);
+
+    await expect(
+      classifyWithRetry({ ...buildCallArgs(), timeoutMs: 1_000 }, callFn),
+    ).rejects.toThrow(/schema mismatch/);
+    expect(callFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the retry unchanged when no timeout was declared", async () => {
+    // No declared timeout means no budget to share and nothing to overrun.
+    const schemaErr = new Error(
+      "Claude output schema mismatch (claude-sonnet-4-6): perPost: Invalid input: expected array, received string",
+    );
+    const callFn = vi
+      .fn()
+      .mockRejectedValueOnce(schemaErr)
+      .mockResolvedValueOnce(successResponse());
+
+    await classifyWithRetry(buildCallArgs(), callFn);
+
+    expect(callFn).toHaveBeenCalledTimes(2);
+    expect(callFn.mock.calls[1]?.[0].timeoutMs).toBeUndefined();
+  });
+});

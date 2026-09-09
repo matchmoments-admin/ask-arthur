@@ -36,6 +36,24 @@ import { SCAM_REPORTS_BACKFILL_EMBED_EVENT } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
 import { isFeatureBraked } from "../cost-log";
 
+/** Per-domain embed tallies a batch step returns. Named so the budget-stopped
+ *  early return can produce a correctly-typed empty array rather than null[]. */
+interface ScamReportDomainSummary {
+  domain: EmbeddingDomain;
+  written: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  provider: string;
+  modelId: string;
+}
+interface VerifiedScamDomainSummary {
+  domain: EmbeddingDomain;
+  written: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  modelId: string;
+}
+
 const BATCH_SIZE = 100;
 const MAX_BATCHES_PER_RUN = 50; // 5000 rows max per invocation
 
@@ -206,17 +224,23 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
 
       // ── Pass 1: scam_reports (skip SAFE, skip short content) ──────────
       for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-        if (budget.expired()) {
-          stoppedForTime = true;
-          logger.warn("scam-reports-backfill-embed: wall-clock break", {
-            pass: "scam_reports",
-            batchesDone: batchIdx,
-          });
-          break;
-        }
         const summaries = await step.run(
           `scam-reports-batch-${batchIdx}`,
           async () => {
+            // Budget checked INSIDE the step so the decision is MEMOIZED.
+            // At the top of the loop body it broke at batchIdx 0 on the first
+            // replay after the deadline, before re-reading any memoized batch,
+            // so every accumulator stayed 0 and the run reported embedding
+            // nothing for work that HAD landed. Same replay-reset class as
+            // #1124. See acnc-charity-backfill-embed for the full note.
+            if (budget.expired()) {
+              return {
+                stopped: true,
+                perDomain: [] as ScamReportDomainSummary[],
+                rowsRequested: 0,
+              };
+            }
+
             const supabase = createServiceClient();
             if (!supabase)
               throw new Error("Supabase service client unavailable");
@@ -239,7 +263,11 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
             );
 
             if (rows.length === 0) {
-              return { perDomain: [], rowsRequested: 0 };
+              return {
+                stopped: false,
+                perDomain: [] as ScamReportDomainSummary[],
+                rowsRequested: 0,
+              };
             }
 
             // Group by domain so each domain sends one model call.
@@ -250,14 +278,7 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
               byDomain.get(d)!.push(r);
             }
 
-            const perDomain: Array<{
-              domain: EmbeddingDomain;
-              written: number;
-              totalTokens: number;
-              estimatedCostUsd: number;
-              provider: string;
-              modelId: string;
-            }> = [];
+            const perDomain: ScamReportDomainSummary[] = [];
 
             for (const [domain, domainRows] of byDomain.entries()) {
               const texts = domainRows.map(buildScamReportText);
@@ -308,10 +329,18 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
               });
             }
 
-            return { perDomain, rowsRequested: rows.length };
+            return { stopped: false, perDomain, rowsRequested: rows.length };
           },
         );
 
+        if (summaries.stopped) {
+          stoppedForTime = true;
+          logger.warn("scam-reports-backfill-embed: wall-clock break", {
+            pass: "scam_reports",
+            batchesDone: batchIdx,
+          });
+          break;
+        }
         if (summaries.rowsRequested === 0) break;
         for (const s of summaries.perDomain) {
           scamReportsEmbedded += s.written;
@@ -325,17 +354,23 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
       // ── Pass 2: verified_scams (no SAFE filter — verified rows are
       //          authoritative anchors, all of them embed) ─────────────────
       for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-        if (budget.expired()) {
-          stoppedForTime = true;
-          logger.warn("scam-reports-backfill-embed: wall-clock break", {
-            pass: "verified_scams",
-            batchesDone: batchIdx,
-          });
-          break;
-        }
         const summaries = await step.run(
           `verified-scams-batch-${batchIdx}`,
           async () => {
+            // Budget checked INSIDE the step so the decision is MEMOIZED.
+            // At the top of the loop body it broke at batchIdx 0 on the first
+            // replay after the deadline, before re-reading any memoized batch,
+            // so every accumulator stayed 0 and the run reported embedding
+            // nothing for work that HAD landed. Same replay-reset class as
+            // #1124. See acnc-charity-backfill-embed for the full note.
+            if (budget.expired()) {
+              return {
+                stopped: true,
+                perDomain: [] as VerifiedScamDomainSummary[],
+                rowsRequested: 0,
+              };
+            }
+
             const supabase = createServiceClient();
             if (!supabase)
               throw new Error("Supabase service client unavailable");
@@ -355,7 +390,11 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
             );
 
             if (rows.length === 0) {
-              return { perDomain: [], rowsRequested: 0 };
+              return {
+                stopped: false,
+                perDomain: [] as VerifiedScamDomainSummary[],
+                rowsRequested: 0,
+              };
             }
 
             const byDomain = new Map<EmbeddingDomain, VerifiedScamRow[]>();
@@ -365,13 +404,7 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
               byDomain.get(d)!.push(r);
             }
 
-            const perDomain: Array<{
-              domain: EmbeddingDomain;
-              written: number;
-              totalTokens: number;
-              estimatedCostUsd: number;
-              modelId: string;
-            }> = [];
+            const perDomain: VerifiedScamDomainSummary[] = [];
 
             for (const [domain, domainRows] of byDomain.entries()) {
               const texts = domainRows.map(buildVerifiedScamText);
@@ -421,10 +454,18 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
               });
             }
 
-            return { perDomain, rowsRequested: rows.length };
+            return { stopped: false, perDomain, rowsRequested: rows.length };
           },
         );
 
+        if (summaries.stopped) {
+          stoppedForTime = true;
+          logger.warn("scam-reports-backfill-embed: wall-clock break", {
+            pass: "verified_scams",
+            batchesDone: batchIdx,
+          });
+          break;
+        }
         if (summaries.rowsRequested === 0) break;
         for (const s of summaries.perDomain) {
           verifiedScamsEmbedded += s.written;

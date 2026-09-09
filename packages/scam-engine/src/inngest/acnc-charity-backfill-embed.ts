@@ -177,18 +177,37 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
 
       let stoppedForTime = false;
       for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-        if (budget.expired()) {
-          // Leftovers drain on the next run rather than the whole run being
-          // cancelled mid-loop — a cancellation gets no retry, no error and no
-          // telemetry (#1069).
-          stoppedForTime = true;
-          logger.warn("acnc-charity-backfill-embed: wall-clock break", {
-            batchesDone: batchIdx,
-            batchCap: MAX_BATCHES_PER_RUN,
-          });
-          break;
-        }
         const summary = await step.run(`batch-${batchIdx}`, async () => {
+          // Budget checked INSIDE the step so the decision is MEMOIZED.
+          //
+          // It was at the top of the loop body, before any step.run. Inngest
+          // re-executes the handler from the top at every boundary, and a
+          // memoized step returns in microseconds — so on the first replay
+          // after event.ts + budget, the check fired at batchIdx 0, broke
+          // before re-reading ANY memoized batch, and left every accumulator
+          // at its initial 0. The run then reported rowsEmbedded 0 for work
+          // that HAD landed, logged batchesDone 0, and skipped log-cost
+          // entirely (guarded on totalEmbedded > 0), losing the whole run's
+          // provider spend from cost_telemetry.
+          //
+          // Inside the step the answer is recorded with the step's output, so
+          // every replay reads the same decision at the same index and the
+          // totals rebuild correctly. Same replay-reset class as #1124 — the
+          // one this workstream exists to remove.
+          if (budget.expired()) {
+            // Leftovers drain on the next run rather than the whole run being
+            // cancelled mid-loop — a cancellation gets no retry, no error and
+            // no telemetry (#1069).
+            return {
+              stopped: true,
+              written: 0,
+              totalTokens: 0,
+              estimatedCostUsd: 0,
+              provider: "",
+              modelId: "",
+              rowsRequested: 0,
+            };
+          }
           const supabase = createServiceClient();
           if (!supabase) throw new Error("Supabase service client unavailable");
 
@@ -209,6 +228,7 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
           const rows = (data ?? []) as CharityRowForEmbed[];
           if (rows.length === 0) {
             return {
+              stopped: false,
               written: 0,
               totalTokens: 0,
               estimatedCostUsd: 0,
@@ -260,6 +280,7 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
           }
 
           return {
+            stopped: false,
             written,
             totalTokens: result.totalTokens,
             estimatedCostUsd: result.estimatedCostUsd,
@@ -268,6 +289,15 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
             rowsRequested: rows.length,
           };
         });
+
+        if (summary.stopped) {
+          stoppedForTime = true;
+          logger.warn("acnc-charity-backfill-embed: wall-clock break", {
+            batchesDone: batchIdx,
+            batchCap: MAX_BATCHES_PER_RUN,
+          });
+          break;
+        }
 
         if (summary.rowsRequested === 0) break;
 
