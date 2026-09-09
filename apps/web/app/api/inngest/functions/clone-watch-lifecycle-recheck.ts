@@ -54,7 +54,7 @@ const RECHECK_FETCH_LIMIT = 200;
 // 20% of 50 = 10 slots/run x 4 runs/day = 40 guaranteed rotations/day.
 const STALE_FLOOR_SHARE = 0.2;
 const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
-// Break the submit loop before the 8m finish budget so worst-case urlscan
+// Break the submit loop before the 15m finish budget so worst-case urlscan
 // latency can't force a full-batch re-POST; leftovers rotate next run.
 const RECHECK_SUBMIT_WALL_CLOCK_MS = 400_000;
 const BRAKE = "shopfront_clone_recheck";
@@ -267,7 +267,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // safe. Each candidate is wrapped in try/catch so one failure doesn't
       // abort the rest; a failed row simply isn't marked submitted and is
       // retried next tick. Replaces the old 50-event fan-out to scan-one. A
-      // wall-clock guard breaks before the 8m finish budget so worst-case submit
+      // wall-clock guard breaks before the 15m finish budget so worst-case submit
       // latency (50 × urlscan POST) can't force a full-batch re-POST — leftovers
       // stay unmarked and rotate through on the next run.
       // Replay-safe: this loop awaits step.run per item, so it spans step
@@ -275,7 +275,27 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // one. A Date.now() captured here would reset on every replay and the
       // guard below could never fire. event.ts is set when the run is
       // TRIGGERED and survives replay.
-      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+      //
+      // elapsedSinceTrigger returns null when event.ts is unusable, and the
+      // first version of this guard wrote `?? 0` — turning "unknowable" back
+      // into the confident zero it exists to avoid, so the guard could never
+      // fire on such a run. Degrade instead: fall back to a clock captured
+      // here. That clock resets on replay, so it bounds only the current
+      // segment, but a segment bound is strictly safer than no bound. Warned
+      // once so a degraded run is distinguishable from a healthy one.
+      const segmentStartMs = Date.now();
+      let degradedWarned = false;
+      const elapsedMs = () => {
+        const sinceTrigger = elapsedSinceTrigger({ event });
+        if (sinceTrigger !== null) return sinceTrigger;
+        if (!degradedWarned) {
+          degradedWarned = true;
+          logger.warn(
+            "clone-watch recheck: event.ts unusable — wall-clock guard degraded to segment clock",
+          );
+        }
+        return Date.now() - segmentStartMs;
+      };
 
       const submitBatch = await step.run("submit-batch", async () => {
         let submitted = 0;

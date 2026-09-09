@@ -46,7 +46,7 @@ const MAX_FAILURE_STREAK = 3;
 // = 9 ticks (~27h) to evict, versus one unlucky window before v272 and never
 // after it. See migration-v274.
 const MAX_TRANSIENT_MISSES = 3;
-// Break the batch loop before the 5m Inngest finish budget so worst-case
+// Break the batch loop before the 10m Inngest finish budget so worst-case
 // external latency can't force a full-batch replay (leftovers drain next tick).
 const BATCH_WALL_CLOCK_MS = 200_000;
 // Bounded weaponised-emit worklist per run (durable, self-draining).
@@ -142,7 +142,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       // failed row is left un-advanced (stays in the worklist) and retried next
       // tick. Weaponisation is emitted from persisted state (durable emit step
       // below), not an array, so an interrupted batch can't drop the event.
-      // A wall-clock guard breaks the loop before the 5m finish budget so
+      // A wall-clock guard breaks the loop before the 10m finish budget so
       // worst-case external latency (40 rows × urlscan GET) can't force a
       // full-batch replay — leftovers drain next tick (worklist is idempotent).
       // Replay-safe: this loop awaits step.run per item, so it spans step
@@ -150,7 +150,27 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       // one. A Date.now() captured here would reset on every replay and the
       // guard below could never fire. event.ts is set when the run is
       // TRIGGERED and survives replay.
-      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+      //
+      // elapsedSinceTrigger returns null when event.ts is unusable, and the
+      // first version of this guard wrote `?? 0` — turning "unknowable" back
+      // into the confident zero it exists to avoid, so the guard could never
+      // fire on such a run. Degrade instead: fall back to a clock captured
+      // here. That clock resets on replay, so it bounds only the current
+      // segment, but a segment bound is strictly safer than no bound. Warned
+      // once so a degraded run is distinguishable from a healthy one.
+      const segmentStartMs = Date.now();
+      let degradedWarned = false;
+      const elapsedMs = () => {
+        const sinceTrigger = elapsedSinceTrigger({ event });
+        if (sinceTrigger !== null) return sinceTrigger;
+        if (!degradedWarned) {
+          degradedWarned = true;
+          logger.warn(
+            "clone-watch urlscan retrieve: event.ts unusable — wall-clock guard degraded to segment clock",
+          );
+        }
+        return Date.now() - segmentStartMs;
+      };
 
       const batch = await step.run("retrieve-batch", async () => {
         let classified = 0;

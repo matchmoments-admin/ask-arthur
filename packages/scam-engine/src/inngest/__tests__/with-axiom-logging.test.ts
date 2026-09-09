@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { withAxiomLogging } from "../with-axiom-logging";
+import {
+  CRON_TICK_EVENT,
+  isCronTick,
+  withAxiomLogging,
+} from "../with-axiom-logging";
 import * as axiomLogger from "@askarthur/utils/axiom-logger";
 
 // With FF_AXIOM_ENABLED unset, getLogger() returns a NOOP logger, so these
@@ -63,6 +67,18 @@ describe("withAxiomLogging", () => {
     await expect(wrapped(ctx({ runId: "run_4" }))).resolves.toBe("done");
     // Even with a totally absent runId it must not blow up.
     await expect(wrapped(ctx({}))).resolves.toBe("done");
+  });
+});
+
+describe("isCronTick", () => {
+  // The wrapper's own cron guard now goes through this rather than open-coding
+  // the comparison eleven lines below the declaration; a seam with no callers
+  // is a pass-through, and a pass-through drifts.
+  it("recognises Inngest's scheduled-timer event and nothing else", () => {
+    expect(isCronTick({ name: CRON_TICK_EVENT })).toBe(true);
+    expect(isCronTick({ name: "reddit.intel.embedded.v1" })).toBe(false);
+    expect(isCronTick({})).toBe(false);
+    expect(isCronTick(undefined)).toBe(false);
   });
 });
 
