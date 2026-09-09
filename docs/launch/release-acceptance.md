@@ -1,6 +1,6 @@
 # Newsletter release acceptance
 
-Status: implementation and local checks; v303 is **not applied to production**. No newsletter, marketing message or trial charge has been sent by this work.
+Status: v303 and v304 applied to production on 2026-09-08 UTC through the Supabase migration API; application rollout is tracked in PR #1126. No newsletter, marketing message or trial charge has been sent by this work.
 
 ## What changes
 
@@ -16,7 +16,7 @@ Enforcers: `supabase/migration-v303-newsletter-confirmation.sql`, `apps/web/lib/
 - Existing core checking, inbound email, ownership, Brand Monitor billing and feature-brake regressions passed: 92 tests across ten targeted files at that checkpoint.
 - Final email-focused regression run: 33 tests passed across five files on 2026-09-08, covering signup, confirmation, receipts, suppression failures and webhook signatures. Typecheck and SQL lifecycle rerun also passed.
 - v303 applied twice to a disposable PGlite PostgreSQL database and lifecycle assertions passed. This is useful runtime SQL evidence but does not exercise Supabase’s full production schema or concurrent sessions.
-- Read-only live database and advisor output is in `readiness-baseline.json`. No advisor ERRORs were reported at that baseline. The migration ledger needs reconciliation; do not blindly replay every repository migration after v280.
+- Read-only live database and advisor output is in `readiness-baseline.json`. No advisor ERRORs were reported at that baseline. The required live prerequisite definitions were copied to a data-free Supabase preview for validation. v303/v304 were applied through the recorded migration API; unrelated historical migration gaps were not replayed.
 
 ## Required release sequence
 
@@ -31,3 +31,7 @@ Enforcers: `supabase/migration-v303-newsletter-confirmation.sql`, `apps/web/lib/
 ## Rollback
 
 Pause new confirmations with the existing feature-brake mechanism while investigating. Keep the additive schema in place; it does not rewrite existing subscribers. Do not roll back to code that silently activates arbitrary supplied addresses. Pause the weekly sending control separately if delivery is affected. Preserve suppression records. A broken confirmation path must show a retryable error, not a success message.
+
+## Deployment validation checkpoint
+
+Supabase preview lifecycle tests and separate-session concurrency checks passed: duplicate address requests admit once and the final daily-budget slot admits only one request. Production security/performance advisors after migration matched the saved baseline, with no ERRORs. Public database types were regenerated. The production publishing flag is configured; it does not itself send posts. Controlled newsletter inbox acceptance remains outstanding.

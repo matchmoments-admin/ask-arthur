@@ -27,4 +27,4 @@ The [42 launch tasks and 52 review packets](review-baseline/small-start-monetisa
 
 ## Manual LinkedIn drafts
 
-The [LinkedIn draft studio](linkedin-drafts.md) is implemented locally: four editable starters, durable saves, public-text preview and an explicit Publish now action for Ask Arthur’s company page. It has no schedule or automatic retry. Migration v304, production configuration and deployment remain pending.
+The [LinkedIn draft studio](linkedin-drafts.md) is implemented locally: four editable starters, durable saves, public-text preview and an explicit Publish now action for Ask Arthur’s company page. It has no schedule or automatic retry. Migration v304 and the production publishing flag are applied. Application rollout is tracked in PR #1126; the founder chooses the first public post.

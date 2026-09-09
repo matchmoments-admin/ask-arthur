@@ -1,6 +1,6 @@
 # Manually launch LinkedIn drafts
 
-Implemented locally on 2026-09-08; not deployed. No live post has been created by this work.
+Implemented on 2026-09-08. Migration v304 is applied to production and the production manual-publish flag is configured. Application rollout is tracked in [PR #1126](https://github.com/matchmoments-admin/ask-arthur/pull/1126). No live post has been created by this work.
 
 ## Using it
 
@@ -31,10 +31,10 @@ For an unresolved attempt, an operator must inspect the company page and the rel
 
 ## Evidence and API references
 
-Unit tests cover author/environment restrictions, admin and origin checks, explicit confirmation, storage failures, saved-text integrity, competing claims, uncertain outcomes and receipt persistence failure. A disposable PostgreSQL test applies v304 twice and checks seed preservation, grants, repeated claims and stale updates. Production database and live LinkedIn acceptance remain pending.
+Unit tests cover author/environment restrictions, admin and origin checks, explicit confirmation, storage failures, saved-text integrity, competing claims, uncertain outcomes and receipt persistence failure. A disposable PostgreSQL test applies v304 twice and checks seed preservation, grants, repeated claims and stale updates. Production database validation passed; live LinkedIn publication remains a founder-chosen action.
 
 The shared client uses LinkedIn’s [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-06). The studio escapes reserved [little-text characters](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format?view=li-lms-2026-07) so typed text is not interpreted as mention syntax. It does not log provider response bodies or credentials.
 
 Local verification on 2026-09-08: 27 LinkedIn tests passed. Browser checks with mocked storage/provider responses verified edit/save, review cancellation, one explicit publish request and a 390px mobile layout without horizontal overflow. No live LinkedIn request was used for these checks.
 
-Final production build and scoped lint passed after the draft studio changes. Database migration and external publishing were not run.
+Final production build and scoped lint passed after the draft studio changes. Database migration was subsequently applied after Supabase preview lifecycle and concurrency checks. External publishing was not run.
