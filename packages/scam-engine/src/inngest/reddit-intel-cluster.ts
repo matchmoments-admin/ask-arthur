@@ -458,8 +458,63 @@ export interface PersistResult extends WriteOutcome {
  * its sibling assignPostsToThemes has an explicit no-mutation test. Resolved
  * ids are held in a local map instead.
  */
+type PgWrite = PromiseLike<{ error: { message: string } | null }>;
+type PgRows = PromiseLike<{
+  data: Array<Record<string, unknown>> | null;
+  error: { message: string } | null;
+}>;
+
+/**
+ * Exactly the client surface persistAssignments uses — three tables, six
+ * builder calls — declared structurally, per table, so that:
+ *
+ *   (a) the real service client passes unchanged (SupabaseClient satisfies
+ *       it), and
+ *   (b) a test passes a fake that satisfies it WITHOUT `as never`.
+ *
+ * The previous parameter was the whole SupabaseClient and the test fake was
+ * `{ from } as never` — the type system switched off at the one seam the
+ * tests exist to exercise. If this function started calling a table or a
+ * builder method the fake did not model, the fake's fallthrough branch
+ * silently answered for it. Now that is a compile error in both places: the
+ * function cannot name a fourth table, and the fake cannot omit a method.
+ * CONVENTIONS.md → "Injected clients: narrow to what is called".
+ */
+export interface PersistTables {
+  reddit_post_intel: {
+    select(columns: string): {
+      in(column: string, values: readonly string[]): PgRows;
+    };
+    update(values: Record<string, unknown>): {
+      in(column: string, values: readonly string[]): PgWrite;
+    };
+  };
+  reddit_intel_themes: {
+    upsert(
+      rows: Array<Record<string, unknown>>,
+      options: { onConflict: string; ignoreDuplicates: boolean },
+    ): PgWrite;
+    select(columns: string): {
+      in(column: string, values: readonly string[]): PgRows;
+    };
+    update(values: Record<string, unknown>): {
+      eq(column: string, value: string): PgWrite;
+    };
+  };
+  reddit_post_intel_themes: {
+    upsert(
+      rows: Array<Record<string, unknown>>,
+      options: { onConflict: string; ignoreDuplicates: boolean },
+    ): PgWrite;
+  };
+}
+
+export interface PersistClient {
+  from<T extends keyof PersistTables>(table: T): PersistTables[T];
+}
+
 export async function persistAssignments(
-  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  supabase: PersistClient,
   assignments: Assignment[],
   /**
    * The enclosing step's budget — obtained from budgetedStep by the caller,

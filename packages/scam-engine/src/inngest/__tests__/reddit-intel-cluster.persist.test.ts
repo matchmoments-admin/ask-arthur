@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { persistAssignments, type Assignment } from "../reddit-intel-cluster";
+import {
+  persistAssignments,
+  type Assignment,
+  type PersistClient,
+  type PersistTables,
+} from "../reddit-intel-cluster";
 import type { BudgetClock } from "../step-budget";
 
 vi.mock("@askarthur/utils/logger", () => ({
@@ -72,6 +77,13 @@ function expectOutcome(
  * resolves ids for both new and pre-existing rows, per-theme updates, a
  * grouped post link, and one bulk membership upsert. Unscripted operations
  * succeed, so each test only says what it is about.
+ *
+ * TYPED AGAINST THE SEAM, not cast. This used to be `{ from } as never` — the
+ * type system switched off at the one seam these tests exercise, and a string
+ * table name the fake did not model fell through to the membership branch and
+ * answered for it silently. `PersistTables` is a per-table lookup, so a table
+ * or method the function calls and this fake lacks is a compile error here,
+ * and a fourth table is a compile error in the function.
  */
 function fakeSupabase(script: {
   /** slug -> id, as the select-by-slug would find it. Defaults to resolving. */
@@ -90,58 +102,58 @@ function fakeSupabase(script: {
   };
   let lastSlugs: string[] = [];
 
-  const from = (table: string) => {
-    if (table === "reddit_post_intel") {
-      return {
-        select: () => ({
-          in: () => Promise.resolve({ data: script.alreadyLinked ?? [] }),
-        }),
-        update: () => ({
-          in: (_col: string, ids: string[]) => {
-            calls.linkUpdates++;
-            if (!script.postUpdateError) calls.linkedPostIds.push(...ids);
-            return Promise.resolve({ error: script.postUpdateError ?? null });
-          },
-        }),
-      };
-    }
-    if (table === "reddit_intel_themes") {
-      return {
-        upsert: (rows: Row[]) => {
-          calls.seedUpsertRows += rows.length;
-          lastSlugs = rows.map((r) => r["slug"] as string);
-          return Promise.resolve({ error: null });
+  const tables: PersistTables = {
+    reddit_post_intel: {
+      select: () => ({
+        in: () =>
+          Promise.resolve({ data: script.alreadyLinked ?? [], error: null }),
+      }),
+      update: () => ({
+        in: (_col, ids) => {
+          calls.linkUpdates++;
+          if (!script.postUpdateError) calls.linkedPostIds.push(...ids);
+          return Promise.resolve({ error: script.postUpdateError ?? null });
         },
-        select: () => ({
-          in: (_col: string, slugs: string[]) => {
-            calls.slugSelects++;
-            if (script.resolveSlugs === "none") {
-              return Promise.resolve({ data: [], error: null });
-            }
-            return Promise.resolve({
-              data: slugs.map((slug) => ({ id: `theme-for-${slug}`, slug })),
-              error: null,
-            });
-          },
-        }),
-        update: () => ({
-          eq: () => {
-            calls.themeUpdates++;
-            return Promise.resolve({ error: script.themeUpdateError ?? null });
-          },
-        }),
-      };
-    }
-    // reddit_post_intel_themes
-    return {
-      upsert: (rows: Row[]) => {
+      }),
+    },
+    reddit_intel_themes: {
+      upsert: (rows) => {
+        calls.seedUpsertRows += rows.length;
+        lastSlugs = rows.map((r) => r["slug"] as string);
+        return Promise.resolve({ error: null });
+      },
+      select: () => ({
+        in: (_col, slugs) => {
+          calls.slugSelects++;
+          if (script.resolveSlugs === "none") {
+            return Promise.resolve({ data: [], error: null });
+          }
+          return Promise.resolve({
+            data: slugs.map((slug) => ({ id: `theme-for-${slug}`, slug })),
+            error: null,
+          });
+        },
+      }),
+      update: () => ({
+        eq: () => {
+          calls.themeUpdates++;
+          return Promise.resolve({ error: script.themeUpdateError ?? null });
+        },
+      }),
+    },
+    reddit_post_intel_themes: {
+      upsert: (rows) => {
         calls.membershipRows += rows.length;
         return Promise.resolve({ error: null });
       },
-    };
+    },
   };
 
-  return { client: { from } as never, calls, slugs: () => lastSlugs };
+  const client: PersistClient = {
+    from: (table) => tables[table],
+  };
+
+  return { client, calls, slugs: () => lastSlugs };
 }
 
 function seedAssignment(postId = "post-1"): Assignment {
