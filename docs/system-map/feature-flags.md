@@ -360,3 +360,9 @@ Before flipping any `NEXT_PUBLIC_FF_*` flag from default-OFF to ON in production
 ### Manual LinkedIn publishing
 
 `LINKEDIN_STUDIO_PUBLISH_ENABLED=true` enables the draft studio publish route only when `VERCEL_ENV=production`, and `LINKEDIN_ORG_URN` matches Ask Arthur’s company-page URN. Default is disabled. Existing LinkedIn access/refresh credentials stay server-side. Enforcement is in `apps/web/app/api/admin/linkedin-drafts/publish/route.ts`; this switch does not control the older CLI or other social publishers. Draft creation and saving do not need this switch.
+
+### Arthur’s Watch manual delivery
+
+`NEWSLETTER_SEND_ENABLED=true` allows subscriber delivery only in production; default is disabled. `apps/web/lib/newsletter/delivery.ts:newsletterCanSend` enforces the environment gate. The operator-only test action needs production and Resend credentials but does not need audience sending enabled. It uses `ADMIN_TEST_EMAIL` or the established `brendan@askarthur.au` fallback. No caller can supply a recipient.
+
+Migration v305’s `start_newsletter_issue`, `claim_newsletter_delivery` and `claim_newsletter_test` check `feature_brakes.newsletter_send`; the dashboard registry includes this brake. Test reservations are limited to one per revision and 20 per rolling day. Subscriber sends require an approved frozen revision with an accepted test receipt, and the admin API requires an inbox-check acknowledgement. The weekly cron prepares drafts only.

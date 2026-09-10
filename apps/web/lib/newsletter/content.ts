@@ -5,7 +5,7 @@ export function safeEvidenceUrl(value: string): boolean {
   try {
     const u = new URL(value);
     return u.protocol === "https:" && !u.username && !u.password && !u.port &&
-      ["askarthur.au", "www.scamwatch.gov.au", "www.cyber.gov.au", "asic.gov.au", "www.asic.gov.au", "moneysmart.gov.au"].includes(u.hostname);
+      ["askarthur.au", "scamwatch.gov.au", "www.scamwatch.gov.au", "cyber.gov.au", "www.cyber.gov.au", "asic.gov.au", "www.asic.gov.au", "moneysmart.gov.au"].includes(u.hostname);
   } catch { return false; }
 }
 const prose = (max: number) => z.string().trim().min(1).max(max);

@@ -475,3 +475,9 @@ The generated file is committed (NOT git-ignored) so CI typechecks have access t
 ### LinkedIn drafts (v304; deployment pending)
 
 `linkedin_drafts` stores private plain-text drafts, revision, status, operator identifier, attempt timestamps and LinkedIn receipt. RLS and grants restrict all access to service_role in `supabase/migration-v304-linkedin-drafts.sql`; admin routes enforce operator access. Conditional updates on `(id, version, status=draft)` prevent stale saves and duplicate claims. Publishing/uncertain rows are locked until an operator reconciles the external outcome. Four seed drafts use stable IDs and never overwrite edits on migration reapplication.
+
+### Newsletter editorial state (v305)
+
+`newsletter_issues` stores private source candidates, editorial revisions, approval and frozen email renders. `newsletter_deliveries` records the issue’s subscriber snapshot and atomic recipient claims/accepted provider receipts. `newsletter_test_sends` records operator-only test reservations and receipts. All three have service-role-only policies and revoked anon/authenticated access in `supabase/migration-v305-newsletter-issues.sql`. No new recipient-email copy is stored; deliveries reference `email_subscribers`.
+
+`start_newsletter_issue` serialises issue initialisation and checks the tested approval. `claim_newsletter_delivery` uses row locks/skip-locked, rechecks active/suppressed status and never reclaims uncertain sends. `claim_newsletter_test` serialises the test budget and reserves one attempt per revision. These RPCs are service-role-only.
