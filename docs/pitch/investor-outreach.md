@@ -1,5 +1,15 @@
 # Ask Arthur — Investor Outreach Materials
 
+> ⚠️ **DATA-RESIDENCY CLAIM IN THIS DOCUMENT IS INCORRECT — verified 2026-07-30.**
+> Any statement here that Ask Arthur is "Australian-hosted", has "sovereign data
+> residency" or "zero US data dependency" does not match the live
+> infrastructure. The Supabase database is `ap-southeast-1` (**Singapore**) and
+> Vercel server functions execute in `iad1` (**Washington DC, USA**); only the
+> CDN edge is Sydney. See `docs/compliance/data-residency-statement.md`.
+> **The narrative below has deliberately NOT been rewritten** — if any version
+> of this document has already been sent to an investor, customer or grant body,
+> that needs a decision from the founder, not a silent edit.
+
 Generated April 2026. All claims labelled: **[Data]** = verifiable, **[Estimate]** = projections, **[Assumption]** = positioning.
 
 ---
@@ -154,22 +164,22 @@ Free consumer scam checker (web, Chrome extension, mobile, Telegram, WhatsApp, S
 
 #### TRACTION
 
-| Metric | Status |
-|--------|--------|
-| Product readiness | Production across 7 surfaces, 6 API endpoints, 16 threat feeds [Data] |
-| Development phases complete | 11 phases, 44 database migrations [Data] |
-| External intelligence | 5 API integrations (AbuseIPDB, HIBP, crt.sh, Twilio, URLScan) [Data] |
-| Cost per check | Sub-$0.001 [Data] |
-| Stage | Pre-revenue with production-ready product [Data] |
+| Metric                      | Status                                                                |
+| --------------------------- | --------------------------------------------------------------------- |
+| Product readiness           | Production across 7 surfaces, 6 API endpoints, 16 threat feeds [Data] |
+| Development phases complete | 11 phases, 44 database migrations [Data]                              |
+| External intelligence       | 5 API integrations (AbuseIPDB, HIBP, crt.sh, Twilio, URLScan) [Data]  |
+| Cost per check              | Sub-$0.001 [Data]                                                     |
+| Stage                       | Pre-revenue with production-ready product [Data]                      |
 
 #### BUSINESS MODEL
 
-| Stream | Price | Target Buyer |
-|--------|-------|-------------|
-| B2B API — Pro | $2,000/mo | Mid-tier banks, fintechs |
-| B2B API — Enterprise | $5,000-$15,000/mo | Banks, telcos, digital platforms |
-| Consumer Premium | $9.99/mo | Power users, families |
-| White-label | Custom | Banks embedding scam check in apps |
+| Stream               | Price             | Target Buyer                       |
+| -------------------- | ----------------- | ---------------------------------- |
+| B2B API — Pro        | $2,000/mo         | Mid-tier banks, fintechs           |
+| B2B API — Enterprise | $5,000-$15,000/mo | Banks, telcos, digital platforms   |
+| Consumer Premium     | $9.99/mo          | Power users, families              |
+| White-label          | Custom            | Banks embedding scam check in apps |
 
 Gross margin 95%+ [Estimate]. Blended B2B data point value ~$0.25 vs ~$0.001 cost = 250x margin [Estimate].
 
@@ -249,6 +259,6 @@ The product is built. 11 development phases, 44 database migrations, 7 consumer 
 
 ---
 
-*Ask Arthur — Protecting Australians from scams, one check at a time.*
+_Ask Arthur — Protecting Australians from scams, one check at a time._
 
 askarthur.au | brendan@askarthur.au

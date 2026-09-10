@@ -1,5 +1,15 @@
 # Ask Arthur — Executive Summary
 
+> ⚠️ **DATA-RESIDENCY CLAIM IN THIS DOCUMENT IS INCORRECT — verified 2026-07-30.**
+> Any statement here that Ask Arthur is "Australian-hosted", has "sovereign data
+> residency" or "zero US data dependency" does not match the live
+> infrastructure. The Supabase database is `ap-southeast-1` (**Singapore**) and
+> Vercel server functions execute in `iad1` (**Washington DC, USA**); only the
+> CDN edge is Sydney. See `docs/compliance/data-residency-statement.md`.
+> **The narrative below has deliberately NOT been rewritten** — if any version
+> of this document has already been sent to an investor, customer or grant body,
+> that needs a decision from the founder, not a silent edit.
+
 ## Founder's Note
 
 Australians lost $2.18 billion to scams last year (NASC 2024). The number has grown every year since tracking began. The people most at risk — older Australians, non-native English speakers, people in crisis — are the least equipped to identify increasingly sophisticated AI-generated scam messages.
@@ -37,18 +47,19 @@ No competitor has this loop. Scamwatch relies on manual reports. Banks see only 
 
 ## Revenue Model
 
-| Tier | Price | Includes |
-|------|-------|---------|
-| Free API | $0 | 25 calls/day, basic threat data |
-| Pro API | $2,000/mo | 100 calls/day, full enrichment, webhooks |
-| Enterprise | $5,000-15,000/mo | 5,000 calls/day, custom feeds, SLA, dedicated support |
-| Consumer Premium | $9.99/mo | Enhanced scanning, family protection, push alerts |
+| Tier             | Price            | Includes                                              |
+| ---------------- | ---------------- | ----------------------------------------------------- |
+| Free API         | $0               | 25 calls/day, basic threat data                       |
+| Pro API          | $2,000/mo        | 100 calls/day, full enrichment, webhooks              |
+| Enterprise       | $5,000-15,000/mo | 5,000 calls/day, custom feeds, SLA, dedicated support |
+| Consumer Premium | $9.99/mo         | Enhanced scanning, family protection, push alerts     |
 
 **Target**: $50K-$200K ARR per enterprise customer. 10 enterprise customers = $600K-$1.8M ARR.
 
 ## Traction
 
 The platform is production-ready across 11 development phases:
+
 - 7 consumer surfaces (web, extension, mobile, 4 chat bots)
 - 16 threat feed integrations with automated scraping
 - 6 B2B API endpoints with OpenAPI 3.0 spec
@@ -69,6 +80,7 @@ Building in public from Australia. Technical founder who has single-handedly bui
 **Seeking**: A$500K-$1M pre-seed on a post-money SAFE with A$5M-$8M cap
 
 **Use of funds**:
+
 - 60% Engineering (ML engineer, security engineer, SOC 2/ISO 27001 readiness)
 - 20% Go-to-market (Head of Sales, enterprise pilots, AFCX/GASA membership)
 - 20% Operations (hosting, AI costs, legal, compliance)
@@ -84,6 +96,7 @@ Building in public from Australia. Technical founder who has single-handedly bui
 ## Thesis: Sovereign Trust + Regulatory Pull
 
 Australian regulated entities face increasing pressure to use Australian-hosted, Australian-focused security tools. Ask Arthur is:
+
 - **Australian-built and hosted** — no US data dependency
 - **Privacy-first** — zero-knowledge architecture, no user accounts, PII scrubbing
 - **Community-powered** — threat intelligence from real Australians, for Australians
@@ -93,6 +106,6 @@ The Scams Prevention Framework creates the kind of forced compliance demand that
 
 ---
 
-*Ask Arthur — Protecting Australians from scams, one check at a time.*
+_Ask Arthur — Protecting Australians from scams, one check at a time._
 
 Contact: brendan@askarthur.au | askarthur.au
