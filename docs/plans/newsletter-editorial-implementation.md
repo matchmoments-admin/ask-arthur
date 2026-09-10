@@ -18,7 +18,7 @@ Use the existing admin authentication and same-origin mutations. Service clients
 
 ## Implemented in this branch
 
-- `apps/web/lib/newsletter/prepare.ts` selects source-dated, public Arthur’s Take, regulator and operator-reviewed clone candidates for one complete UTC week. Its bounded sample is disclosed. It does not generate incident counts or trend badges.
+- `apps/web/lib/newsletter/prepare.ts` selects source-dated, public Arthur’s Take, regulator and operator-reviewed clone candidates for one complete UTC week. Its bounded sample is disclosed. Legacy ready Takes with an unknown `is_scam_report` flag remain eligible, but explicit false is excluded; they are labelled discussions, not verified incidents. Refreshing the current draft’s sources preserves editorial copy and is refused after approval. It does not generate incident counts or trend badges.
 - `apps/web/app/api/cron/weekly-email/route.ts` prepares the issue only. Repeated preparation keeps existing edits through the unique window and insert-on-conflict-ignore.
 - `/admin/newsletter` offers evidence links, candidate selection, editable stories and saved HTML preview. Regulator candidates require the editor to write the explanation and action; placeholder copy cannot pass approval.
 - The admin POST checks authentication and same origin. Saving increments revision and clears approval; approval checks source eligibility and freezes HTML/plain text/sender. Sending is a separate deliberate action.

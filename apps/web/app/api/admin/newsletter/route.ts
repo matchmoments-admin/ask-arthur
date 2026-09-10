@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
+  z.object({ action: z.literal("refresh") }),
   z.object({ action: z.literal("save"), id: z.uuid(), revision: z.number().int().positive(), content: IssueContent }),
   z.object({ action: z.literal("approve"), id: z.uuid(), revision: z.number().int().positive(), evidenceReviewed: z.literal(true) }),
   z.object({ action: z.literal("test"), id: z.uuid(), revision: z.number().int().positive() }),
@@ -52,8 +53,8 @@ export async function POST(req: NextRequest) {
   if (!sb) return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
   try {
     const body = parsed.data;
-    if (body.action === "prepare") {
-      const issue = await prepareNewsletter(sb);
+    if (body.action === "prepare" || body.action === "refresh") {
+      const issue = await prepareNewsletter(sb, new Date(), body.action === "refresh");
       return NextResponse.json({ id: issue.id });
     }
     if (body.action === "test") {

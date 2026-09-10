@@ -14,7 +14,7 @@ export async function checkNewsletterEvidence(sb: Client, content: NewsletterCon
         .select("take_status,take_tells,confidence,is_scam_report,feed_items!inner(published,source,source_created_at)")
         .eq("feed_item_id", Number(rawId)).maybeSingle();
       const feed = data?.feed_items as unknown as { published: boolean; source: string; source_created_at: string } | undefined;
-      if (error || !data || !feed || !feed.published || feed.source !== "reddit" || data.is_scam_report !== true ||
+      if (error || !data || !feed || !feed.published || feed.source !== "reddit" || data.is_scam_report === false ||
         new Date(feed.source_created_at).getTime() !== new Date(story.sourceDate).getTime() ||
         !takeIsPageWorthy({ takeStatus: data.take_status, tells: data.take_tells ?? [], confidence: data.confidence })) throw new Error("evidence_no_longer_eligible");
     } else if (kind === "feed") {

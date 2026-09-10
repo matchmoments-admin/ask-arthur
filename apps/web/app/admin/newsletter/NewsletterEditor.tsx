@@ -29,10 +29,10 @@ export default function NewsletterEditor() {
     setSelected(next?.id ?? ""); setContent(next?.content ?? null); setReviewed(false); setConfirmSend(false);
   }
   useEffect(() => { load().catch(e => setMessage(e.message)); }, []);
-  async function action(action: "prepare" | "save" | "approve" | "send" | "test") {
+  async function action(action: "prepare" | "save" | "approve" | "send" | "test" | "refresh") {
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "prepare" ? { action } : {
+      const response = await fetch(api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "prepare" || action === "refresh" ? { action } : {
         action, id: selected, revision: issue?.revision, ...(action === "save" ? { content } : {}), ...(action === "approve" ? { evidenceReviewed: reviewed } : {}), ...(action === "send" ? { inboxChecked: confirmSend } : {}),
       }) });
       const result = await response.json();
@@ -50,6 +50,7 @@ export default function NewsletterEditor() {
     <h1 className="text-3xl font-bold">Arthur’s Watch</h1>
     <p className="my-3">Prepare the week’s evidence, edit the warnings, review the saved preview, then choose when to send.</p>
     <button disabled={busy || dirty} onClick={() => action("prepare")} className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Prepare this week’s draft</button>
+    <button disabled={busy || dirty} onClick={() => action("refresh")} className="ml-3 rounded border px-4 py-2 disabled:opacity-40">Refresh this week’s source list</button>
     <p role="status" className="my-4">{message}</p>
     <label>Issue <select disabled={dirty || busy} value={selected} onChange={e => { const next = issues.find(i => i.id === e.target.value); setSelected(e.target.value); setContent(next?.content ?? null); setReviewed(false); setConfirmSend(false); }} className="m-2 border p-2">
       {issues.map(i => <option key={i.id} value={i.id}>{i.window_start.slice(0, 10)} — {i.status}</option>)}
