@@ -167,7 +167,11 @@ async function main() {
     }
   }
 
-  const verdict = await verifyPost({ postUrn, accessToken });
+  const verdict = await verifyPost({
+    postUrn,
+    accessToken,
+    shape: link ? "article" : "document",
+  });
   const problems = Array.isArray(verdict?.problems) ? verdict.problems : [];
   console.log(`VERIFY=${problems.length === 0 ? "ok" : "problems"}`);
   if (problems.length > 0) {

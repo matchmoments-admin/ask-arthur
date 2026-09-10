@@ -115,4 +115,59 @@ describe("verifyPost read-after-write", () => {
     expect(v.ok).toBe(false);
     expect(v.problems[0]).toMatch(/after 2 attempts/);
   });
+  // --- article (link) posts ---
+  // The first live link post was flagged "post has no attached document"
+  // (2026-08-21) because the document assertion ran against a shape that
+  // correctly has none. A verifier that cries wolf is worse than no verifier:
+  // this repo has already been burned by a green check that meant nothing, and
+  // a false alarm trains people to ignore the real one.
+
+  it("does not demand a document on an article post", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      post: {
+        lifecycleState: "PUBLISHED",
+        visibility: "PUBLIC",
+        distribution: { feedDistribution: "MAIN_FEED" },
+        content: { article: { source: "https://askarthur.au/hub" } },
+      },
+      listing: { elements: [{ id: POST }] },
+    }));
+    const v = await verifyPost({
+      postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0, shape: "article",
+    });
+    expect(v.problems).toEqual([]);
+    expect(v.ok).toBe(true);
+  });
+
+  it("flags an article post that lost its link source", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      post: {
+        lifecycleState: "PUBLISHED",
+        visibility: "PUBLIC",
+        distribution: { feedDistribution: "MAIN_FEED" },
+        content: {},
+      },
+      listing: { elements: [{ id: POST }] },
+    }));
+    const v = await verifyPost({
+      postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0, shape: "article",
+    });
+    expect(v.ok).toBe(false);
+    expect(v.problems).toContain("article post has no link source");
+  });
+
+  it("still demands a document when the shape is document (default)", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      post: {
+        lifecycleState: "PUBLISHED",
+        visibility: "PUBLIC",
+        distribution: { feedDistribution: "MAIN_FEED" },
+        content: { article: { source: "https://askarthur.au/hub" } },
+      },
+      listing: { elements: [{ id: POST }] },
+    }));
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0 });
+    expect(v.ok).toBe(false);
+    expect(v.problems).toContain("post has no attached document");
+  });
 });
