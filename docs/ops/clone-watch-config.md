@@ -95,6 +95,49 @@ WHERE NOT (sca.submitted_to ? 'netcraft')
   AND (sca.urlscan_classification='likely_phishing' OR sca.lifecycle_state='weaponised');
 ```
 
+### Escalation is gated by BATCH SIZE, not just the evidence gate (v289, 2026-08-24)
+
+Netcraft permits **one issue report per submission uuid**, and the auto lane
+stamps every alert in a batch with the same uuid. So a batch of N alerts yields
+N−1 alerts that can never be escalated — they drain in the issue lane as
+`skipped: "submission_has_issue"`.
+
+Measured batch sizes either side of v284:
+
+| Submitted         | URLs per uuid |
+| ----------------- | ------------- |
+| 08-18 … 08-22     | 25 – 37       |
+| 08-23 (post-v284) | **1**         |
+
+The pre-v284 fat batches stranded **25 live weaponised clones**. Worse, they
+were also too young for the v250 resubmit lane (`RESUBMIT_MIN_AGE_DAYS` 30), so
+21 of them had no route out at all for up to 24 more days — the "escalation
+dead zone". **v289** fixes that: an alert stamped `submission_has_issue`
+bypasses the min-age wait, because no amount of waiting makes its current uuid
+escalatable.
+
+**The protection against a recurrence is the v284 evidence gate, not
+`DAILY_CAP`.** The cap (50) is a ceiling that was never the binding constraint;
+what shrank the batches is that far fewer candidates qualify. Loosen that
+predicate and the batches re-fatten and this bug returns silently. Watch it:
+
+```sql
+-- URLs per submission uuid, recent. Should be ~1-2. A jump back to 25+ means
+-- the evidence gate has been loosened and escalation is being strangled again.
+SELECT date_trunc('day', (submitted_to->'netcraft'->>'submitted_at')::timestamptz)::date AS day,
+       count(DISTINCT submitted_to->'netcraft'->>'uuid') AS uuids,
+       count(*) AS urls,
+       round(count(*)::numeric / NULLIF(count(DISTINCT submitted_to->'netcraft'->>'uuid'),0), 1) AS urls_per_uuid
+FROM shopfront_clone_alerts
+WHERE (submitted_to->'netcraft'->>'submitted_at')::timestamptz > now() - interval '14 days'
+GROUP BY 1 ORDER BY 1 DESC;
+
+-- Currently stranded by uuid collision. Should trend to zero as v289 drains it.
+SELECT count(*) FROM shopfront_clone_alerts
+WHERE lifecycle_state='weaponised'
+  AND submitted_to->'netcraft_issue'->>'skipped'='submission_has_issue';
+```
+
 ### Watch after activation
 
 - Decline rate on submissions made after 2026-08-23 should fall well below 89%.
