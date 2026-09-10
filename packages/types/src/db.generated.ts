@@ -4604,6 +4604,125 @@ export type Database = {
         }
         Relationships: []
       }
+      newsletter_deliveries: {
+        Row: {
+          attempted_at: string | null
+          issue_id: string
+          provider_id: string | null
+          status: string
+          subscriber_id: number
+        }
+        Insert: {
+          attempted_at?: string | null
+          issue_id: string
+          provider_id?: string | null
+          status?: string
+          subscriber_id: number
+        }
+        Update: {
+          attempted_at?: string | null
+          issue_id?: string
+          provider_id?: string | null
+          status?: string
+          subscriber_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "newsletter_deliveries_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: false
+            referencedRelation: "newsletter_issues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "newsletter_deliveries_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "email_subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      newsletter_issues: {
+        Row: {
+          approved_revision: number | null
+          candidates: Json
+          content: Json
+          created_at: string
+          id: string
+          rendered_html: string | null
+          rendered_text: string | null
+          revision: number
+          sender: string | null
+          source_health: Json
+          status: string
+          updated_at: string
+          window_end: string
+          window_start: string
+        }
+        Insert: {
+          approved_revision?: number | null
+          candidates?: Json
+          content: Json
+          created_at?: string
+          id?: string
+          rendered_html?: string | null
+          rendered_text?: string | null
+          revision?: number
+          sender?: string | null
+          source_health?: Json
+          status?: string
+          updated_at?: string
+          window_end: string
+          window_start: string
+        }
+        Update: {
+          approved_revision?: number | null
+          candidates?: Json
+          content?: Json
+          created_at?: string
+          id?: string
+          rendered_html?: string | null
+          rendered_text?: string | null
+          revision?: number
+          sender?: string | null
+          source_health?: Json
+          status?: string
+          updated_at?: string
+          window_end?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      newsletter_test_sends: {
+        Row: {
+          attempted_at: string
+          issue_id: string
+          provider_id: string | null
+          revision: number
+        }
+        Insert: {
+          attempted_at?: string
+          issue_id: string
+          provider_id?: string | null
+          revision: number
+        }
+        Update: {
+          attempted_at?: string
+          issue_id?: string
+          provider_id?: string | null
+          revision?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "newsletter_test_sends_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: false
+            referencedRelation: "newsletter_issues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       onward_report_log: {
         Row: {
           analysis_id: string | null
@@ -9577,6 +9696,17 @@ export type Database = {
           threat_actor: string
         }[]
       }
+      claim_newsletter_delivery: {
+        Args: { p_id: string }
+        Returns: {
+          email: string
+          subscriber_id: number
+        }[]
+      }
+      claim_newsletter_test: {
+        Args: { p_id: string; p_revision: number }
+        Returns: boolean
+      }
       cleanup_expired_shop_checks: {
         Args: { p_batch_size?: number }
         Returns: number
@@ -10728,6 +10858,10 @@ export type Database = {
       set_watchlist_candidate_status: {
         Args: { p_brand_normalized: string; p_note?: string; p_status: string }
         Returns: number
+      }
+      start_newsletter_issue: {
+        Args: { p_id: string; p_revision: number }
+        Returns: undefined
       }
       submit_provider_report: {
         Args: {

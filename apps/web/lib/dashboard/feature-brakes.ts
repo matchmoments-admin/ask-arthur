@@ -39,6 +39,7 @@ export const KNOWN_BRAKE_KEYS = [
   "monthly_intel_blog",
   "news_intel_embed",
   "newsletter_confirmation",
+  "newsletter_send",
   "onward_reporting",
   "phone_footprint",
   "reddit_intel",
