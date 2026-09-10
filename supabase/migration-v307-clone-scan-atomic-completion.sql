@@ -1,4 +1,4 @@
--- v303: successful scan completion and lifecycle are one transaction.
+-- v307: successful scan completion and lifecycle are one transaction.
 -- Failed attempts retain the last successful scan clock and classification.
 -- Idempotent replacement; no data backfill or table rewrite. Roll back by
 -- reapplying the v230 function definition (restores the known failure modes).
@@ -109,7 +109,7 @@ GRANT EXECUTE ON FUNCTION public.persist_clone_alert_urlscan(bigint, text, jsonb
 
 
 COMMENT ON FUNCTION public.persist_clone_alert_urlscan(bigint, text, jsonb, text, text) IS
-  'v303: atomic successful verdict, archive and lifecycle. Misses retain the successful scan clock; failure streak remains bounded.';
+  'v307: atomic successful verdict, archive and lifecycle. Misses retain the successful scan clock; failure streak remains bounded.';
 
 -- Backward-compatible worklist repair: no historical evidence is rewritten.
 CREATE OR REPLACE FUNCTION public.list_clone_alerts_pending_urlscan_retrieve(

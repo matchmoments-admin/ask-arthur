@@ -176,10 +176,11 @@ export async function POST(req: Request) {
       ) {
         // Suppression check — STOP-replied recipients never even hit the
         // queue. Same logic as notify-brand's check-suppression step.
-        const { data: suppressed } = await supabase.rpc(
+        const { data: suppressed, error: suppressionError } = await supabase.rpc(
           "clone_alert_recipient_is_suppressed",
           { p_email: directoryRow.recipient },
         );
+        if (suppressionError) throw new Error(`suppression lookup failed: ${suppressionError.message}`);
         if (!suppressed) {
           const { error: enqueueErr } = await supabase.rpc(
             "enqueue_clone_alert_notification",

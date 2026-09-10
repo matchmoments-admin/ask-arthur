@@ -145,13 +145,14 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
     // Look up brand contact directory by legitimate_domain (which is what
     // shopfront_clone_alerts.inferred_target_domain stores).
     const directoryRow = await step.run("load-brand-contact", async () => {
-      const { data: rows } = await sb
+      const { data: rows, error } = await sb
         .from("brand_contact_directory")
         .select(
           "brand, legitimate_domain, channel_type, recipient, evidence_format, notes",
         )
         .eq("legitimate_domain", data.brand)
         .maybeSingle();
+      if (error) throw new Error(`brand directory lookup failed: ${error.message}`);
       return rows as DirectoryRow | null;
     });
 
@@ -181,11 +182,12 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
     // key (`brand_notification_queued`) so re-triaging them DOES re-page
     // the admin instead of silently no-op'ing — fixes ultrareview H3.
     const alreadyNotified = await step.run("check-dedup", async () => {
-      const { data: row } = await sb
+      const { data: row, error } = await sb
         .from("shopfront_clone_alerts")
         .select("submitted_to")
         .eq("id", data.alertId)
         .maybeSingle();
+      if (error) throw new Error(`notification dedup lookup failed: ${error.message}`);
       const submitted_to =
         (row?.submitted_to as Record<string, unknown> | null) ?? {};
       const notification = submitted_to.brand_notification as
@@ -253,10 +255,11 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       // Suppression check still runs first so STOP-replied recipients
       // never even hit the queue.
       const suppressed = await step.run("check-suppression", async () => {
-        const { data } = await sb.rpc(
+        const { data, error } = await sb.rpc(
           "clone_alert_recipient_is_suppressed",
           { p_email: directoryRow.recipient },
         );
+        if (error) throw new Error(`suppression lookup failed: ${error.message}`);
         return Boolean(data);
       });
       if (suppressed) {
@@ -284,7 +287,7 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       const scheduledFor = new Date();
 
       await step.run("enqueue-for-batch", async () => {
-        await sb.rpc("enqueue_clone_alert_notification", {
+        const { error } = await sb.rpc("enqueue_clone_alert_notification", {
           p_alert_id: data.alertId,
           p_brand: directoryRow.brand,
           p_candidate_domain: data.candidateDomain,
@@ -294,6 +297,7 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
           p_severity_tier: severity,
           p_scheduled_for: scheduledFor.toISOString(),
         });
+        if (error) throw new Error(`notification enqueue failed: ${error.message}`);
       });
 
       await step.run("persist-notification-enqueued", async () => {
@@ -358,12 +362,13 @@ async function persistNotification(
   if (!sb) return;
   // Atomic JSONB merge via v147 RPC — prevents lost-update races with
   // submit-netcraft (which can run concurrently on the same alert).
-  await sb.rpc("merge_clone_alert_submission", {
+  const { error } = await sb.rpc("merge_clone_alert_submission", {
     p_alert_id: alertId,
     p_key: "brand_notification",
     p_value: { ...fragment, ts: new Date().toISOString() },
     p_set_triage_status: null,
   });
+  if (error) throw new Error(`notification stamp failed: ${error.message}`);
 }
 
 interface ManualQueueFragment {
@@ -378,12 +383,13 @@ async function persistManualQueue(
   fragment: ManualQueueFragment,
 ): Promise<void> {
   if (!sb) return;
-  await sb.rpc("merge_clone_alert_submission", {
+  const { error } = await sb.rpc("merge_clone_alert_submission", {
     p_alert_id: alertId,
     p_key: "brand_notification_queued",
     p_value: fragment,
     p_set_triage_status: null,
   });
+  if (error) throw new Error(`notification stamp failed: ${error.message}`);
 }
 
 function escapeHtml(s: string): string {

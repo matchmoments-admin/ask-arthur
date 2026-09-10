@@ -105,7 +105,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       });
 
       // Drain the durable event queue even when no scans need retrieval.
-      // v303 persists classification and lifecycle in the same transaction.
+      // v307 persists classification and lifecycle in the same transaction.
 
       // Retrieve + classify the whole batch inside ONE step instead of one step
       // per row. Inngest bills per step execution, so a 40-row batch was ~40

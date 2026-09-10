@@ -84,7 +84,7 @@ export async function submitCloneCandidate(
       p_classification: "likely_phishing",
       p_set_triage_status: null, // operator confirms TP (ultrareview F5)
     });
-    // v303 applies the lifecycle in the same transaction as the verdict.
+    // v307 applies the lifecycle in the same transaction as the verdict.
     if (error) throw new Error(`persist reputation verdict failed: ${error.message}`);
     return { kind: "reputation_classified", reputationMalicious: true };
   }

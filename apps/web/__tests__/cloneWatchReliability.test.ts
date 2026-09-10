@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(), from: vi.fn(), send: vi.fn(), submit: vi.fn(), log: vi.fn(),
@@ -35,6 +35,7 @@ function query(result: unknown) {
     chain[method] = () => chain;
   return chain;
 }
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("URLSCAN_API_KEY", "test");
@@ -58,7 +59,9 @@ describe("worker recovery", () => {
   it("does not mark candidates skipped by the wall-clock guard as rechecked", async () => {
     const candidates = [1, 2].map(id => ({ id, candidate_url: `https://clone${id}.example`, candidate_domain: `clone${id}.example`, lifecycle_state: "monitoring", last_rechecked_at: null }));
     mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? candidates : null, error: null }));
-    mocks.elapsed.mockReturnValueOnce(0).mockReturnValue(500_000);
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    mocks.submit.mockImplementation(async () => { now += 500_000; return { kind: "submitted" }; });
     await invoke(cloneWatchLifecycleRecheck);
     expect(mocks.submit).toHaveBeenCalledTimes(1);
     expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked")).toEqual([
@@ -123,4 +126,41 @@ it("records confirmation without a delivery stamp when shadow email is disabled"
   expect(stamp?.p_key).toBe("auto_triage");
   expect(stamp?.p_value.status).toBe("confirmed");
   expect(stamp?.p_value.sent_at).toBeUndefined();
+});
+
+it.each([
+  ["clone_alert_recipient_is_suppressed", "suppression lookup failed"],
+  ["enqueue_clone_alert_notification", "notification enqueue failed"],
+  ["merge_clone_alert_submission", "notification stamp failed"],
+])("retries %s failures instead of falsely completing notification", async (failedRpc, message) => {
+  mocks.rpc.mockImplementation(async name => ({ data: null, error: name === failedRpc ? { message: "injected DB failure" } : null }));
+  mocks.from.mockReturnValue(query({ data: { submitted_to: {} }, error: null }));
+  const run = cloneWatchNotifyBrand as unknown as (ctx: unknown) => Promise<unknown>;
+  await expect(run({ event: { data: {
+    alertId: 1, brand: "brand.example", candidateDomain: "clone.example",
+    candidateUrl: "https://clone.example", severityTier: "medium", signalType: "levenshtein", score: 0.9,
+    triagedAt: "2026-09-08T00:00:00Z",
+  } }, step: { run: (name: string, fn: () => unknown) => name === "load-brand-contact"
+    ? { brand: "Brand", channel_type: "fraud_inbox", recipient: "abuse@brand.example" }
+    : fn() } })).rejects.toThrow(message);
+  if (failedRpc !== "merge_clone_alert_submission")
+    expect(mocks.rpc.mock.calls.some(([name]) => name === "merge_clone_alert_submission")).toBe(false);
+  if (failedRpc === "clone_alert_recipient_is_suppressed")
+    expect(mocks.rpc.mock.calls.some(([name]) => name === "enqueue_clone_alert_notification")).toBe(false);
+});
+
+vi.mock("@/lib/adminAuth", () => ({ requireAdmin: async () => {}, getAdminRateLimitKey: async () => null }));
+import { POST as triage } from "@/app/api/admin/clone-watch/triage/route";
+it("does not inline-enqueue when suppression lookup fails during operator triage", async () => {
+  mocks.from
+    .mockReturnValueOnce(query({ data: { id: 1, inferred_target_domain: "brand.example", candidate_domain: "clone.example", candidate_url: "https://clone.example", severity_tier: "medium", signals: [] }, error: null }))
+    .mockReturnValueOnce(query({ data: { brand: "Brand", channel_type: "fraud_inbox", recipient: "abuse@brand.example" }, error: null }));
+  mocks.rpc.mockImplementation(async name => ({ data: null, error: name === "clone_alert_recipient_is_suppressed" ? { message: "injected suppression failure" } : null }));
+  const response = await triage(new Request("https://example.test/api/admin/clone-watch/triage", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alertId: 1, status: "tp_confirmed" }),
+  }));
+  expect(response.status).toBe(200); // confirmation remains saved; durable consumer can retry
+  expect((await response.json()).enqueuedInline).toBe(false);
+  expect(mocks.rpc.mock.calls.some(([name]) => name === "enqueue_clone_alert_notification")).toBe(false);
+  expect(mocks.send).toHaveBeenCalledTimes(1);
 });

@@ -25,7 +25,7 @@ beforeAll(async () => {
       (alert_id, COALESCE(urlscan_uuid, ''), new_classification);
   `);
   await db.exec(migration("migration-v200-clone-urlscan-verdict.sql"));
-  await db.exec(migration("migration-v303-clone-scan-atomic-completion.sql"));
+  await db.exec(migration("migration-v307-clone-scan-atomic-completion.sql"));
 
 }, 30_000);
 afterAll(async () => db?.close());
@@ -83,7 +83,7 @@ describe("scan completion SQL", () => {
     expect((await row()).lifecycle_state).toBe("taken_down");
   });
   it("can be applied again without changing data", async () => {
-    await db.exec(migration("migration-v303-clone-scan-atomic-completion.sql"));
+    await db.exec(migration("migration-v307-clone-scan-atomic-completion.sql"));
     expect((await row()).lifecycle_state).toBe("monitoring");
   });
 });
