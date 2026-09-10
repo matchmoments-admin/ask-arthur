@@ -30,7 +30,7 @@ Use the existing admin authentication and same-origin mutations. Service clients
 
 1. Apply v305 to an empty Supabase preview and run `supabase/tests/newsletter-issues.sql`. Validate simultaneous recipient claims separately.
 2. Run targeted tests, typecheck, lint and web production build. Render a sample at 375px and 800px; an HTML screenshot does not prove Outlook/Gmail rendering or inbox delivery.
-3. Apply the additive migration before deploying the app, regenerate DB types from the applied schema, and verify advisors. Keep sending disabled until the saved production draft has been reviewed.
+3. Apply additive migrations v305 and v306 before deploying the app, regenerate DB types from the applied schema, and verify advisors. Keep sending disabled until the saved production draft has been reviewed.
 4. Open `/admin/newsletter`, prepare a draft, select distinct relevant stories, edit and save. Check sources and the saved preview. Approve only that revision.
 5. Before broad distribution, use “Send saved issue to my test inbox” after approval. It sends only to ADMIN_TEST_EMAIL (or the established operator fallback), once per revision, with a global 20-test rolling-day budget. Check a real inbox before acknowledging the audience-send checkbox. The database requires a successful test receipt for the revision before audience sending.
 6. Enable production sending only after the controlled inbox check. Use the explicit send action; repeat it for pending recipients. Accepted means the provider returned an ID, not that an inbox received it.

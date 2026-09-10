@@ -481,3 +481,5 @@ The generated file is committed (NOT git-ignored) so CI typechecks have access t
 `newsletter_issues` stores private source candidates, editorial revisions, approval and frozen email renders. `newsletter_deliveries` records the issue’s subscriber snapshot and atomic recipient claims/accepted provider receipts. `newsletter_test_sends` records operator-only test reservations and receipts. All three have service-role-only policies and revoked anon/authenticated access in `supabase/migration-v305-newsletter-issues.sql`. No new recipient-email copy is stored; deliveries reference `email_subscribers`.
 
 `start_newsletter_issue` serialises issue initialisation and checks the tested approval. `claim_newsletter_delivery` uses row locks/skip-locked, rechecks active/suppressed status and never reclaims uncertain sends. `claim_newsletter_test` serialises the test budget and reserves one attempt per revision. These RPCs are service-role-only.
+
+Migration v306 adds `newsletter_deliveries_subscriber_idx` for subscriber foreign-key checks; it does not rewrite rows.
