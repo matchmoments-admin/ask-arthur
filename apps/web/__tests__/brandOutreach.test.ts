@@ -317,7 +317,7 @@ describe("POST /api/admin/brand-outreach/send", () => {
 
     const [payload] = resendSendMock.mock.calls[0];
     // the styled evidence section + the real clone domain
-    expect(payload.html).toContain("A sample of the clones");
+    expect(payload.html).toContain("A sample of the lookalikes");
     expect(payload.html).toContain("reece-login.click");
     // honesty framing survives the send path
     expect(payload.html).toContain("not an assessment of your organisation");
@@ -333,7 +333,7 @@ describe("POST /api/admin/brand-outreach/send", () => {
     expect(res.status).toBe(200);
     const [payload] = resendSendMock.mock.calls[0];
     // no brandKey → getBrandCloneSample short-circuits (no DB read), no sample
-    expect(payload.html).not.toContain("A sample of the clones");
+    expect(payload.html).not.toContain("A sample of the lookalikes");
     expect(payload.html).toContain("72 695 772 313");
   });
 

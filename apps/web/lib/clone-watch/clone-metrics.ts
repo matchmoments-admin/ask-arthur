@@ -39,8 +39,8 @@ export interface CloneDetail {
   screenshot_url: string | null;
   result_url: string | null;
   /** Honest "observed live" timestamp: weaponised→weaponised_at,
-   *  declined→netcraft_declined_at (the vendor observed the live site when
-   *  grading), else null. last_rechecked_at is NOT used — it stamps when a
+   *  other states have no liveness claim. A vendor decline can mean unavailable,
+   *  so its timestamp is not evidence of a live site. last_rechecked_at is NOT used — it stamps when a
    *  rescan is TRIGGERED, not when the site was seen live. */
   still_live_as_of: string | null;
   /** F3 weaponisation-risk score (0-100) — a point-in-time ledger snapshot of
@@ -105,9 +105,7 @@ export function toCloneDetail(
   const stillLiveAsOf =
     row.lifecycle_state === "weaponised"
       ? (row.weaponised_at ?? null)
-      : row.lifecycle_state === "declined"
-        ? (row.netcraft_declined_at ?? null)
-        : null;
+      : null;
   return {
     domain: row.candidate_domain,
     classification: row.urlscan_classification ?? null,

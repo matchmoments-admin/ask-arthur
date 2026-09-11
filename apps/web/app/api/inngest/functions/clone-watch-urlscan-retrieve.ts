@@ -92,7 +92,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
       const pending = await step.run("load-pending-retrieve", async () => {
-        const { data } = await sb.rpc(
+        const { data, error } = await sb.rpc(
           "list_clone_alerts_pending_urlscan_retrieve",
           {
             p_limit: RETRIEVE_BATCH_LIMIT,
@@ -100,34 +100,12 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             p_max_failure_streak: MAX_FAILURE_STREAK,
           },
         );
+        if (error) throw new Error(`retrieve worklist failed: ${error.message}`);
         return (data as RetrieveRow[] | null) ?? [];
       });
 
-      if (pending.length === 0) {
-        return { ok: true, retrieved: 0, reason: "nothing_pending" };
-      }
-
-      // Drive the v199 enforcement lifecycle from the urlscan verdict via the
-      // edge-guarded v200 RPC (never downgrades reported/terminal states). The RPC
-      // stamps weaponised_at on the real transition; the weaponised.v1 emission is
-      // now driven from that persisted state (weaponised_at NOT NULL AND
-      // weaponised_notified_at NULL, v236) rather than an in-memory array — so a
-      // batch step interrupted after a transition but before emit doesn't silently
-      // drop the event (the drop the array approach caused; #762 regression).
-      const applyVerdict = async (
-        row: RetrieveRow,
-        classification: string,
-      ): Promise<void> => {
-        const { error } = await sb.rpc("apply_clone_urlscan_verdict", {
-          p_alert_id: row.id,
-          p_classification: classification,
-        });
-        if (error) {
-          throw new Error(
-            `apply_clone_urlscan_verdict failed for alert ${row.id}: ${error.message}`,
-          );
-        }
-      };
+      // Drain the durable event queue even when no scans need retrieval.
+      // v307 persists classification and lifecycle in the same transaction.
 
       // Retrieve + classify the whole batch inside ONE step instead of one step
       // per row. Inngest bills per step execution, so a 40-row batch was ~40
@@ -231,7 +209,6 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                   `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
                 );
               }
-              await applyVerdict(row, classification);
               classified++;
               continue;
             }
@@ -255,7 +232,6 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                   `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
                 );
               }
-              await applyVerdict(row, "likely_phishing");
               classified++;
               reputationFallback++;
               continue;

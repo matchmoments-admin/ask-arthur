@@ -76,6 +76,7 @@
   },
   "devDependencies": {
     "@askarthur/eslint-config": "workspace:*",
+    "@electric-sql/pglite": "0.3.14",
     "@tailwindcss/postcss": "^4",
     "@types/marked": "^5.0.2",
     "@types/node": "^20",

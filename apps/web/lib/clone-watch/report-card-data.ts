@@ -83,10 +83,7 @@ async function fetchMonth(
   // Warn on the RAW count (pre-FP-filter) so an FP row dropped after the fetch
   // can't mask a truncated result.
   if (truncated) {
-    logger.warn("report-card: clone fetch hit LIMIT", {
-      limit: FETCH_LIMIT,
-      period: periodMonth,
-    });
+    throw new Error(`report-card incomplete: ${periodMonth} exceeds ${FETCH_LIMIT} rows`);
   }
   return applyCohortRules(raw);
 }

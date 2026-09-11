@@ -81,7 +81,8 @@ export function cloneDetectionsFromMetrics(
       firstSeenAt: d.first_seen_at ?? null,
       screenshotUrl: d.screenshot_url ?? null,
       resultUrl: d.result_url ?? null,
-      stillLiveAsOf: d.still_live_as_of ?? null,
+      // Older snapshots inferred liveness from vendor declines (including unavailable).
+      stillLiveAsOf: d.lifecycle_state === "weaponised" ? (d.still_live_as_of ?? null) : null,
     })),
     topRisk: Array.isArray(c.top_risk)
       ? c.top_risk.map((t) => ({ domain: t.domain, riskScore: t.risk_score }))

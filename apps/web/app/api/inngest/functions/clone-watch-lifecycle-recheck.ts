@@ -280,6 +280,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
 
       const submitBatch = await step.run("submit-batch", async () => {
         let submitted = 0;
+        const completedIds: number[] = [];
         let submitFailed = 0;
         let reputationHits = 0;
         for (const c of candidates) {
@@ -296,6 +297,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
               outcome.kind === "reputation_classified"
             ) {
               submitted++;
+              completedIds.push(c.id);
             } else {
               submitFailed++;
             }
@@ -307,11 +309,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             });
           }
         }
-        return { submitted, submitFailed, reputationHits };
+        return { submitted, submitFailed, reputationHits, completedIds };
       });
-      const { submitted, submitFailed, reputationHits } = submitBatch;
+      const { submitted, submitFailed, reputationHits, completedIds } = submitBatch;
 
-      // Mark each candidate rechecked (bump recheck_count + last_rechecked_at)
+      // Mark only successfully submitted/classified candidates rechecked (bump recheck_count + last_rechecked_at)
       // so it drops out of the cadence window until the re-scan verdict lands.
       //
       // This used to call advance_clone_lifecycle with
@@ -327,13 +329,13 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // v278's RPC takes an id and nothing else, so this step cannot name a
       // lifecycle state at all.
       await step.run("mark-rechecked", async () => {
-        for (const c of candidates) {
+        for (const id of completedIds) {
           const { error } = await sb.rpc("mark_clone_alert_rechecked", {
-            p_alert_id: c.id,
+            p_alert_id: id,
           });
           if (error) {
             throw new Error(
-              `mark_clone_alert_rechecked failed for alert ${c.id}: ${error.message}`,
+              `mark_clone_alert_rechecked failed for alert ${id}: ${error.message}`,
             );
           }
         }
@@ -350,10 +352,10 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           feature: "shopfront_clone_recheck",
           provider: "internal",
           operation: "recheck_batch",
-          units: candidates.length,
+          units: completedIds.length,
           unitCostUsd: 0,
           metadata: {
-            rechecked: candidates.length,
+            rechecked: completedIds.length,
             pool: pool.length,
             submitted,
             submit_failed: submitFailed,
@@ -387,7 +389,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       });
 
       logger.info("clone-watch lifecycle re-check: complete", {
-        rechecked: candidates.length,
+        rechecked: completedIds.length,
         pool: pool.length,
         submitted,
         submitFailed,
@@ -395,7 +397,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
 
       return {
         ok: true,
-        rechecked: candidates.length,
+        rechecked: completedIds.length,
         pool: pool.length,
         submitted,
         submitFailed,
