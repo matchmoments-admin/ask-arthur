@@ -19,9 +19,9 @@ app/
 │   ├── cron/              # Vercel cron handlers
 │   └── ...
 ├── app/                   # authenticated consumer pages
-│   ├── dashboard/         # main user dashboard
+│   ├── page.tsx           # main user dashboard
 │   ├── billing/           # Stripe portal entry
-│   ├── reports/threats/   # user's own analyses
+│   ├── reports/, threats/ # user's own analyses
 │   └── ...
 ├── banking/, telco/, digital-platforms/   # SPF sector landing pages
 ├── blog/                  # MDX blog posts
