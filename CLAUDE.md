@@ -89,7 +89,7 @@ ask-arthur/
 ├── pipeline/
 │   └── scrapers/               # Python threat feed scrapers (20+ feeds)
 │
-├── supabase/                   # Migration SQL files (v2–v291+)
+├── supabase/                   # Migration SQL files (v2–v307+)
 ├── docs/                       # OpenAPI spec, setup guides, compliance
 ├── turbo.json                  # Turborepo task config
 ├── pnpm-workspace.yaml         # Workspace manifest
