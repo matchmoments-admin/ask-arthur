@@ -22,6 +22,7 @@ vi.mock("@/lib/cost-telemetry", () => ({ logCost: mocks.log, logCostAsync: mocks
 
 import { cloneWatchUrlscanRetrieve } from "@/app/api/inngest/functions/clone-watch-urlscan-retrieve";
 import { cloneWatchLifecycleRecheck } from "@/app/api/inngest/functions/clone-watch-lifecycle-recheck";
+import { cloneWatchUrlscanSubmit } from "@/app/api/inngest/functions/clone-watch-urlscan-submit";
 import { loadCardInputs } from "@/lib/clone-watch/report-card-data";
 import { toCloneDetail } from "@/lib/clone-watch/clone-metrics";
 import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
@@ -68,11 +69,73 @@ describe("worker recovery", () => {
       ["mark_clone_alert_rechecked", { p_alert_id: 1 }],
     ]);
   });
-  it("does not mark rate-limited or failed submissions as completed", async () => {
+  it("does not mark a rate-limited submission as rechecked (quota says nothing about the URL)", async () => {
     mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? [{ id: 1, lifecycle_state: "monitoring" }] : null, error: null }));
     mocks.submit.mockResolvedValue({ kind: "rate_limited" });
     await invoke(cloneWatchLifecycleRecheck);
     expect(mocks.rpc.mock.calls.some(([name]) => name === "mark_clone_alert_rechecked")).toBe(false);
+  });
+  // #1127 stamped only successes. A row urlscan refuses (400, no DNS) then kept
+  // its stale last_rechecked_at, stayed at the head of the staleness-ordered
+  // worklist, and was re-attempted every run: by 2026-09-16 the same 50 dead
+  // domains were the entire batch and nothing live was rechecked. The stamp
+  // records "we looked", and v277's 168h dead-domain cadence keys on it.
+  it("marks a failed submission as rechecked so it rotates instead of starving the worklist", async () => {
+    const candidates = [1, 2].map(id => ({ id, candidate_url: `https://clone${id}.example`, candidate_domain: `clone${id}.example`, lifecycle_state: "declined", last_rechecked_at: null }));
+    mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? candidates : null, error: null }));
+    mocks.submit
+      .mockResolvedValueOnce({ kind: "submit_failed", error: "rejected" })
+      .mockResolvedValueOnce({ kind: "submitted" });
+    await invoke(cloneWatchLifecycleRecheck);
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked").map(([, args]) => args)).toEqual([
+      { p_alert_id: 1 },
+      { p_alert_id: 2 },
+    ]);
+    expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
+      feature: "shopfront_clone_recheck",
+      metadata: expect.objectContaining({ rechecked: 2, submitted: 1, submit_failed: 1 }),
+    }));
+  });
+  it("marks a submission that threw as rechecked", async () => {
+    mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? [{ id: 9, lifecycle_state: "declined" }] : null, error: null }));
+    mocks.submit.mockRejectedValueOnce(new Error("record scan failure failed: boom"));
+    await invoke(cloneWatchLifecycleRecheck);
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked")).toEqual([
+      ["mark_clone_alert_rechecked", { p_alert_id: 9 }],
+    ]);
+  });
+  // From #1124 to #1141 the submit loop's budget was a spanning one measured
+  // from event.ts. A cron event's ts is the scheduled tick; the fn reaches
+  // submit-batch ~200s+ later on the :00 fleet pileup, so the guard was already
+  // expired at index 0 and the lane processed 0 of 75 candidates every day
+  // from Sep 12. The loop runs inside ONE step, so its clock must start at
+  // step entry: an event.ts long in the past must not stop it submitting.
+  it("submits the batch even when the trigger tick is older than the wall-clock budget", async () => {
+    mocks.rpc.mockImplementation(async name => ({
+      data: name === "list_clone_alerts_pending_urlscan_submit"
+        ? [{ id: 1, candidate_url: "https://clone1.example", candidate_domain: "clone1.example" }]
+        : name === "mark_stale_clone_alerts_dormant" ? 0 : null,
+      error: null,
+    }));
+    const handler = cloneWatchUrlscanSubmit as unknown as (ctx: unknown) => Promise<unknown>;
+    await handler({
+      event: { ts: Date.now() - 30 * 60_000, data: {} },
+      step: { run: (_name: string, fn: () => unknown) => fn() },
+    });
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "submit_batch",
+      metadata: expect.objectContaining({ submitted: 1 }),
+    }));
+  });
+  it("recheck submits even when the trigger tick is older than the wall-clock budget", async () => {
+    mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? [{ id: 1, candidate_url: "https://clone1.example", candidate_domain: "clone1.example", lifecycle_state: "monitoring" }] : null, error: null }));
+    const handler = cloneWatchLifecycleRecheck as unknown as (ctx: unknown) => Promise<unknown>;
+    await handler({
+      event: { ts: Date.now() - 30 * 60_000, data: {} },
+      step: { run: (_name: string, fn: () => unknown) => fn() },
+    });
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
   });
 });
 

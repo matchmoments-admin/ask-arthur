@@ -1,5 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
+import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -54,8 +54,15 @@ const MAX_FAILURE_STREAK = 3;
 // stamped `dormant` rather than silently vanishing (v285). Bounded per run.
 const DORMANT_HORIZON_DAYS = 90;
 const DORMANT_BATCH_LIMIT = 500;
-// Break the batch loop before the finish budget so worst-case submit latency
-// can't force a full-batch re-POST to urlscan; leftovers drain next tick.
+// Break the batch loop before the ROUTE's maxDuration (the loop runs inside
+// ONE step, so that is the bound that kills it — step-budget.ts) so worst-case
+// submit latency can't force a full-batch re-POST to urlscan; leftovers drain
+// next tick. In-step: the clock starts at step entry, never at event.ts. From
+// #1124 (Sep 8) to #1141 it was a spanning budget measured from the 09:00:00
+// cron tick, and the fn reaches this step ~200s+ later on the :00 fleet
+// pileup — so `expired()` was true at index 0 and the lane processed 0 of 75
+// candidates every day from Sep 12, while logging it honestly and alerting
+// nobody. Under budgetedStep's 240s ceiling.
 const SUBMIT_WALL_CLOCK_MS = 200_000;
 
 export const cloneWatchUrlscanSubmit = inngest.createFunction(
@@ -88,7 +95,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-urlscan-submit" },
-    async ({ event, step }) => {
+    async ({ step }) => {
       if (!featureFlags.shopfrontCloneUrlscan) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
       }
@@ -171,50 +178,51 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       // records urlscan_submitted_at and the retrieve worklist de-dupes on it),
       // so a batch-step retry re-submits harmlessly and losing per-row
       // memoisation is safe. Each row is wrapped in try/catch so one failure
-      // doesn't abort the rest; a failed row is retried next tick. A wall-clock
-      // guard breaks before the finish budget so worst-case submit latency can't
-      // force a full-batch replay (which would re-POST to urlscan) — leftovers
-      // drain next tick (submit is urlscan_submitted_at-idempotent).
-      // Spanning budget: this loop awaits step.run per item, so it crosses
-      // step boundaries and is bounded by timeouts.finish, with event.ts as
-      // its clock (survives replay; see step-budget.ts for the two bounds and
-      // the degraded mode when event.ts is unusable).
-      const budget = spanningBudget({ event }, SUBMIT_WALL_CLOCK_MS, logger);
-
-      const batch = await step.run("submit-batch", async () => {
-        let submitted = 0;
-        let submitFailed = 0;
-        let rateLimited = 0;
-        let reputationHits = 0;
-        for (const row of candidates) {
-          if (budget.expired()) break;
-          try {
-            const outcome = await submitCloneCandidate(row);
-            if (outcome.reputationMalicious) reputationHits++;
-            if (
-              outcome.kind === "submitted" ||
-              outcome.kind === "reputation_classified"
-            ) {
-              submitted++;
-            } else if (outcome.kind === "rate_limited") {
-              // Counted apart from failures: a 429 is quota exhaustion, leaves the
-              // row untouched, and must not read as evidence about the URL. Before
-              // this it was folded into submitFailed and left no DB trace, so
-              // "has urlscan ever rate-limited us?" had no answer anywhere.
-              rateLimited++;
-            } else {
+      // doesn't abort the rest; a failed row is retried next tick. The in-step
+      // budget breaks the loop before Vercel's maxDuration kill so worst-case
+      // submit latency can't force a full-batch replay (which would re-POST to
+      // urlscan) — leftovers drain next tick (submit is
+      // urlscan_submitted_at-idempotent). The loop does NOT await step.run per
+      // item, so this is an in-step budget, not a spanning one.
+      const batch = await budgetedStep(
+        step,
+        "submit-batch",
+        SUBMIT_WALL_CLOCK_MS,
+        async (budget) => {
+          let submitted = 0;
+          let submitFailed = 0;
+          let rateLimited = 0;
+          let reputationHits = 0;
+          for (const row of candidates) {
+            if (budget.expired()) break;
+            try {
+              const outcome = await submitCloneCandidate(row);
+              if (outcome.reputationMalicious) reputationHits++;
+              if (
+                outcome.kind === "submitted" ||
+                outcome.kind === "reputation_classified"
+              ) {
+                submitted++;
+              } else if (outcome.kind === "rate_limited") {
+                // Counted apart from failures: a 429 is quota exhaustion, leaves the
+                // row untouched, and must not read as evidence about the URL. Before
+                // this it was folded into submitFailed and left no DB trace, so
+                // "has urlscan ever rate-limited us?" had no answer anywhere.
+                rateLimited++;
+              } else {
+                submitFailed++;
+              }
+            } catch (err) {
               submitFailed++;
+              logger.error("clone-watch urlscan submit: row failed", {
+                alertId: row.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
             }
-          } catch (err) {
-            submitFailed++;
-            logger.error("clone-watch urlscan submit: row failed", {
-              alertId: row.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
-        }
-        return { submitted, submitFailed, rateLimited, reputationHits };
-      });
+          return { submitted, submitFailed, rateLimited, reputationHits };
+        },
+      );
       const { submitted, submitFailed, rateLimited, reputationHits } = batch;
 
       await step.run("log-cost", async () => {
