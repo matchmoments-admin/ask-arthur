@@ -1,6 +1,6 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
+import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -52,9 +52,14 @@ const RECHECK_FETCH_LIMIT = 200;
 // 20% of 50 = 10 slots/run x 4 runs/day = 40 guaranteed rotations/day.
 const STALE_FLOOR_SHARE = 0.2;
 const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
-// Break the submit loop before the 15m finish budget so worst-case urlscan
-// latency can't force a full-batch re-POST; leftovers rotate next run.
-const RECHECK_SUBMIT_WALL_CLOCK_MS = 400_000;
+// Break the submit loop before the ROUTE's maxDuration — the loop runs inside
+// ONE step, so Vercel's 300s request kill is the bound that applies, not the
+// 15m finish budget (step-budget.ts). In-step: the clock starts at step entry.
+// Was 400_000 as a spanning budget measured from event.ts (#1124–#1130), which
+// is the wrong constructor for a single-step loop and above budgetedStep's 240s
+// ceiling; the :30 cron never sat on the fleet pileup so it happened not to
+// expire at index 0 the way the 09:00 submit lane did. Leftovers rotate next run.
+const RECHECK_SUBMIT_WALL_CLOCK_MS = 220_000;
 const BRAKE = "shopfront_clone_recheck";
 
 interface RecheckRow {
@@ -192,7 +197,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-lifecycle-recheck" },
-    async ({ event, step }) => {
+    async ({ step }) => {
       if (!featureFlags.shopfrontCloneRecheck) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_RECHECK disabled" };
       }
@@ -267,54 +272,71 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // retried next tick. Replaces the old 50-event fan-out to scan-one. A
       // wall-clock guard breaks before the 15m finish budget so worst-case submit
       // latency (50 × urlscan POST) can't force a full-batch re-POST — leftovers
-      // stay unmarked and rotate through on the next run.
-      // Spanning budget: this loop awaits step.run per item, so it crosses
-      // step boundaries and is bounded by timeouts.finish, with event.ts as
-      // its clock (survives replay; see step-budget.ts for the two bounds and
-      // the degraded mode when event.ts is unusable).
-      const budget = spanningBudget(
-        { event },
+      // stay unmarked and rotate through on the next run. The loop does NOT
+      // await step.run per item, so this is an in-step budget, not a spanning
+      // one (step-budget.ts).
+      const submitBatch = await budgetedStep(
+        step,
+        "submit-batch",
         RECHECK_SUBMIT_WALL_CLOCK_MS,
-        logger,
-      );
-
-      const submitBatch = await step.run("submit-batch", async () => {
-        let submitted = 0;
-        const completedIds: number[] = [];
-        let submitFailed = 0;
-        let reputationHits = 0;
-        for (const c of candidates) {
-          if (budget.expired()) break;
-          try {
-            const outcome = await submitCloneCandidate({
-              id: c.id,
-              candidate_url: c.candidate_url,
-              candidate_domain: c.candidate_domain,
-            });
-            if (outcome.reputationMalicious) reputationHits++;
-            if (
-              outcome.kind === "submitted" ||
-              outcome.kind === "reputation_classified"
-            ) {
-              submitted++;
-              completedIds.push(c.id);
-            } else {
+        async (budget) => {
+          let submitted = 0;
+          let submitFailed = 0;
+          let reputationHits = 0;
+          // Every row the loop LOOKED AT, except a 429. The cadence stamp
+          // (mark_clone_alert_rechecked) records "we looked", not "it worked":
+          // a submit that urlscan refused with a 400 (no DNS) is exactly the
+          // row v277's 168h dead-domain cadence exists to park, and that cadence
+          // keys on last_rechecked_at. #1127 stamped only successes, so every
+          // failed row kept its stale stamp, stayed at the head of the
+          // staleness-ordered worklist, and was re-attempted 4×/day — within a
+          // week the same 50 dead domains were the whole batch and the live
+          // tail went unrechecked (worklist-gate-starvation rule). A 429 is the
+          // one exception: quota exhaustion says nothing about the URL, and
+          // leaving it unstamped means the next run retries it as soon as the
+          // quota is back (v224).
+          const attemptedIds: number[] = [];
+          for (const c of candidates) {
+            if (budget.expired()) break;
+            try {
+              const outcome = await submitCloneCandidate({
+                id: c.id,
+                candidate_url: c.candidate_url,
+                candidate_domain: c.candidate_domain,
+              });
+              if (outcome.reputationMalicious) reputationHits++;
+              if (
+                outcome.kind === "submitted" ||
+                outcome.kind === "reputation_classified"
+              ) {
+                submitted++;
+                attemptedIds.push(c.id);
+              } else if (outcome.kind === "rate_limited") {
+                submitFailed++;
+              } else {
+                submitFailed++;
+                attemptedIds.push(c.id);
+              }
+            } catch (err) {
               submitFailed++;
+              attemptedIds.push(c.id);
+              logger.error("clone-watch recheck: submit failed", {
+                alertId: c.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
             }
-          } catch (err) {
-            submitFailed++;
-            logger.error("clone-watch recheck: submit failed", {
-              alertId: c.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
-        }
-        return { submitted, submitFailed, reputationHits, completedIds };
-      });
-      const { submitted, submitFailed, reputationHits, completedIds } = submitBatch;
+          return { submitted, submitFailed, reputationHits, attemptedIds };
+        },
+      );
+      const { submitted, submitFailed, reputationHits, attemptedIds } =
+        submitBatch;
 
-      // Mark only successfully submitted/classified candidates rechecked (bump recheck_count + last_rechecked_at)
-      // so it drops out of the cadence window until the re-scan verdict lands.
+      // Mark every attempted candidate rechecked (bump recheck_count +
+      // last_rechecked_at) so it drops out of the cadence window — 6h for a
+      // live domain, 168h for one urlscan refused — until its turn comes round.
+      // Rows the budget skipped and rows urlscan rate-limited stay unstamped
+      // and re-present next run.
       //
       // This used to call advance_clone_lifecycle with
       // `p_to_state: c.lifecycle_state` as a "no-op state change" — a value read
@@ -329,7 +351,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // v278's RPC takes an id and nothing else, so this step cannot name a
       // lifecycle state at all.
       await step.run("mark-rechecked", async () => {
-        for (const id of completedIds) {
+        for (const id of attemptedIds) {
           const { error } = await sb.rpc("mark_clone_alert_rechecked", {
             p_alert_id: id,
           });
@@ -352,10 +374,10 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           feature: "shopfront_clone_recheck",
           provider: "internal",
           operation: "recheck_batch",
-          units: completedIds.length,
+          units: attemptedIds.length,
           unitCostUsd: 0,
           metadata: {
-            rechecked: completedIds.length,
+            rechecked: attemptedIds.length,
             pool: pool.length,
             submitted,
             submit_failed: submitFailed,
@@ -389,7 +411,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       });
 
       logger.info("clone-watch lifecycle re-check: complete", {
-        rechecked: completedIds.length,
+        rechecked: attemptedIds.length,
         pool: pool.length,
         submitted,
         submitFailed,
@@ -397,7 +419,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
 
       return {
         ok: true,
-        rechecked: completedIds.length,
+        rechecked: attemptedIds.length,
         pool: pool.length,
         submitted,
         submitFailed,
