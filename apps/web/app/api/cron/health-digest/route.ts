@@ -120,7 +120,8 @@ function buildMessage(
 
   if (laneProblems.length > 0) {
     const LANE_LABEL: Record<LaneProblemKind, string> = {
-      absent: "🚫 <b>Clone-watch lane not running:</b>",
+      absent:
+        "🚫 <b>Clone-watch lane wrote no outcome row (not running, or skipped without logging):</b>",
       braked: "🛑 <b>Clone-watch lane braked:</b>",
       silent_zero: "🕳️ <b>Clone-watch lane running but doing nothing:</b>",
     };

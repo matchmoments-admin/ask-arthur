@@ -394,7 +394,15 @@ lane that stops logging is `absent`, never invisible.
 | feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                               | 1           |
 | preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                        | —           |
 
-Absence windows: 9h for the 6h lanes, 26h for the daily ones. Lanes with **no
+Absence windows: 9h for the 6h lanes, 26h for the daily ones. **Every roster
+lane writes one outcome row per run, including its quiet-day path** (`units 0`,
+`metadata.reason` ∈ `nothing_due` / `no_gated_candidates` / `nothing_pending` /
+`daily_cap_reached` / `none_pending_or_cap` / `all_dead` / `bulk_submit_failed`)
+— that is what makes `absent` a real signal. Before that follow-up, prod showed
+resubmit row-less on 4 of 13 days and issue on 3 of 13, so "absent" would have
+paged on 7 of 13 days for lanes that ran fine. Skip-paths (flag off, brake
+engaged, cooldown, no DB) still write nothing on purpose: a disabled lane
+_should_ read as absent. Lanes with **no
 per-run cost row** (notify-brand, notify-weaponised, enforcement-plan/-execute,
 auto-triage, reemergence-monitor, enrich-attribution, report-summary, the
 three digests, scan-one, submit-netcraft) are deliberately NOT in the roster —

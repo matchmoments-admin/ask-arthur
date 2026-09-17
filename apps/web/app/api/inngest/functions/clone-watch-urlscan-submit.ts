@@ -151,19 +151,27 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       if (candidates.length === 0) {
         // Still log the sweep — cost_telemetry is the durable record (this
         // logger is console-backed with no Axiom transport), so a run that only
-        // retired rows must not be invisible.
-        if (dormant > 0) {
-          await step.run("log-cost-dormant-only", async () => {
-            await logCostAsync({
-              feature: "shopfront_clone_urlscan",
-              provider: "urlscan",
-              operation: "submit_batch",
-              units: 0,
-              unitCostUsd: 0,
-              metadata: { submitted: 0, dormant_retired: dormant },
-            });
+        // retired rows must not be invisible. Unconditional since #1145: the
+        // digest's silent-zero detector judges this lane ABSENT when no
+        // submit_batch row lands inside 26h, and a quiet day (no gated
+        // candidates, nothing to retire) used to write nothing. units 0
+        // satisfies no silent-zero predicate.
+        await step.run("log-cost-quiet", async () => {
+          await logCostAsync({
+            feature: "shopfront_clone_urlscan",
+            provider: "urlscan",
+            operation: "submit_batch",
+            units: 0,
+            unitCostUsd: 0,
+            metadata: {
+              reason: "no_gated_candidates",
+              submitted: 0,
+              submit_failed: 0,
+              rate_limited: 0,
+              dormant_retired: dormant,
+            },
           });
-        }
+        });
         return {
           ok: true,
           submitted: 0,

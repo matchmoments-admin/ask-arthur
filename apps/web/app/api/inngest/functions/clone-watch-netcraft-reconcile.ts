@@ -3,7 +3,7 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCost, logCostAsync } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
@@ -138,6 +138,22 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
       });
 
       if (groups.length === 0) {
+        // One outcome row per run (#1145). The digest's silent-zero detector
+        // judges this lane ABSENT when no lifecycle_reconcile row lands inside
+        // 26h, and "nothing pending" used to write nothing. Its silent-zero
+        // shape is uuids=0 on THREE consecutive rows — 36h with nothing to
+        // reconcile against ~10 resubmits/day is a broken worklist RPC, not a
+        // quiet day, so the quiet row is deliberately allowed to count.
+        await step.run("log-cost-quiet", async () => {
+          await logCostAsync({
+            feature: "shopfront_clone_netcraft_reconcile",
+            provider: "netcraft",
+            operation: "lifecycle_reconcile",
+            units: 0,
+            unitCostUsd: 0,
+            metadata: { reason: "nothing_pending", uuids: 0, taken_down: 0, declined: 0 },
+          });
+        });
         return { ok: true, uuids: 0, taken_down: 0, declined: 0 };
       }
 
