@@ -297,6 +297,12 @@ EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
      INVOKER functions that depend on extension-provided operators;
      reserve the empty form for SECURITY DEFINER functions where
      unqualified-name exploitation is the actual threat model.
+   - `SET LOCAL statement_timeout` inside a function body is DECORATIVE for
+     the calling statement through PostgREST (the `authenticator` login's 8 s
+     applies; the timer is armed before the body runs — measured 2026-09-17,
+     v310). Put the cap in the function-level clause:
+     `SET statement_timeout = '90s'` next to `SET search_path`. See
+     `supabase/CLAUDE.md` §4.
    - Both bites surface as immediate exceptions on the first call,
      regardless of input data — which is what
      `packages/scam-engine/src/__tests__/rpcs.smoke.test.ts` is for.

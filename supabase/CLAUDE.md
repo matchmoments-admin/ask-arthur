@@ -36,6 +36,8 @@ The advisor will surface this — `mcp__supabase__get_advisors` reports tables w
 - `SECURITY DEFINER` functions: use `SET search_path = ''` and fully qualify every reference (the threat model is unqualified-name exploitation by a low-privilege caller).
 - `RETURNS TABLE (col_name ...)` functions: add `#variable_conflict use_column` immediately after `AS $$`. Without it, unqualified column refs in the body resolve to OUT parameters and raise `42702: column reference is ambiguous` at call time.
 
+- **`SET LOCAL statement_timeout` INSIDE a function body does nothing for the statement that called it** (measured 2026-09-17, v310). PostgREST logs in as `authenticator` (`statement_timeout=8s`, `lock_timeout=8s`); `SET ROLE service_role` does not replace that, and Postgres arms the timer when the top-level statement starts — a SET LOCAL executed mid-statement changes `current_setting()` but never re-arms it. Probe: a fn doing `SET LOCAL statement_timeout='60s'; PERFORM pg_sleep(12)` was cancelled at 8 s with `57014`. **Use the function-level clause instead** — `CREATE FUNCTION … SET search_path = '' SET statement_timeout = '90s' AS $$…$$` — which IS honoured (the same 12 s sleep completed). Every supabase-js `.rpc()` call is subject to this; direct psycopg (scrapers) and the Management API are not, which is why an RPC can pass every local timing test and still die at 8 s in prod. Nine functions still carry the decorative form (tracked on map #1143).
+
 These bites are covered by `packages/scam-engine/src/__tests__/rpcs.smoke.test.ts` — run against a preview branch after applying any migration that changes a function body.
 
 ### 5. Long-running migrations are not auto-applied
