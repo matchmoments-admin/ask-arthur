@@ -82,7 +82,11 @@ export interface AlertRow {
     result_url?: string;
     // Hosting attribution urlscan already captures (clone-watch-urlscan.ts
     // serialiseEvidence → server: result.serverInfo).
-    server?: { ip?: string | null; country?: string | null; asn?: string | null };
+    server?: {
+      ip?: string | null;
+      country?: string | null;
+      asn?: string | null;
+    };
   } | null;
   first_seen_at: string;
 }
@@ -106,7 +110,10 @@ export function passesStrictSignal(signals: unknown): boolean {
  * human, since that's where Haiku's rare (~1%) false-negatives concentrate.
  * Pure — unit-tested.
  */
-export function isAutoParkEligible(isNotClone: boolean, signals: unknown): boolean {
+export function isAutoParkEligible(
+  isNotClone: boolean,
+  signals: unknown,
+): boolean {
   return isNotClone && !passesStrictSignal(signals);
 }
 
@@ -318,17 +325,20 @@ export const cloneWatchAutoTriage = inngest.createFunction(
         }
         // Record internal confirmation separately from real brand delivery.
         // No email has been sent at this point. Non-fatal.
-        const { error: stampErr } = await sb.rpc("merge_clone_alert_submission", {
-          p_alert_id: alert.id,
-          p_key: "auto_triage",
-          p_value: {
-            channel_type: "shadow_summary",
-            recipient: shadowRecipient,
-            status: "confirmed",
-            ts: new Date().toISOString(),
+        const { error: stampErr } = await sb.rpc(
+          "merge_clone_alert_submission",
+          {
+            p_alert_id: alert.id,
+            p_key: "auto_triage",
+            p_value: {
+              channel_type: "shadow_summary",
+              recipient: shadowRecipient,
+              status: "confirmed",
+              ts: new Date().toISOString(),
+            },
+            p_set_triage_status: null,
           },
-          p_set_triage_status: null,
-        });
+        );
         if (stampErr) {
           logger.warn("clone-watch auto-triage: submitted_to stamp failed", {
             alertId: alert.id,
@@ -343,15 +353,14 @@ export const cloneWatchAutoTriage = inngest.createFunction(
       // Collect the hosting attribution urlscan already captured for the digest.
       items.push(toSummaryItem(alert));
 
-      // Feed the confirmed clone (+ hosting IP) into the unified entity index so
-      // the rest of the app sees it. Own step + non-fatal (flag-gated inside).
-      const srv = alert.urlscan_evidence?.server ?? null;
+      // Feed the confirmed clone into the platform (v309: domain + hosting IP
+      // entities + a scam_urls row, one transaction, flag-gated inside). The
+      // RPC refuses a row that is not weaponised, so an auto-confirmed clone
+      // that urlscan never verified is reported here as `not_written` rather
+      // than entering consumer reputation on a lexical match alone. Own step
+      // + non-fatal.
       await step.run(`feed-entity-${alert.id}`, () =>
-        feedCloneEntity(
-          alert.candidate_domain,
-          srv?.ip ?? null,
-          srv?.country ?? null,
-        ).then(() => true),
+        feedCloneEntity({ id: alert.id, candidate_url: alert.candidate_url }),
       );
     }
 
