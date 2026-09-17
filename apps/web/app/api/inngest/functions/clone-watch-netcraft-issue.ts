@@ -1,4 +1,5 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
@@ -7,7 +8,6 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost, logCostAsync } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
@@ -272,24 +272,17 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         // pending. uuids 0 / braked false satisfies no predicate. The 10-min
         // cooldown above reads this feature's latest row, so a quiet run
         // extends it by at most 10 min — harmless.
-        await step.run("log-cost-quiet", async () => {
-          await logCostAsync({
-            feature: "shopfront_clone_netcraft_issue",
-            provider: "netcraft",
-            operation: "issue_report",
-            units: 0,
-            unitCostUsd: 0,
-            metadata: {
-              reason,
-              dryRun,
-              uuids: 0,
-              filed: 0,
-              permanentRejects: 0,
-              braked: false,
-              daily_remaining: plan.remaining,
-            },
-          });
-        });
+        await step.run("log-cost-quiet", () =>
+          recordLaneOutcome("shopfront-clone-netcraft-issue", 0, {
+            reason,
+            dryRun,
+            uuids: 0,
+            filed: 0,
+            permanentRejects: 0,
+            braked: false,
+            daily_remaining: plan.remaining,
+          }),
+        );
         return { ok: true, dryRun, reason, filed: 0 };
       }
 
@@ -768,14 +761,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         });
       }
 
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "shopfront_clone_netcraft_issue",
-          provider: "netcraft",
-          operation: "issue_report",
-          units: dryRun ? counts.dryRunLogged : counts.filed,
-          unitCostUsd: 0,
-          metadata: {
+      await step.run("log-cost", () =>
+        recordLaneOutcome(
+          "shopfront-clone-netcraft-issue",
+          dryRun ? counts.dryRunLogged : counts.filed,
+          {
             dryRun,
             uuids: plan.groups.length,
             ...counts,
@@ -784,8 +774,8 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             // run — a normal, bounded outcome, not a failure (#1069).
             uuids_skipped_for_time: uuidsSkippedForTime,
           },
-        });
-      });
+        ),
+      );
 
       logger.info("netcraft-issue: complete", {
         dryRun,

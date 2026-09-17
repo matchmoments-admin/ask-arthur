@@ -1,9 +1,9 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost, logCostAsync } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
@@ -144,16 +144,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         // shape is uuids=0 on THREE consecutive rows — 36h with nothing to
         // reconcile against ~10 resubmits/day is a broken worklist RPC, not a
         // quiet day, so the quiet row is deliberately allowed to count.
-        await step.run("log-cost-quiet", async () => {
-          await logCostAsync({
-            feature: "shopfront_clone_netcraft_reconcile",
-            provider: "netcraft",
-            operation: "lifecycle_reconcile",
-            units: 0,
-            unitCostUsd: 0,
-            metadata: { reason: "nothing_pending", uuids: 0, taken_down: 0, declined: 0 },
-          });
-        });
+        await step.run("log-cost-quiet", () =>
+          recordLaneOutcome("shopfront-clone-netcraft-reconcile", 0, {
+            reason: "nothing_pending",
+            uuids: 0,
+            taken_down: 0,
+            declined: 0,
+          }),
+        );
         return { ok: true, uuids: 0, taken_down: 0, declined: 0 };
       }
 
@@ -250,16 +248,12 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         });
       }
 
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "shopfront_clone_netcraft_reconcile",
-          provider: "netcraft",
-          operation: "lifecycle_reconcile",
-          units: groups.length,
-          unitCostUsd: 0,
-          metadata: { uuids: groups.length, ...counts },
-        });
-      });
+      await step.run("log-cost", () =>
+        recordLaneOutcome("shopfront-clone-netcraft-reconcile", groups.length, {
+          uuids: groups.length,
+          ...counts,
+        }),
+      );
 
       logger.info("netcraft-reconcile: complete", { uuids: groups.length, ...counts });
       return { ok: true, uuids: groups.length, ...counts };

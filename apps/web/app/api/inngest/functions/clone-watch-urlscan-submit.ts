@@ -1,10 +1,10 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCostAsync } from "@/lib/cost-telemetry";
 import {
   submitCloneCandidate,
   type CloneCandidate,
@@ -156,22 +156,15 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         // submit_batch row lands inside 26h, and a quiet day (no gated
         // candidates, nothing to retire) used to write nothing. units 0
         // satisfies no silent-zero predicate.
-        await step.run("log-cost-quiet", async () => {
-          await logCostAsync({
-            feature: "shopfront_clone_urlscan",
-            provider: "urlscan",
-            operation: "submit_batch",
-            units: 0,
-            unitCostUsd: 0,
-            metadata: {
-              reason: "no_gated_candidates",
-              submitted: 0,
-              submit_failed: 0,
-              rate_limited: 0,
-              dormant_retired: dormant,
-            },
-          });
-        });
+        await step.run("log-cost-quiet", () =>
+          recordLaneOutcome("shopfront-clone-urlscan-submit", 0, {
+            reason: "no_gated_candidates",
+            submitted: 0,
+            submit_failed: 0,
+            rate_limited: 0,
+            dormant_retired: dormant,
+          }),
+        );
         return {
           ok: true,
           submitted: 0,
@@ -237,20 +230,17 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         // Awaited (#1069): the Aug 31 submit run was finish-cancelled after the
         // batch step and this row silently vanished — the day's submit telemetry
         // simply did not exist. Awaiting binds the row to the step.
-        await logCostAsync({
-          feature: "shopfront_clone_urlscan",
-          provider: "urlscan",
-          operation: "submit_batch",
-          units: candidates.length,
-          unitCostUsd: 0, // free tier (urlscan + SB/VT)
-          metadata: {
+        await recordLaneOutcome(
+          "shopfront-clone-urlscan-submit",
+          candidates.length,
+          {
             submitted,
             submit_failed: submitFailed,
             rate_limited: rateLimited,
             reputation_hits: reputationHits,
             dormant_retired: dormant,
           },
-        });
+        );
       });
 
       logger.info("clone-watch urlscan submit: batch complete", {

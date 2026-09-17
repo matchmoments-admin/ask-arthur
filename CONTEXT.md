@@ -53,6 +53,14 @@ What a **Weaponised** Clone Alert becomes when the platform's own surfaces are t
 _Naming note:_ the `/api/scam-contacts/*` routes + the `scamContactReporting` feature flag are the legacy surface name for the phone/email subset of Scam Entities (public reporting + reputation lookup) — "contact" here is not a separate concept; it's a Scam Entity. (The routes/flag keep the legacy name; no code rename — see migration v170 which re-wired them onto the unified `scam_entities` model via `report_scam_entity`.)
 _Avoid_: indicator, IOC, observable, artifact.
 
+**Lane** (clone-watch):
+One clone-watch background function — named by its Inngest id minus the app prefix (`shopfront-clone-lifecycle-recheck`, `shopfront-clone-netcraft-issue`, …). The unit the fleet brake matrix (`docs/inngest-brakes.md`) and the silent-zero detector reason about. A Lane with a `feature_brakes` key is _braked_ when `paused_until > now()`; that is the only meaning of braked (a row saying `braked:true` records that a run _tripped_ it).
+_Avoid_: "job", "worker", "cron" for a specific function (a cron is the trigger, not the Lane).
+
+**Outcome Row** (v62 table, ADR-0025):
+The one `cost_telemetry` row a Lane writes per run, quiet or not, through `recordLaneOutcome` (`packages/scam-engine/src/lane-outcome.ts`). `units` and the typed `metadata` keys are the Lane's contract with the silent-zero detector; `metadata.reason` marks a quiet run (`nothing_due`, `no_gated_candidates`, `nothing_pending`, `daily_cap_reached`, `none_pending_or_cap`, `all_dead`, `bulk_submit_failed`). Skip-paths (flag off, brake, cooldown, no DB) write no Outcome Row on purpose, so a disabled Lane reads as _absent_. Distinct from the Lane's other `cost_telemetry` rows (per-item spend such as `recheck_submit` or the per-alert Claude `classify` rows, and `-error` rows), which are not read as outcomes.
+_Avoid_: "log line", "telemetry event", "cost row" (ambiguous — a Lane writes several) for the per-run row.
+
 **Scam Cluster**:
 A group of Scam Reports linked by shared Scam Entities, text similarity, or a common impersonated brand. Tracks aggregate member count and total reported loss.
 _Avoid_: group, campaign, ring.

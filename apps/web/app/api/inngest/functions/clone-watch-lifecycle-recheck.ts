@@ -1,11 +1,12 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost, logCostAsync } from "@/lib/cost-telemetry";
+import { logCost } from "@/lib/cost-telemetry";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 
@@ -251,28 +252,19 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       });
 
       if (pool.length === 0) {
-        // One outcome row per run (#1145). The digest's silent-zero detector
-        // judges this lane ABSENT when no recheck_batch row lands inside 9h,
-        // and "nothing due" used to write nothing — a quiet window read as
-        // "not running". units 0 / pool 0 satisfies no silent-zero predicate.
-        // The 50-min cooldown above reads this feature's latest row, so a
-        // quiet run also holds off a stacked manual fire — intended.
-        await step.run("log-cost-quiet", async () => {
-          await logCostAsync({
-            feature: "shopfront_clone_recheck",
-            provider: "internal",
-            operation: "recheck_batch",
-            units: 0,
-            unitCostUsd: 0,
-            metadata: {
-              reason: "nothing_due",
-              pool: 0,
-              rechecked: 0,
-              submitted: 0,
-              submit_failed: 0,
-            },
-          });
-        });
+        // Quiet-run Outcome Row (#1145/#1166): "nothing due" used to write
+        // nothing and read as "not running". The 50-min cooldown above reads
+        // this feature's latest row, so a quiet run also holds off a stacked
+        // manual fire — intended.
+        await step.run("log-cost-quiet", () =>
+          recordLaneOutcome("shopfront-clone-lifecycle-recheck", 0, {
+            reason: "nothing_due",
+            pool: 0,
+            rechecked: 0,
+            submitted: 0,
+            submit_failed: 0,
+          }),
+        );
         return { ok: true, rechecked: 0, reason: "nothing_due" };
       }
 
@@ -392,13 +384,10 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // volume ceilings (v224).
       await step.run("log-cost", async () => {
         const risks = candidates.map((c) => c.risk).sort((a, b) => a - b);
-        logCost({
-          feature: "shopfront_clone_recheck",
-          provider: "internal",
-          operation: "recheck_batch",
-          units: attemptedIds.length,
-          unitCostUsd: 0,
-          metadata: {
+        await recordLaneOutcome(
+          "shopfront-clone-lifecycle-recheck",
+          attemptedIds.length,
+          {
             rechecked: attemptedIds.length,
             pool: pool.length,
             submitted,
@@ -417,7 +406,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
               low: candidates.filter((c) => c.risk < 40).length,
             },
           },
-        });
+        );
         logCost({
           feature: "shopfront_clone_urlscan",
           provider: "urlscan",
