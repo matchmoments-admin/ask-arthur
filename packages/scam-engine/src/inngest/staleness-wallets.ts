@@ -1,11 +1,25 @@
 // Staleness cron for crypto wallets — daily, marks wallets not seen in any feed
 // for 14 days as inactive. Preserves high-confidence wallets.
+//
+// v308 (#1156): brought onto the shared bounded-batch sweep (staleness-sweep.ts)
+// so the three staleness crons are one shape. This one was completing fine
+// (small table); the change here is uniformity, not a fix.
 
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { withAxiomLogging } from "./with-axiom-logging";
+import { budgetedStep } from "./step-budget";
+import { runStalenessSweep, stalenessRpcBatch } from "./staleness-sweep";
+
+const STALE_DAYS = 14;
+const BATCH_LIMIT = 5000;
+// In-step budget (see staleness.ts). Floor = 30 + 120 + 60 = 210 s < 4 m.
+const STALENESS_WALL_CLOCK_MS = 120_000;
+
+// inngest-finish-budget: 1 boundaries — the single budgetedStep "mark-stale-wallets"
+// (the batch loop runs INSIDE it; no per-item steps).
 
 export const stalenessCheckWallets = inngest.createFunction(
   {
@@ -14,8 +28,9 @@ export const stalenessCheckWallets = inngest.createFunction(
     timeouts: { finish: "4m" },
     name: "Pipeline: Mark Stale Crypto Wallets",
   },
-  // Staggered off the 0 3 trio (#524): URLs 0 3, IPs 10 3, wallets 20 3.
-  { cron: "20 3 * * *" },
+  // Staggered trio: URLs 05:40, IPs 05:50, wallets 06:05 UTC (v308 — see
+  // staleness.ts for why it left 03:20).
+  { cron: "5 6 * * *" },
   withAxiomLogging(
     { fnId: "pipeline-staleness-check-wallets" },
     async ({ step }) => {
@@ -23,32 +38,30 @@ export const stalenessCheckWallets = inngest.createFunction(
         return { skipped: true, reason: "dataPipeline feature flag disabled" };
       }
 
-      const result = await step.run("mark-stale-wallets", async () => {
-        const supabase = createServiceClient();
-        if (!supabase) {
-          logger.warn(
-            "Supabase not configured, skipping wallet staleness check",
-          );
-          return { skipped: true };
-        }
-
-        const { data, error } = await supabase.rpc(
-          "mark_stale_crypto_wallets",
-          {
-            p_stale_days: 14,
-          },
-        );
-
-        if (error) {
-          logger.error("Wallet staleness check failed", {
-            error: String(error),
+      const result = await budgetedStep(
+        step,
+        "mark-stale-wallets",
+        STALENESS_WALL_CLOCK_MS,
+        async (budget) => {
+          const supabase = createServiceClient();
+          if (!supabase) {
+            logger.warn(
+              "Supabase not configured, skipping wallet staleness check",
+            );
+            return { skipped: true as const };
+          }
+          const sweep = await runStalenessSweep({
+            budget,
+            batchLimit: BATCH_LIMIT,
+            runBatch: stalenessRpcBatch(supabase, "mark_stale_crypto_wallets", {
+              p_stale_days: STALE_DAYS,
+              p_limit: BATCH_LIMIT,
+            }),
           });
-          throw new Error(`Wallet staleness RPC failed: ${error.message}`);
-        }
-
-        logger.info("Wallet staleness check complete", { result: data });
-        return data;
-      });
+          logger.info("Wallet staleness check complete", { ...sweep });
+          return sweep;
+        },
+      );
 
       return result;
     },

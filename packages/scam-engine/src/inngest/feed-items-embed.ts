@@ -20,6 +20,7 @@ import { inngest } from "./client";
 import { embed } from "../embeddings";
 import { isFeatureBraked } from "../cost-log";
 import { withAxiomLogging } from "./with-axiom-logging";
+import { budgetedStep } from "./step-budget";
 
 interface UnembeddedRow {
   id: number;
@@ -33,6 +34,14 @@ interface UnembeddedRow {
 }
 
 const BATCH_LIMIT = 40;
+// embed + write + log-cost run inside ONE step (v308/#1156): they were three
+// steps, and on the `:00` account-concurrency pileup each boundary costs
+// 30–60 s of queue wait, so 4 boundaries cancelled 12 of 48 runs at the 4 m
+// finish. The Voyage call is ~2 s and the 40 row writes ~5 s; the budget is
+// checked between the embed and the writes, and the writes are idempotent
+// (embedding IS NULL re-selects any row a cut-off run missed). In-step: the
+// clock starts at step entry. Floor = 2 × 30 s + 90 s + 60 s = 210 s < 4 m.
+const EMBED_WALL_CLOCK_MS = 90_000;
 
 function buildEmbedText(row: UnembeddedRow): string {
   const parts: string[] = [`source:${row.source}`];
@@ -80,7 +89,8 @@ export const feedItemsEmbed = inngest.createFunction(
   // feed_items re-selects any not-yet-embedded rows each run, so a transient
   // backlog (inflow > BATCH_LIMIT in one window) simply drains over the next
   // runs. No feed_items are ever skipped, only embedded slightly later.
-  { cron: "0 */4 * * *" },
+  // :20, not :00 — off the account-concurrency pileup (v308/#1156).
+  { cron: "20 */4 * * *" },
   withAxiomLogging({ fnId: "feed-items-embed" }, async ({ step }) => {
     // Cost brake — this is a paid Voyage call. cost-daily-check sets the
     // `news_intel_embed` brake when the day's embed spend exceeds its cap;
@@ -105,65 +115,83 @@ export const feedItemsEmbed = inngest.createFunction(
       return { skipped: true, reason: "no_unembedded_rows" };
     }
 
-    const result = await step.run("embed", async () => {
-      const texts = rows.map(buildEmbedText);
-      return embed(texts);
-    });
-
-    if (result.vectors.length !== rows.length) {
-      throw new Error(
-        `embedding count mismatch: ${result.vectors.length} vs ${rows.length}`,
-      );
-    }
-
-    const written = await step.run("write-embeddings", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) throw new Error("supabase service client unavailable");
-      let count = 0;
-      for (let i = 0; i < rows.length; i++) {
-        const vec = vectorToPgString(result.vectors[i]);
-        const { error } = await supabase
-          .from("feed_items")
-          .update({
-            embedding: vec,
-            embedding_model_version: result.modelId,
-          })
-          .eq("id", rows[i].id);
-        if (error) {
-          logger.warn("feed-items-embed: row update failed", {
-            id: rows[i].id,
-            error: error.message,
-          });
-          continue;
+    const outcome = await budgetedStep(
+      step,
+      "embed-and-write",
+      EMBED_WALL_CLOCK_MS,
+      async (budget) => {
+        const texts = rows.map(buildEmbedText);
+        const result = await embed(texts);
+        if (result.vectors.length !== rows.length) {
+          throw new Error(
+            `embedding count mismatch: ${result.vectors.length} vs ${rows.length}`,
+          );
         }
-        count++;
-      }
-      return count;
-    });
 
-    await step.run("log-cost", () =>
-      logCost({
-        estimatedCostUsd: result.estimatedCostUsd,
-        totalTokens: result.totalTokens,
-        provider: result.provider,
-        modelId: result.modelId,
-        itemCount: written,
-      }),
+        const supabase = createServiceClient();
+        if (!supabase) throw new Error("supabase service client unavailable");
+        let written = 0;
+        let cutOff = 0;
+        for (let i = 0; i < rows.length; i++) {
+          if (budget.expired()) {
+            // Unwritten rows stay embedding IS NULL and re-select next tick.
+            cutOff = rows.length - i;
+            break;
+          }
+          const vec = vectorToPgString(result.vectors[i]);
+          const { error } = await supabase
+            .from("feed_items")
+            .update({
+              embedding: vec,
+              embedding_model_version: result.modelId,
+            })
+            .eq("id", rows[i].id);
+          if (error) {
+            logger.warn("feed-items-embed: row update failed", {
+              id: rows[i].id,
+              error: error.message,
+            });
+            continue;
+          }
+          written++;
+        }
+
+        // Cost is bound to this step: the Voyage call has happened whether or
+        // not every row was written, so the row is logged here, not later.
+        await logCost({
+          estimatedCostUsd: result.estimatedCostUsd,
+          totalTokens: result.totalTokens,
+          provider: result.provider,
+          modelId: result.modelId,
+          itemCount: written,
+        });
+
+        return {
+          written,
+          cutOff,
+          provider: result.provider,
+          totalTokens: result.totalTokens,
+          estimatedCostUsd: result.estimatedCostUsd,
+        };
+      },
     );
+    const { written, cutOff } = outcome;
 
     logger.info("feed-items-embed: complete", {
       candidates: rows.length,
       embedded: written,
-      provider: result.provider,
-      tokens: result.totalTokens,
-      cost: result.estimatedCostUsd.toFixed(6),
+      cutOff,
+      provider: outcome.provider,
+      tokens: outcome.totalTokens,
+      cost: outcome.estimatedCostUsd.toFixed(6),
     });
 
     return {
       candidates: rows.length,
       embedded: written,
-      provider: result.provider,
-      estimatedCostUsd: result.estimatedCostUsd,
+      cutOff,
+      provider: outcome.provider,
+      estimatedCostUsd: outcome.estimatedCostUsd,
     };
   }),
 );

@@ -16,7 +16,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 | Path                                | Schedule                                   | Purpose                                                                                                                                                                                                                     |
 | ----------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/cron/weekly-email`            | `0 14 * * 1` (Mon 14:00 UTC)               | Prepare a private Arthur’s Watch draft (no email send); v303 prunes up to 500 never-confirmed requests older than 7 days and 100 budget rows older than 30 days per run. Cleanup/query failures return 503.                                               |
+| `/api/cron/weekly-email`            | `0 14 * * 1` (Mon 14:00 UTC)               | Prepare a private Arthur’s Watch draft (no email send); v303 prunes up to 500 never-confirmed requests older than 7 days and 100 budget rows older than 30 days per run. Cleanup/query failures return 503.                 |
 | `/api/cron/nurture`                 | `0 23 * * *` (daily 23:00 UTC)             | B2B leads nurture sequence                                                                                                                                                                                                  |
 | `/api/cron/bot-queue-sweep`         | `0 */6 * * *` (every 6h)                   | Bot queue safety net (>2 min pending)                                                                                                                                                                                       |
 | `/api/cron/bot-queue-cleanup`       | `0 4 * * *` (daily 04:00 UTC)              | Hard-delete terminal queue rows >24h                                                                                                                                                                                        |
@@ -62,19 +62,30 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Enrichment pipeline (recurring)
 
-| Function                      | Cron           | Purpose                                                                  |
-| ----------------------------- | -------------- | ------------------------------------------------------------------------ |
-| `pipeline-enrichment-fanout`  | `0 */12 * * *` | URL WHOIS + SSL enrichment (20 domains/run, concurrency 1, newest-first) |
-| `pipeline-entity-enrichment`  | `0 */8 * * *`  | Entity enrichment (wallet / IP / email)                                  |
-| `pipeline-urlscan-enrichment` | `30 */8 * * *` | URLScan async enrichment                                                 |
+| Function                      | Cron            | Purpose                                                                                                                                          |
+| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pipeline-enrichment-fanout`  | `35 */12 * * *` | URL WHOIS + SSL enrichment (20 domains/run in ONE budgeted step, 4-wide waves, concurrency 1, newest-first; v308 folded the 20 per-domain steps) |
+| `pipeline-entity-enrichment`  | `0 */8 * * *`   | Entity enrichment (wallet / IP / email)                                                                                                          |
+| `pipeline-urlscan-enrichment` | `30 */8 * * *`  | URLScan async enrichment                                                                                                                         |
 
-### Staleness checks (daily 03:00 UTC)
+### Staleness checks (daily 05:40 / 05:50 / 06:05 UTC)
 
-| Function                           | Purpose                             |
-| ---------------------------------- | ----------------------------------- |
-| `pipeline-staleness-check`         | Mark URLs inactive after 7 days     |
-| `pipeline-staleness-check-ips`     | Mark IPs inactive after 7 days      |
-| `pipeline-staleness-check-wallets` | Mark wallets inactive after 14 days |
+| Function                           | Cron         | Purpose                             |
+| ---------------------------------- | ------------ | ----------------------------------- |
+| `pipeline-staleness-check`         | `40 5 * * *` | Mark URLs inactive after 7 days     |
+| `pipeline-staleness-check-ips`     | `50 5 * * *` | Mark IPs inactive after 7 days      |
+| `pipeline-staleness-check-wallets` | `5 6 * * *`  | Mark wallets inactive after 14 days |
+
+All three are one shape since v308 (#1156): a bounded-batch RPC
+(`mark_stale_{urls,ips,crypto_wallets}(p_stale_days, p_limit)`, index-driven
+via the partial `idx_scam_*_staleness`) looped by
+`packages/scam-engine/src/inngest/staleness-sweep.ts` inside ONE in-step
+budget (120 s); each batch is its own transaction, and a tail that doesn't fit
+returns `drained:false` and continues next tick. They left 03:00–03:20 because
+that hour is where the tier-12h bulk IOC mirror scrapers land (GHA dispatches
+the 00:00 tick 1–4 h late → 84K–136K `scam_urls` upserts at 03–04 UTC), which
+finish-cancelled the single-statement URL sweep every day Sep 14–17 and left
+`is_active` URL gating four days stale.
 
 ### Vulnerability enrichment
 
@@ -114,7 +125,7 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 | Function                   | Trigger                                  | Purpose                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `feed-items-embed`         | `0 * * * *` (hourly)                     | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                                                                                                                                                                                                                                                                       |
+| `feed-items-embed`         | `20 */4 * * *` (every 4h, off `:00`)     | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                                                                                                                                                                                                                                                                       |
 | `competitor-intel-extract` | `0 */6 * * *` (every 6h)                 | Arthur's Watch Phase 2 — split competitor newsletters into per-scam observations (`competitor_intel_observations`, v212). Flag-gated `FF_COMPETITOR_INTEL_EXTRACT` (default OFF); marks `feed_items.competitor_extracted_at`; logs `cost_telemetry` `feature='competitor-intel-extract'` + shares `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`. |
 | `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC)         | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d)                                                                                                                                                                                                                                                             |
 | `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)              | Sync `verified_scams` → `feed_items`                                                                                                                                                                                                                                                                                                                      |
@@ -339,9 +350,9 @@ Redeploy procedure when the Worker source changes: from `apps/cloudflare-email-w
 */15   scraper-brake-alert                   (every 15 min)
 :50    feedback-triage-refresh               (hourly at :50 — off the :00 pileup, #1069; change-guarded — most ticks skip the REFRESH)
 hourly phone-footprint-refresh-claimer       (Inngest, TZ=Australia/Sydney)
-every 4h feed-items-embed                     (Inngest)
+every 4h feed-items-embed                     (Inngest, :20)
 every 4h pipeline-entity-enrichment, urlscan-enrichment (Inngest)
-every 12h pipeline-enrichment-fanout, risk-scorer (Inngest)
+every 12h pipeline-enrichment-fanout (:35), risk-scorer (Inngest)
 
 Event-only — NO schedule (cron removed; 0 scheduled executions until re-enabled):
        scam-alert-push, regulator-alert-push, enrich-vulnerabilities-cron,
@@ -355,7 +366,6 @@ every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRA
 02:30 feed-retention                          (Inngest)
 02:00 billing-ingest-nightly                  (Inngest)
 03:00 vuln-retention                          (Vercel)
-03:00 pipeline-staleness-check[/ips/wallets]  (Inngest)
 03:15 phone-footprint-retention               (Inngest)
 03:30 scam-reports-retention                  (Vercel)
 03:45 reddit-processed-posts-retention        (Inngest)
@@ -366,6 +376,9 @@ every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRA
 04:30 reddit-intel-retention                  (Vercel)
 04:30 telco-events-retention                  (Inngest)
 05:00 archive-shadows-retention               (Inngest)
+05:40 pipeline-staleness-check                (Inngest — moved from 03:00 in v308, see Staleness checks)
+05:50 pipeline-staleness-check-ips            (Inngest)
+06:05 pipeline-staleness-check-wallets        (Inngest)
 09:00 feedback-digest                         (Vercel)
 13:00 clone-watch-auto-triage                 (Inngest, FF_CLONE_WATCH_AUTO_TRIAGE)
 14:00 weekly-email                            (Vercel, Mondays)
@@ -382,7 +395,7 @@ Anything between 02:00 and 05:00 UTC is in the housekeeping window. Anything out
 
 ## News Intel scrapers — operational note
 
-AU regulator narrative scrapers (Scamwatch HTML, ACSC RSS, ASIC JSON) shipped 2026-05-06 (PR #137 + fixes #138/#139, migration v97). Scrapers in `pipeline/scrapers/{scamwatch,acsc,asic_investor}_alerts.py` write to `feed_items` with `source IN ('scamwatch_alert','acsc','asic_investor')`. Voyage embedding via `feed-items-embed` Inngest cron (`0 * * * *`, hourly). Weekly digest folds in via `regulatorAlerts` section + Clone Watch section (`getWeeklyCloneWatch` → `cloneWatch` prop) in `WeeklyIntelDigest.tsx`.
+AU regulator narrative scrapers (Scamwatch HTML, ACSC RSS, ASIC JSON) shipped 2026-05-06 (PR #137 + fixes #138/#139, migration v97). Scrapers in `pipeline/scrapers/{scamwatch,acsc,asic_investor}_alerts.py` write to `feed_items` with `source IN ('scamwatch_alert','acsc','asic_investor')`. Voyage embedding via `feed-items-embed` Inngest cron (`20 */4 * * *`). Weekly digest folds in via `regulatorAlerts` section + Clone Watch section (`getWeeklyCloneWatch` → `cloneWatch` prop) in `WeeklyIntelDigest.tsx`.
 
 **Retention** (migration v98): narrative `feed_items` >365d → `feed_items_archive`; `feed_ingestion_log` pruned 90d; `feed_http_cache` pruned 30d. All housekeeping runs nightly at 02:30 UTC via `feed-retention` Inngest function.
 
