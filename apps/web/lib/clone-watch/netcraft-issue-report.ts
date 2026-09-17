@@ -1,5 +1,8 @@
 import { stripUrlPii } from "@/lib/onward/url-blocklist-report";
-import { NETCRAFT_API_BASE, type FalseNegativeCandidate } from "./netcraft-urls";
+import {
+  NETCRAFT_API_BASE,
+  type FalseNegativeCandidate,
+} from "./netcraft-urls";
 
 /**
  * Netcraft "report an issue with a submission" — payload builder + keyless POST.
@@ -61,14 +64,20 @@ export function buildIssuePayload(
   const lines = candidates.map(
     (c) =>
       `• ${stripUrlPii(c.candidateUrl)} — impersonates ${c.brand} (${c.urlState})` +
-      (c.urlscanUuid ? ` — urlscan: https://urlscan.io/result/${c.urlscanUuid}/` : ""),
+      (c.urlscanUuid
+        ? ` — urlscan: https://urlscan.io/result/${c.urlscanUuid}/`
+        : ""),
   );
   let additional_info = `${ADDITIONAL_INFO_PREFIX}\n\n${lines.join("\n")}`;
   if (additional_info.length > ADDITIONAL_INFO_MAX) {
     additional_info = additional_info.slice(0, ADDITIONAL_INFO_MAX);
   }
 
-  return { additional_info, url_misclassifications, filename_misclassifications: [] };
+  return {
+    additional_info,
+    url_misclassifications,
+    filename_misclassifications: [],
+  };
 }
 
 /** F4 evidence sentence for the per-URL reason. Cites our independent
@@ -132,4 +141,55 @@ export async function postNetcraftIssue(
       body: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * How a failed report_issue POST should be handled. Three outcomes, not two:
+ *
+ *   - "transient": network/timeout (status 0), 429, 5xx — Netcraft's problem,
+ *     bump the attempt counter and retry next run.
+ *   - "not_yet": Netcraft's 400 `"Please wait until the submission has been
+ *     fully processed before reporting issues"`. A 400 by status, a retry by
+ *     meaning: the per-URL states we read can already say "no threats" while
+ *     the SUBMISSION is still processing (a `weaponised_resubmit` re-files the
+ *     batch, and the reporter can be event-triggered hours later). Defer the
+ *     uuid like the pre-POST `transient_state` path does.
+ *   - "permanent": any other 4xx — the body contract or the uuid is wrong.
+ *
+ * Before 2026-09-16 the classifier looked only at the status code, so every
+ * "not yet" was stamped `post_4xx` (a terminal skip — the alert never re-filed)
+ * and tripped the autobrake. Every permanent 4xx this reporter had EVER
+ * recorded (Aug 7, Sep 9, Sep 16) was this one message; 7 alerts across 3
+ * uuids were dropped from escalation by it.
+ */
+export type IssueRejectKind = "transient" | "not_yet" | "permanent";
+
+const NETCRAFT_NOT_YET_PROCESSED_RE = /fully processed/i;
+
+export function classifyIssueReject(
+  status: number,
+  body: string,
+): IssueRejectKind {
+  if (status === 0 || status === 429 || status >= 500) return "transient";
+  if (status === 400 && NETCRAFT_NOT_YET_PROCESSED_RE.test(body)) {
+    return "not_yet";
+  }
+  return "permanent";
+}
+
+/**
+ * The autobrake decision, pure so it can be tested against the case that
+ * tripped it falsely: a ratio over ONE live post. A ratio needs a denominator
+ * before it means anything — `minLivePosts` is that floor. The absolute count
+ * rule has no floor by design (N distinct uuids rejected is evidence on its own).
+ */
+export function autobrakeShouldTrip(
+  counts: { permanentRejects: number; livePosts: number },
+  rule: { rejectCount: number; rejectRatio: number; minLivePosts: number },
+): boolean {
+  if (counts.permanentRejects >= rule.rejectCount) return true;
+  return (
+    counts.livePosts >= rule.minLivePosts &&
+    counts.permanentRejects / counts.livePosts > rule.rejectRatio
+  );
 }
