@@ -7,7 +7,11 @@ import {
   type NetcraftUrlEntry,
   type PendingAlert,
 } from "@/lib/clone-watch/netcraft-urls";
-import { buildIssuePayload } from "@/lib/clone-watch/netcraft-issue-report";
+import {
+  autobrakeShouldTrip,
+  buildIssuePayload,
+  classifyIssueReject,
+} from "@/lib/clone-watch/netcraft-issue-report";
 import acDbUrls from "./fixtures/netcraft-acDb-urls.json";
 
 /**
@@ -71,14 +75,18 @@ describe("selectFalseNegativeCandidates", () => {
       { allowUnavailable: false },
     );
     expect(r.candidates).toHaveLength(1);
-    expect(r.candidates[0]).toMatchObject({ alertId: 1, urlState: "no threats" });
+    expect(r.candidates[0]).toMatchObject({
+      alertId: 1,
+      urlState: "no threats",
+    });
   });
 
   it("gates 'unavailable' behind allowUnavailable", () => {
     const entries = [urlEntry("inistagram.ir", "unavailable")];
     expect(
-      selectFalseNegativeCandidates(alerts, entries, { allowUnavailable: false })
-        .candidates,
+      selectFalseNegativeCandidates(alerts, entries, {
+        allowUnavailable: false,
+      }).candidates,
     ).toHaveLength(0);
     expect(
       selectFalseNegativeCandidates(alerts, entries, { allowUnavailable: true })
@@ -131,9 +139,15 @@ describe("selectFalseNegativeCandidates", () => {
   });
 
   it("maps N alerts in one batch to N candidates", () => {
-    const many = [alert(1, "a-bank.com"), alert(2, "b-bank.com"), alert(3, "c-bank.com")];
+    const many = [
+      alert(1, "a-bank.com"),
+      alert(2, "b-bank.com"),
+      alert(3, "c-bank.com"),
+    ];
     const entries = many.map((a) => urlEntry(a.candidate_domain, "no threats"));
-    const r = selectFalseNegativeCandidates(many, entries, { allowUnavailable: false });
+    const r = selectFalseNegativeCandidates(many, entries, {
+      allowUnavailable: false,
+    });
     expect(r.candidates.map((c) => c.alertId).sort()).toEqual([1, 2, 3]);
   });
 });
@@ -142,9 +156,13 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
   const alerts = [alert(1, "inistagram.ir")];
 
   it("routes a matched malicious host to terminal 'actioned' (not a candidate)", () => {
-    const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "malicious")], {
-      allowUnavailable: true,
-    });
+    const r = selectFalseNegativeCandidates(
+      alerts,
+      [urlEntry("inistagram.ir", "malicious")],
+      {
+        allowUnavailable: true,
+      },
+    );
     expect(r.candidates).toHaveLength(0);
     expect(r.terminal).toEqual([{ alert: alerts[0], reason: "actioned" }]);
   });
@@ -152,9 +170,13 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
   it.each(["suspicious", "processing"])(
     "routes a matched %s host to transient (recheck, never dropped)",
     (state) => {
-      const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", state)], {
-        allowUnavailable: true,
-      });
+      const r = selectFalseNegativeCandidates(
+        alerts,
+        [urlEntry("inistagram.ir", state)],
+        {
+          allowUnavailable: true,
+        },
+      );
       expect(r.candidates).toHaveLength(0);
       expect(r.transient.map((a) => a.id)).toEqual([1]);
       expect(r.terminal).toHaveLength(0);
@@ -165,9 +187,13 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
   // row carrying a `skipped` key, so 19 weaponised alerts (more than had ever
   // been filed) were dropped forever. It is now a bounded deferral.
   it("routes 'unavailable' on likely_phishing evidence to a bounded deferral, never terminal", () => {
-    const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "unavailable")], {
-      allowUnavailable: false,
-    });
+    const r = selectFalseNegativeCandidates(
+      alerts,
+      [urlEntry("inistagram.ir", "unavailable")],
+      {
+        allowUnavailable: false,
+      },
+    );
     expect(r.candidates).toHaveLength(0);
     expect(r.terminal).toHaveLength(0);
     expect(r.deferred).toEqual([{ alert: alerts[0], reason: "unavailable" }]);
@@ -178,7 +204,9 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
   // serving phishing by 12:01. When OUR scan witnessed weaponisation, that
   // disagreement is precisely the false negative the reporter exists to file.
   it("escalates 'unavailable' when the alert carries witnessed-weaponisation evidence", () => {
-    const weaponised = [{ ...alert(1, "inistagram.ir"), lifecycle_state: "weaponised" }];
+    const weaponised = [
+      { ...alert(1, "inistagram.ir"), lifecycle_state: "weaponised" },
+    ];
     const r = selectFalseNegativeCandidates(
       weaponised,
       [urlEntry("inistagram.ir", "unavailable")],
@@ -194,10 +222,16 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
   });
 
   it("routes an unknown-only host to terminal 'no_escalatable_state' + drift", () => {
-    const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "quarantined")], {
-      allowUnavailable: true,
-    });
-    expect(r.terminal).toEqual([{ alert: alerts[0], reason: "no_escalatable_state" }]);
+    const r = selectFalseNegativeCandidates(
+      alerts,
+      [urlEntry("inistagram.ir", "quarantined")],
+      {
+        allowUnavailable: true,
+      },
+    );
+    expect(r.terminal).toEqual([
+      { alert: alerts[0], reason: "no_escalatable_state" },
+    ]);
     expect(r.deferred).toHaveLength(0);
     expect(r.driftStates).toContain("quarantined");
   });
@@ -224,10 +258,14 @@ describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => 
   }
 
   it("catches the founder's own examples (googlu.co, facebookk.xyz, statestreetcollective.shop) at 'no threats'", () => {
-    const alerts = ["googlu.co", "facebookk.xyz", "statestreetcollective.shop"].map(
-      alertFor,
-    );
-    const r = selectFalseNegativeCandidates(alerts, urls, { allowUnavailable: false });
+    const alerts = [
+      "googlu.co",
+      "facebookk.xyz",
+      "statestreetcollective.shop",
+    ].map(alertFor);
+    const r = selectFalseNegativeCandidates(alerts, urls, {
+      allowUnavailable: false,
+    });
     expect(r.candidates.map((c) => c.candidateDomain).sort()).toEqual(
       ["facebookk.xyz", "googlu.co", "statestreetcollective.shop"].sort(),
     );
@@ -237,18 +275,24 @@ describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => 
   it("only escalates 'unavailable' (inistagram.ir) when allowUnavailable=true", () => {
     const alerts = [alertFor("inistagram.ir")];
     expect(
-      selectFalseNegativeCandidates(alerts, urls, { allowUnavailable: false }).candidates,
+      selectFalseNegativeCandidates(alerts, urls, { allowUnavailable: false })
+        .candidates,
     ).toHaveLength(0);
     expect(
-      selectFalseNegativeCandidates(alerts, urls, { allowUnavailable: true }).candidates,
+      selectFalseNegativeCandidates(alerts, urls, { allowUnavailable: true })
+        .candidates,
     ).toHaveLength(1);
   });
 
   it("never escalates the one genuinely-malicious URL in the batch", () => {
     const malicious = urls.find((u) => u.url_state === "malicious")!;
-    const r = selectFalseNegativeCandidates([alertFor(malicious.hostname)], urls, {
-      allowUnavailable: true,
-    });
+    const r = selectFalseNegativeCandidates(
+      [alertFor(malicious.hostname)],
+      urls,
+      {
+        allowUnavailable: true,
+      },
+    );
     expect(r.candidates).toHaveLength(0);
   });
 });
@@ -262,7 +306,9 @@ describe("selectFalseNegativeCandidates — F4 evidence gate (v221)", () => {
       urlscan_classification: "neutral",
       lifecycle_state: "declined",
     };
-    const r = selectFalseNegativeCandidates([a], entries, { allowUnavailable: false });
+    const r = selectFalseNegativeCandidates([a], entries, {
+      allowUnavailable: false,
+    });
     expect(r.candidates).toHaveLength(0);
     expect(r.gatedOut.map((g) => g.id)).toEqual([1]);
     expect(r.terminal).toHaveLength(0); // never stamped — must retry when it weaponises
@@ -276,18 +322,26 @@ describe("selectFalseNegativeCandidates — F4 evidence gate (v221)", () => {
       inferred_target_domain: "instagram.com",
       target_brand_normalized: "Instagram",
     };
-    const r = selectFalseNegativeCandidates([a], entries, { allowUnavailable: false });
+    const r = selectFalseNegativeCandidates([a], entries, {
+      allowUnavailable: false,
+    });
     expect(r.candidates).toHaveLength(0);
     expect(r.gatedOut.map((g) => g.id)).toEqual([1]);
   });
 
   it("admits likely_phishing with evidence tag", () => {
-    const r = selectFalseNegativeCandidates([alert(1, "inistagram.ir")], entries, {
-      allowUnavailable: false,
-    });
+    const r = selectFalseNegativeCandidates(
+      [alert(1, "inistagram.ir")],
+      entries,
+      {
+        allowUnavailable: false,
+      },
+    );
     expect(r.candidates).toHaveLength(1);
     expect(r.candidates[0].evidence).toBe("likely_phishing");
-    expect(r.candidates[0].urlscanUuid).toBe("11111111-2222-3333-4444-555555555555");
+    expect(r.candidates[0].urlscanUuid).toBe(
+      "11111111-2222-3333-4444-555555555555",
+    );
   });
 
   it("admits a weaponised clone even with a null classification (reputation-fallback path)", () => {
@@ -297,7 +351,9 @@ describe("selectFalseNegativeCandidates — F4 evidence gate (v221)", () => {
       lifecycle_state: "weaponised",
       urlscan_uuid: null,
     };
-    const r = selectFalseNegativeCandidates([a], entries, { allowUnavailable: false });
+    const r = selectFalseNegativeCandidates([a], entries, {
+      allowUnavailable: false,
+    });
     expect(r.candidates).toHaveLength(1);
     expect(r.candidates[0].evidence).toBe("weaponised");
     expect(r.candidates[0].urlscanUuid).toBeNull();
@@ -320,7 +376,12 @@ describe("classifyByUrlState — lifecycle reconcile (PR3.1)", () => {
   const ra = (id: number, domain: string) => ({ id, candidate_domain: domain });
 
   it("malicious → taken_down; no-threats/unavailable → declined; else other", () => {
-    const alerts = [ra(1, "a.com"), ra(2, "b.com"), ra(3, "c.com"), ra(4, "d.com")];
+    const alerts = [
+      ra(1, "a.com"),
+      ra(2, "b.com"),
+      ra(3, "c.com"),
+      ra(4, "d.com"),
+    ];
     const urls = [
       urlEntry("a.com", "malicious"),
       urlEntry("b.com", "no threats"),
@@ -352,7 +413,10 @@ describe("classifyByUrlState — lifecycle reconcile (PR3.1)", () => {
   });
 
   it("an alert absent from /urls falls to 'other' (reconciled, not lost)", () => {
-    const r = classifyByUrlState([ra(9, "gone.com")], [urlEntry("other.com", "malicious")]);
+    const r = classifyByUrlState(
+      [ra(9, "gone.com")],
+      [urlEntry("other.com", "malicious")],
+    );
     expect(r.other).toEqual([9]);
   });
 
@@ -453,12 +517,16 @@ describe("buildIssuePayload", () => {
 
   it("falls back to the reputation-scan sentence when uuid is null", () => {
     const payload = buildIssuePayload([{ ...base, urlscanUuid: null }]);
-    expect(payload.url_misclassifications[0].reason).not.toContain("urlscan.io/result");
+    expect(payload.url_misclassifications[0].reason).not.toContain(
+      "urlscan.io/result",
+    );
     expect(payload.url_misclassifications[0].reason).toContain("Safe Browsing");
   });
 
   it("adds the witnessed-weaponisation sentence for weaponised evidence", () => {
-    const weaponised = buildIssuePayload([{ ...base, evidence: "weaponised" as const }]);
+    const weaponised = buildIssuePayload([
+      { ...base, evidence: "weaponised" as const },
+    ]);
     expect(weaponised.url_misclassifications[0].reason).toContain(
       "transition from parked/inactive",
     );
@@ -466,5 +534,63 @@ describe("buildIssuePayload", () => {
     expect(phishing.url_misclassifications[0].reason).not.toContain(
       "transition from parked/inactive",
     );
+  });
+});
+
+// The 400 Netcraft returned on 2026-08-07, 2026-09-09 and 2026-09-16 — every
+// "permanent 4xx" the reporter had ever recorded. Read as permanent, it stamped
+// 7 alerts across 3 uuids `post_4xx` (terminal) and tripped the autobrake at
+// 1/1 each time.
+const NETCRAFT_NOT_YET_BODY =
+  '{"details":[{"message":"Please wait until the submission has been fully processed before reporting issues"}],"error":"Bad Request","status":400}';
+
+describe("classifyIssueReject — Netcraft's 'not yet' is a retry, not a reject", () => {
+  it("reads the 'fully processed' 400 as not_yet, never permanent", () => {
+    expect(classifyIssueReject(400, NETCRAFT_NOT_YET_BODY)).toBe("not_yet");
+  });
+  it("keeps other 400s permanent (a real body-contract problem)", () => {
+    expect(
+      classifyIssueReject(
+        400,
+        '{"error":"Bad Request","details":[{"message":"url is required"}]}',
+      ),
+    ).toBe("permanent");
+    expect(classifyIssueReject(404, "not found")).toBe("permanent");
+    expect(classifyIssueReject(422, "")).toBe("permanent");
+  });
+  it("keeps network/429/5xx transient", () => {
+    expect(classifyIssueReject(0, "TimeoutError")).toBe("transient");
+    expect(classifyIssueReject(429, "")).toBe("transient");
+    expect(classifyIssueReject(503, NETCRAFT_NOT_YET_BODY)).toBe("transient");
+  });
+});
+
+describe("autobrakeShouldTrip — a ratio needs a denominator", () => {
+  const rule = { rejectCount: 3, rejectRatio: 0.5, minLivePosts: 2 };
+  it("does NOT trip on 1/1 (the false trip of 2026-08-07 and 2026-09-16)", () => {
+    expect(
+      autobrakeShouldTrip({ permanentRejects: 1, livePosts: 1 }, rule),
+    ).toBe(false);
+  });
+  it("trips on the ratio once the floor is met (2/2, 2/3)", () => {
+    expect(
+      autobrakeShouldTrip({ permanentRejects: 2, livePosts: 2 }, rule),
+    ).toBe(true);
+    expect(
+      autobrakeShouldTrip({ permanentRejects: 2, livePosts: 3 }, rule),
+    ).toBe(true);
+    expect(
+      autobrakeShouldTrip({ permanentRejects: 1, livePosts: 3 }, rule),
+    ).toBe(false);
+  });
+  it("trips on the absolute count regardless of ratio", () => {
+    expect(
+      autobrakeShouldTrip({ permanentRejects: 3, livePosts: 10 }, rule),
+    ).toBe(true);
+  });
+  it("never trips on zero live posts", () => {
+    expect(
+      autobrakeShouldTrip({ permanentRejects: 0, livePosts: 0 }, rule),
+    ).toBe(false);
   });
 });

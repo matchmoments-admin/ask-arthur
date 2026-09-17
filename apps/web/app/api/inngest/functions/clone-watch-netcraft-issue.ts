@@ -16,7 +16,9 @@ import {
 } from "@/lib/clone-watch/liveness";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
+  autobrakeShouldTrip,
   buildIssuePayload,
+  classifyIssueReject,
   postNetcraftIssue,
 } from "@/lib/clone-watch/netcraft-issue-report";
 import {
@@ -108,10 +110,14 @@ const DEAD_RECHECK_MS = 72 * 3600 * 1000;
 const UNAVAILABLE_RECHECK_MS = 24 * 3600 * 1000;
 const TRANSIENT_RECHECK_MS = 24 * 3600 * 1000;
 // Autobrake: trip on this many permanent 4xx rejects in a run, OR >50% of live
-// POSTs rejected. Transient (5xx/429/timeout) never trips it (Netcraft outage,
-// not our fault).
+// POSTs rejected once there are at least AUTOBRAKE_MIN_LIVE_POSTS of them.
+// Transient (5xx/429/timeout) and not-yet-processed 400s never trip it
+// (Netcraft's side, not ours). The ratio floor exists because 1/1 tripped it
+// on 2026-08-07 and 2026-09-16 — both on Netcraft's "wait until fully
+// processed", which was also being misread as permanent.
 const AUTOBRAKE_REJECT_COUNT = 3;
 const AUTOBRAKE_REJECT_RATIO = 0.5;
+const AUTOBRAKE_MIN_LIVE_POSTS = 2;
 
 function dailyCap(): number {
   const raw = Number.parseInt(process.env.NETCRAFT_ISSUE_DAILY_CAP ?? "", 10);
@@ -120,11 +126,6 @@ function dailyCap(): number {
 
 function isDryRun(): boolean {
   return readStringEnv("NETCRAFT_ISSUE_DRY_RUN") !== "false";
-}
-
-/** Transient = worth retrying (bump attempts). Everything else 4xx is permanent. */
-function isTransientStatus(status: number): boolean {
-  return status === 0 || status === 429 || status >= 500;
 }
 
 interface WorklistGroup {
@@ -279,6 +280,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         noEscalatable: 0,
         hasIssues: 0,
         transientErrors: 0,
+        notYetDeferred: 0,
         permanentRejects: 0,
         drained: 0,
         livePosts: 0,
@@ -608,7 +610,32 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         counts.livePosts++;
 
         if (!result.ok) {
-          if (isTransientStatus(result.status)) {
+          const reject = classifyIssueReject(result.status, result.body);
+          if (reject === "not_yet") {
+            // Netcraft: "wait until the submission has been fully processed".
+            // Same treatment as a pre-POST transient url_state — defer the
+            // uuid's candidates and let the 24h recheck re-file. Not a reject,
+            // not an attempt, never an autobrake input.
+            counts.notYetDeferred++;
+            await step.run(`defer-not-yet-${uuid}`, async () => {
+              await bulkDefer(
+                candidateIds,
+                "transient_state",
+                TRANSIENT_RECHECK_MS,
+              );
+              logEnforcementEvent("rejected", {
+                alertId: candidateIds[0],
+                domain: liveCandidates[0].candidateDomain,
+                channel: "netcraft",
+                runId,
+                extra: {
+                  reason: "not_yet_processed",
+                  uuid,
+                  status: result.status,
+                },
+              });
+            });
+          } else if (reject === "transient") {
             counts.transientErrors++;
             // Bump + the always-ship reject warn in ONE step, so a later
             // checkpoint replay can't re-fire the warn/audit row (v224).
@@ -691,10 +718,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       // BLOCK-5 — autobrake on a permanent-reject spike (standing safety net).
       const tripBrake =
         !dryRun &&
-        (counts.permanentRejects >= AUTOBRAKE_REJECT_COUNT ||
-          (counts.livePosts > 0 &&
-            counts.permanentRejects / counts.livePosts >
-              AUTOBRAKE_REJECT_RATIO));
+        autobrakeShouldTrip(counts, {
+          rejectCount: AUTOBRAKE_REJECT_COUNT,
+          rejectRatio: AUTOBRAKE_REJECT_RATIO,
+          minLivePosts: AUTOBRAKE_MIN_LIVE_POSTS,
+        });
       if (tripBrake) {
         await step.run("autobrake", async () => {
           // UPSERT (not update): the row doesn't exist by default, and
