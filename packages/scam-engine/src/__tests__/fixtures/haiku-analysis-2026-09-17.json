@@ -1,0 +1,47 @@
+{
+  "verdict": "HIGH_RISK",
+  "confidence": 0.95,
+  "summary": "This is a sophisticated phishing email impersonating Australia Post. It falsely claims there are 'overdue accounts' requiring your attention and directs you to click links or reply with personal information. Legitimate Australia Post communications do not mention overdue accounts or ask you to verify details via email — they use your official tracking portal or SMS.",
+  "redFlags": [
+    "Impersonation of Australia Post with fake case reference numbers",
+    "False claim about 'overdue accounts' — a common phishing pressure tactic",
+    "Mismatched sender: email comes from a redacted address, not an official Australia Post domain (@auspost.com.au)",
+    "Suspicious contact info: [NAME] listed as contact with non-official phone and website (example-unrelated-site.com.au — not Australia Post)",
+    "Generic greeting '[NAME]' and generic responder 'Anthony A' — unprofessional for official Australia Post",
+    "Multiple email redirects requesting replies — classic phishing pattern to harvest responses",
+    "Embedded mailto: links designed to capture replies with sensitive information",
+    "Login portal link (auspost.com.au/portal) — could be spoofed or lead to credential harvesting",
+    "Redacted personal information (TFN, Medicare number, phone, email, name) suggests this is a mass phishing campaign adapted to each victim",
+    "Poor grammar: 'regarding to some overdue accounts' and 'regarding to this enquiry' — non-native English phrasing"
+  ],
+  "nextSteps": [
+    "DO NOT click any links in this email or reply to it",
+    "DO NOT provide any personal or banking information",
+    "Verify directly with Australia Post: Go to auspost.com.au or call 13 POST (13 7678) using a phone number you find independently",
+    "If you have genuine parcels pending, log into your own Australia Post account (not via a link in this email) to check status",
+    "Delete this email immediately",
+    "Report this phishing attempt to Scamwatch at scamwatch.gov.au",
+    "If you have clicked links or shared information, contact IDCARE on 1800 595 160 for identity protection advice"
+  ],
+  "scamType": "phishing",
+  "impersonatedBrand": "Australia Post",
+  "channel": "email",
+  "scammerContacts": {
+    "phoneNumbers": [
+      {
+        "value": "[TFN] (redacted)",
+        "context": "Listed as mobile for '[NAME]' — appears to be a fake contact name/number used in the phishing header"
+      }
+    ],
+    "emailAddresses": [
+      {
+        "value": "[EMAIL] (redacted — sender address)",
+        "context": "Sender of the phishing email — not an official Australia Post domain"
+      },
+      {
+        "value": "[EMAIL] (redacted — reply-to address in CLOSE MY CASE link)",
+        "context": "Designed to capture email replies from victims"
+      }
+    ]
+  }
+}
