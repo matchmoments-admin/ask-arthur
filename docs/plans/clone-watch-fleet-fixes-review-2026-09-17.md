@@ -7,13 +7,14 @@ time are given so it can be re-run.
 
 ## What shipped (in merge order)
 
-| PR    | Ticket          | State            | Migration      | One-line                                                                                                                                                     |
-| ----- | --------------- | ---------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| #1159 | #1156           | merged 04:39 UTC | v308 (applied) | Batched, index-driven staleness RPCs + one Staleness Sweep module; enrichment fan-out 21 → 2 boundaries; embed 4 → 2; crons off the 03–04 UTC scraper window |
-| #1161 | #1156 follow-up | merged 06:05 UTC | v310 (applied) | The in-body `SET LOCAL statement_timeout` was decorative; moved to the function-level clause                                                                 |
-| #1160 | #1151           | merged 06:12 UTC | v309 (applied) | Platform Entity bridge: weaponised clones → `scam_entities` + `scam_urls`, retraction, worklist consumer; 149 backfilled                                     |
-| #1163 | #1145           | **open, green**  | —              | Silent-zero detector as Check 4 of `health-digest`                                                                                                           |
-| #1164 | #1144           | **open, green**  | —              | Saved query set for the recovery proof (interim posted; final Sep 18–19)                                                                                     |
+| PR    | Ticket          | State                      | Migration      | One-line                                                                                                                                                     |
+| ----- | --------------- | -------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| #1159 | #1156           | merged 04:39 UTC           | v308 (applied) | Batched, index-driven staleness RPCs + one Staleness Sweep module; enrichment fan-out 21 → 2 boundaries; embed 4 → 2; crons off the 03–04 UTC scraper window |
+| #1161 | #1156 follow-up | merged 06:05 UTC           | v310 (applied) | The in-body `SET LOCAL statement_timeout` was decorative; moved to the function-level clause                                                                 |
+| #1160 | #1151           | merged 06:12 UTC           | v309 (applied) | Platform Entity bridge: weaponised clones → `scam_entities` + `scam_urls`, retraction, worklist consumer; 149 backfilled                                     |
+| #1163 | #1145           | **open, green**            | —              | Silent-zero detector as Check 4 of `health-digest`                                                                                                           |
+| #1164 | #1144           | **open, green**            | —              | Saved query set for the recovery proof (interim posted; final Sep 18–19). Block 1b refined 18:40 UTC — see §4                                                |
+| #1166 | #1145 follow-up | **open, stacked on #1163** | —              | Every roster lane writes one outcome row per run — without it the detector's `absent` pages on ~half of quiet days (§3)                                      |
 
 New tickets: **#1162** (six more functions with the decorative timeout form). Map #1143 has two new
 decision lines and two fog items resolved; one new fog item (the web checker reads no local threat table).
@@ -98,29 +99,60 @@ created_at > '2026-09-17'`.
   from the Sep 16 autobrake row. **Today's 11:00 UTC `issue_report` row should carry
   `braked:false`** (#1157 merged 01:40); if it still says `braked:true`, that is #1148's problem,
   not the detector's.
+- **The review found a hole in `absent` (fixed in #1166, stacked on #1163 — merge both before
+  trusting Check 4).** `absent` assumes one row per run, but every daily roster lane had a
+  quiet-day early return that wrote NO row: recheck `nothing_due`, submit `no_gated_candidates`
+  (when `dormant=0`), issue `nothing_pending` / `daily_cap_reached`, resubmit
+  `none_pending_or_cap` / `all_dead` / bulk-submit failure (only the `-error` feature), reconcile
+  `groups.length===0`. Prod Sep 4–16: resubmit row-less on 4 of 13 days, issue on 3 of 13 → the
+  digest would have paged "not running" on **7 of 13 days** for lanes that ran fine. Confirmed
+  live on Sep 17 from the Inngest run record (not inferred): issue 11:00 → `nothing_pending`,
+  resubmit 13:00 → `none_pending_or_cap`, neither wrote a row. #1166 adds a `units 0` +
+  `metadata.reason` row to each quiet path, awaited in its own `step.run`; every quiet shape was
+  checked against the predicates (resubmit `all_dead` pages only if the deferral itself failed —
+  which is the v252 starvation; reconcile's quiet row deliberately counts toward `uuids=0 ×3`).
+  Skip-paths (flag / brake / cooldown / no DB) still write nothing on purpose.
+- **A second nuance the same fix resolves:** `braked` is read from the latest row's metadata, but
+  the brake lives in `feature_brakes`. After the operator cleared the Sep 16 brake (01:30 UTC),
+  the latest issue row still said `braked:true` — and stays that way until a run writes a row.
+  With #1166 the next quiet run writes `braked:false`. Until then it is a stale finding, not a
+  detector bug.
+- **Tonight's 22:00 UTC row will therefore be wrong in two known ways if #1166 has not deployed:**
+  `absent:shopfront-clone-netcraft-resubmit` (last row Sep 16 13:03 → 33h) and
+  `braked:shopfront-clone-netcraft-issue` (stale). The first honest read of Check 4 is the 22:00
+  run after #1166 is on prod AND each lane has had one run.
 - What it cannot see: twelve lanes log no per-run cost row (listed in the module header). That is
-  deliberate — a predicate over rows that never exist is a guard that reads as protection. Next
-  graduated ticket: "every lane logs one outcome row per run".
+  deliberate — a predicate over rows that never exist is a guard that reads as protection. The
+  roster lanes now honour "one outcome row per run"; the twelve remain the graduated ticket.
 - Telegram stays behind `FF_LEGACY_DIGEST_TELEGRAM`; the delivery-log row carries
   `lanes_checked: 9` either way. First real run: **22:00 UTC** — `SELECT * FROM alert_deliveries
 WHERE alerter='health-digest' ORDER BY created_at DESC LIMIT 1` should show it.
 
 ### 4. Recovery proof (#1164, open; #1144 stays open until Sep 18–19)
 
-`apps/web/scripts/sql/recovery-proof-1144.sql`, one block per `_query.ts --sql`. Interim (+10 h) is
-on the ticket. The reviewer question is whether the five blocks answer the ticket's five questions —
-block 1b in particular CALLS `list_clone_alerts_for_recheck(200,6,168)` rather than reading its WHERE.
+`apps/web/scripts/sql/recovery-proof-1144.sql`, one block per `_query.ts --sql` (the invocation is
+`pnpm --filter @askarthur/web exec tsx …` — without `exec` pnpm looks for a script named `tsx`).
+Interim (+10 h) is on the ticket. The reviewer question is whether the five blocks answer the
+ticket's five questions — block 1b in particular CALLS `list_clone_alerts_for_recheck(200,6,168)`
+rather than reading its WHERE.
+
+**Block 1b was refined during review.** As first written it counted every dead-400 row in the
+worklist and implied 0; on Sep 17 it read **79**, all stamped Aug 29 – Sep 3 — rows re-presenting
+after their 168h window BY DESIGN. The invariant is "a dead row stamped inside 168h is not in the
+worklist": `dead_400_restamped_but_present`, which read **0**. The block now reports both and says
+so in its comment. Do not read the informational count as a failure on Sep 18–19.
 
 ## Time-gated checks still open (UTC)
 
-| When               | Check                                                                                  | Expect                                                                                                                                                          | Where                |
-| ------------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| Sep 17 09:10       | `cost_telemetry feature='shopfront_clone_urlscan' operation='submit_batch'` newest row | `submitted > 0` on an UNATTENDED run; note `created_at` — every scheduled row since Sep 10 landed 09:03:30–09:07:00, so the `:00` pileup is already established | #1144                |
-| Sep 17 11:10       | `feature='shopfront_clone_netcraft_issue'` newest row                                  | `braked:false`, a "not yet" shows as `notYetDeferred`, no `permanentRejects`                                                                                    | #1148                |
-| Sep 17 22:00       | `alert_deliveries` health-digest row                                                   | `lanes_checked: 9`; the netcraft-issue `braked` finding gone if 11:00 cleared it                                                                                | #1145                |
-| Sep 18 05:40–06:10 | the three staleness runs via `inngest-runs.sh`                                         | all `finished`, non-null `result`, `drained:true`; zero `cancelled`                                                                                             | #1156 / #1161        |
-| Sep 18 ≥ 01:30     | the 7 un-stamped alerts (690, 1876, 1899, 2845, 2931, 3151, 3160)                      | re-enter the reporter                                                                                                                                           | #1148                |
-| Sep 18–19          | `recovery-proof-1144.sql` blocks 1–5                                                   | weekly `weaponised_at` non-zero, `unconverted` 0–2, mixed recheck split, zero cancelled                                                                         | **#1144 resolution** |
+| When                | Check                                                                  | Expect                                                                                                                                                                                                                               | Where                |
+| ------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| ~~Sep 17 09:10~~ ✅ | submit newest row                                                      | **PASSED** — `2026-09-17 09:05:19`, `units 75 / submitted 41 / submit_failed 34 / rate_limited 0`, unattended                                                                                                                        | #1144                |
+| ~~Sep 17 11:10~~ ⚠  | issue newest row                                                       | **NO ROW** — the run finished `reason: nothing_pending` (Inngest record, 11:03:48), which writes nothing until #1166. Not a #1148 failure; the 7 un-stamped alerts are deferred to Sep 18 01:30. Re-check after the Sep 18 11:00 run | #1148 / #1145        |
+| Sep 17 22:00        | `alert_deliveries` health-digest row                                   | `lanes_checked: 9`; EXPECT a false `absent:…netcraft-resubmit` + stale `braked:…netcraft-issue` unless #1166 deployed first (§3) — the honest read is the next night                                                                 | #1145                |
+| Sep 18 11:00–13:30  | `cost_telemetry` rows for the issue (11:00) and resubmit (13:00) lanes | one row each even if quiet, carrying `metadata.reason`, `units 0` — the first unattended proof of #1166                                                                                                                              | #1145                |
+| Sep 18 05:40–06:10  | the three staleness runs via `inngest-runs.sh`                         | all `finished`, non-null `result`, `drained:true`; zero `cancelled`                                                                                                                                                                  | #1156 / #1161        |
+| Sep 18 ≥ 01:30      | the 7 un-stamped alerts (690, 1876, 1899, 2845, 2931, 3151, 3160)      | re-enter the reporter                                                                                                                                                                                                                | #1148                |
+| Sep 18–19           | `recovery-proof-1144.sql` blocks 1–5                                   | weekly `weaponised_at` non-zero, `unconverted` 0–2, mixed recheck split, zero cancelled                                                                                                                                              | **#1144 resolution** |
 
 ## Traps from this session (add to the ones in the previous handoff)
 
@@ -141,6 +173,9 @@ block 1b in particular CALLS `list_clone_alerts_for_recheck(200,6,168)` rather t
   (`evals/README.md` is one; it is not part of any of these PRs).
 
 ## Frontier after this session (map #1143)
+
+Merge order for the open set: #1164 → #1163 then #1166 (stacked — retarget to `main` and
+`rebase --onto` after #1163 squashes; it will NOT auto-retarget) → this handoff.
 
 Unclaimed: #1147 · #1148 · #1149 · #1150 · #1162 (new) · #1071 · #1074; #1152 / #1153 / #1155 are
 founder-gated. Suggested next: **#1162** first (six RPCs silently capped at 8 s — `upsert_clone_alerts_batch`
