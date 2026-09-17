@@ -36,6 +36,7 @@ import {
 import type { BrandEntry } from "@askarthur/shopfront-glue/au-brand-watchlist";
 import { getActiveWatchlist } from "../active-watchlist";
 import { ssrfSafeDispatcher } from "../ssrf-dispatcher";
+import { recordLaneOutcome } from "../lane-outcome";
 
 const ZIP_DOWNLOAD_TIMEOUT_MS = 60_000;
 const MAX_ZIP_BYTES = 50 * 1024 * 1024; // 50 MB compressed — 10x the legit
@@ -111,15 +112,15 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         return upsertHitsInChunks(hits);
       });
 
-      await step.run("log-cost-telemetry", async () => {
-        await logCostTelemetry({
+      await step.run("log-cost-telemetry", () =>
+        recordLaneOutcome("shopfront-clone-nrd-daily-ingest", domains.length, {
           domains_scanned: domains.length,
           hits_found: hits.length,
           rows_inserted: upsertResult.inserted,
           failed_chunks: upsertResult.failed_chunks,
           total_chunks: upsertResult.total_chunks,
-        });
-      });
+        }),
+      );
 
       // Phase A.3 — fan out urlscan jobs for any pending-initial-scan rows
       // (newly inserted today + any unscanned backlog within 14 days).
@@ -442,31 +443,6 @@ async function upsertHitsInChunks(
 }
 
 // ── Cost telemetry + error log ───────────────────────────────────────────
-
-async function logCostTelemetry(args: {
-  domains_scanned: number;
-  hits_found: number;
-  rows_inserted: number;
-  failed_chunks: number;
-  total_chunks: number;
-}): Promise<void> {
-  const supabase = createServiceClient();
-  if (!supabase) return;
-  await supabase.from("cost_telemetry").insert({
-    feature: "shopfront_clone_watch",
-    provider: "whoisds",
-    operation: "nrd_daily_ingest",
-    units: args.domains_scanned,
-    estimated_cost_usd: 0,
-    metadata: {
-      domains_scanned: args.domains_scanned,
-      hits_found: args.hits_found,
-      rows_inserted: args.rows_inserted,
-      failed_chunks: args.failed_chunks,
-      total_chunks: args.total_chunks,
-    },
-  });
-}
 
 async function logErrorTelemetry(
   kind: string,

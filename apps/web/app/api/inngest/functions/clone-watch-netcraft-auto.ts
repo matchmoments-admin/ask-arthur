@@ -1,10 +1,11 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost, logCostAsync } from "@/lib/cost-telemetry";
+import { logCost } from "@/lib/cost-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
 
@@ -250,40 +251,6 @@ export function buildNetcraftBulkBody(
       "Submitted in good faith for Netcraft classification.",
     urls,
   };
-}
-
-/**
- * One outcome row per resubmit run (#1145). The digest's silent-zero detector
- * judges this lane ABSENT when no `resubmit_bulk` row lands inside 26h, and
- * before this helper 4 of 13 days wrote nothing: none pending, every candidate
- * dead at probe, or a Netcraft non-2xx (which logged only the `-error`
- * feature). `candidates>0 ∧ marked=0 ∧ deferred=0` is the lane's silent-zero
- * shape, so an all-dead day pages only when the dead-row deferral itself
- * failed — which IS the starvation — and a bulk-submit failure pages once
- * rather than reading as "not running".
- */
-async function logResubmitQuietRow(meta: {
-  reason: "none_pending_or_cap" | "all_dead" | "bulk_submit_failed";
-  candidates: number;
-  dead?: number;
-  deferred?: number;
-  status?: number;
-}): Promise<void> {
-  await logCostAsync({
-    feature: "shopfront_clone_netcraft_resubmit",
-    provider: "netcraft",
-    operation: "resubmit_bulk",
-    units: 0,
-    unitCostUsd: 0, // keyless intake
-    metadata: {
-      reason: meta.reason,
-      candidates: meta.candidates,
-      dead: meta.dead ?? 0,
-      deferred: meta.deferred ?? 0,
-      marked: 0,
-      ...(meta.status !== undefined ? { status: meta.status } : {}),
-    },
-  });
 }
 
 export const cloneWatchNetcraftAuto = inngest.createFunction(
@@ -554,7 +521,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // test too); the quiet row follows the same rule.
           if (!isTest) {
             await step.run("resubmit-log-quiet", () =>
-              logResubmitQuietRow({ reason: "none_pending_or_cap", candidates: 0 }),
+              recordLaneOutcome("shopfront-clone-netcraft-resubmit", 0, {
+                reason: "none_pending_or_cap",
+                candidates: 0,
+                marked: 0,
+                deferred: 0,
+                dead: 0,
+              }),
             );
           }
           return { ok: true, candidates: 0, submitted: 0, reason: "none_pending_or_cap" };
@@ -631,8 +604,17 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             candidates: pending.length,
             deferred,
           });
+          // Quiet-run Outcome Row: `candidates>0 ∧ marked=0 ∧ deferred=0` is
+          // the lane's silent-zero shape, so an all-dead day pages ONLY when
+          // the dead-row deferral itself failed — which IS the v252 starvation.
           await step.run("resubmit-log-quiet", () =>
-            logResubmitQuietRow({ reason: "all_dead", candidates: pending.length, dead, deferred }),
+            recordLaneOutcome("shopfront-clone-netcraft-resubmit", 0, {
+              reason: "all_dead",
+              candidates: pending.length,
+              marked: 0,
+              deferred,
+              dead,
+            }),
           );
           return {
             ok: true,
@@ -697,12 +679,15 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             status: result.status,
             urlCount: result.urlCount,
           });
+          // Outcome Row beside the `-error` row above: one transient Netcraft
+          // non-2xx is one digest line, not a "lane not running" label.
           await step.run("resubmit-log-quiet", () =>
-            logResubmitQuietRow({
+            recordLaneOutcome("shopfront-clone-netcraft-resubmit", 0, {
               reason: "bulk_submit_failed",
               candidates: pending.length,
-              dead,
+              marked: 0,
               deferred,
+              dead,
               status: result.status,
             }),
           );
@@ -751,14 +736,8 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           return typeof data === "number" ? data : 0;
         });
 
-        await step.run("resubmit-log-cost", async () => {
-          logCost({
-            feature: "shopfront_clone_netcraft_resubmit",
-            provider: "netcraft",
-            operation: "resubmit_bulk",
-            units: marked,
-            unitCostUsd: 0, // keyless intake
-            metadata: {
+        await step.run("resubmit-log-cost", () =>
+          recordLaneOutcome("shopfront-clone-netcraft-resubmit", marked, {
               candidates: pending.length,
               live: live.length,
               dead,
@@ -776,9 +755,8 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
                 domain: c.candidate_domain,
                 reason: liveness[c.candidate_url]?.reason ?? "unknown",
               })),
-            },
-          });
-        });
+          }),
+        );
 
         logger.info("netcraft-resubmit: complete", {
           candidates: pending.length,

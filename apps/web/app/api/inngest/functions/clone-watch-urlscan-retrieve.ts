@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import {
   CLONE_WATCH_WEAPONISED_EVENT,
   type CloneWatchWeaponisedData,
@@ -9,7 +10,6 @@ import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCostAsync } from "@/lib/cost-telemetry";
 import {
   classifyScan,
   suggestTriageTransition,
@@ -408,13 +408,10 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         // Awaited (#1069): a finish-cancelled run kills waitUntil promises, so
         // fire-and-forget rows were being lost. Awaiting makes the row part of
         // the step's work.
-        await logCostAsync({
-          feature: "shopfront_clone_urlscan",
-          provider: "urlscan",
-          operation: "retrieve_batch",
-          units: pending.length,
-          unitCostUsd: 0,
-          metadata: {
+        await recordLaneOutcome(
+          "shopfront-clone-urlscan-retrieve",
+          pending.length,
+          {
             classified,
             still_pending: stillPending,
             reputation_fallback: reputationFallback,
@@ -423,7 +420,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             // null = the probe itself failed; 0 = genuinely none outstanding.
             unnotified_weaponised: unnotified,
           },
-        });
+        );
       });
 
       logger.info("clone-watch urlscan retrieve: batch complete", {

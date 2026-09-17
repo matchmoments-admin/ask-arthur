@@ -13,9 +13,11 @@ import {
   type FeedProblem,
   type FeedProblemKind,
 } from "@/lib/feedHealth";
+import { LANE_BRAKES } from "@askarthur/scam-engine/lane-outcome";
 import {
   classifyLaneHealth,
-  LANE_SHAPES,
+  LANES_CHECKED,
+  WATCHED_FEATURES,
   type LaneCostRow,
   type LaneProblem,
   type LaneProblemKind,
@@ -250,25 +252,46 @@ export async function GET(req: Request) {
   // a lane that stopped writing is judged absent rather than dropping out of
   // the result set. Measured 149 rows / 72h across the roster (2026-09-17);
   // 1000 is PostgREST's hard cap (rowCap.test.ts) and ~7x the observed volume.
-  const laneFeatures = Array.from(new Set(LANE_SHAPES.map((s) => s.feature)));
-  const { data: laneRows, error: laneError } = await supabase
-    .from("cost_telemetry")
-    .select("feature, operation, created_at, units, metadata")
-    .in("feature", laneFeatures)
-    .gte("created_at", new Date(now - 72 * 3600 * 1000).toISOString())
-    .order("created_at", { ascending: false })
-    .limit(1000);
+  // Brake state comes from feature_brakes, not from the rows: a cleared brake
+  // otherwise reads as braked until the lane's next run overwrites the row.
+  const [laneRes, brakeRes] = await Promise.all([
+    supabase
+      .from("cost_telemetry")
+      .select("feature, operation, created_at, units, metadata")
+      .in("feature", [...WATCHED_FEATURES])
+      .gte("created_at", new Date(now - 72 * 3600 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1000),
+    supabase
+      .from("feature_brakes")
+      .select("feature, paused_until")
+      .in("feature", [...LANE_BRAKES]),
+  ]);
 
-  if (laneError) {
+  if (laneRes.error) {
     logger.error("health-digest: lane query failed", {
-      error: laneError.message,
+      error: laneRes.error.message,
     });
   }
-  // A failed query must not read as "all lanes healthy": with no rows every
-  // roster lane classifies as absent, which is the loud outcome.
+  if (brakeRes.error) {
+    // Reads as "not braked"; the issue lane's permanentRejects predicate
+    // still catches the trip shape from the row itself.
+    logger.error("health-digest: brake query failed", {
+      error: brakeRes.error.message,
+    });
+  }
+  const brakes: Record<string, string | null> = {};
+  for (const b of (brakeRes.data ?? []) as {
+    feature: string;
+    paused_until: string | null;
+  }[]) {
+    brakes[b.feature] = b.paused_until;
+  }
+  // A failed lane query must not read as "all lanes healthy": with no rows
+  // every roster lane classifies as absent, which is the loud outcome.
   const laneProblems = classifyLaneHealth(
-    (laneRows ?? []) as unknown as LaneCostRow[],
-    now,
+    (laneRes.data ?? []) as unknown as LaneCostRow[],
+    { now, brakes },
   );
 
   // ── Decision: alert or stay silent ────────────────────────────────────
@@ -287,7 +310,7 @@ export async function GET(req: Request) {
       errors_24h: 0,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
-      lanes_checked: LANE_SHAPES.length,
+      lanes_checked: LANES_CHECKED,
       cost_usd: cost.cost_usd,
     });
     return NextResponse.json({
@@ -295,7 +318,7 @@ export async function GET(req: Request) {
       errors_24h: 0,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
-      lanes_checked: LANE_SHAPES.length,
+      lanes_checked: LANES_CHECKED,
       problems: 0,
       cost,
     });
@@ -327,7 +350,7 @@ export async function GET(req: Request) {
       lane_problems: laneProblems.map((p) => `${p.kind}:${p.lane}`),
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
-      lanes_checked: LANE_SHAPES.length,
+      lanes_checked: LANES_CHECKED,
       cost_usd: cost.cost_usd,
       mutedBy: legacyTelegramEnabled ? null : "FF_LEGACY_DIGEST_TELEGRAM",
     },
@@ -358,7 +381,7 @@ export async function GET(req: Request) {
     lane_problems: laneProblems,
     feeds_checked: rows.length,
     feeds_muted: mutedCount,
-    lanes_checked: LANE_SHAPES.length,
+    lanes_checked: LANES_CHECKED,
     cost,
   });
 }

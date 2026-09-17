@@ -378,21 +378,27 @@ Twice (Sep 9–16 recheck starvation #1127; Sep 12–16 submit budget-at-index-0
 #1124) the feature went to zero while every run returned `ok:true` and every
 cost row was honest. The detector is Check 4 of `/api/cron/health-digest`
 (daily 22:00 UTC, silence-on-healthy, `recordNoAlertNeeded` carries
-`lanes_checked` so proof-of-life is unconditional); the roster and predicates
-are `apps/web/lib/laneHealth.ts` `LANE_SHAPES` — evaluated by ROSTER, so a
-lane that stops logging is `absent`, never invisible.
+`lanes_checked` so proof-of-life is unconditional). The **roster and the
+per-lane Outcome Row shapes** are `packages/scam-engine/src/lane-outcome.ts`
+(`LANES` + `LaneOutcome`; `recordLaneOutcome` is the only writer); the
+**predicates** are `apps/web/lib/laneHealth.ts` `LANE_SHAPES`, a mapped type
+over the roster — a lane without a shape, or a predicate naming a key the
+lane does not write, is a compile error (ADR-0025). Evaluated by ROSTER, so a
+lane that stops logging is `absent`, never invisible. **Brake state comes
+from `feature_brakes.paused_until`**, not from the row's `braked` field — a
+cleared brake otherwise read as braked until the lane's next run.
 
-| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                      | consecutive |
-| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
-| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed≥rechecked`           | 2           |
-| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                       | 1           |
-| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                             | 3           |
-| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `braked=true` → **braked**; `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape) | 1           |
-| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                     | 1           |
-| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                  | 3           |
-| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`                                       | 1           |
-| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                               | 1           |
-| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                        | —           |
+| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                         | consecutive |
+| ------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------- |
+| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed≥rechecked`              | 2           |
+| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                          | 1           |
+| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                                | 3           |
+| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape); **braked** = `feature_brakes` | 1           |
+| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                        | 1           |
+| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                     | 3           |
+| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`                                          | 1           |
+| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                                  | 1           |
+| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                           | —           |
 
 Absence windows: 9h for the 6h lanes, 26h for the daily ones. **Every roster
 lane writes one outcome row per run, including its quiet-day path** (`units 0`,

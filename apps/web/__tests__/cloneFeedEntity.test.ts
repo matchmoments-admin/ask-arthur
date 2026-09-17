@@ -43,6 +43,11 @@ vi.mock("@/lib/cost-telemetry", () => ({
   logCost: mocks.log,
   logCostAsync: mocks.log,
 }));
+// The per-run `feed_batch` Outcome Row goes through `recordLaneOutcome`
+// (lane-outcome.ts), which writes via scam-engine's logCost.
+vi.mock("@askarthur/scam-engine/cost-log", () => ({
+  logCost: mocks.log,
+}));
 
 import {
   feedCloneEntity,

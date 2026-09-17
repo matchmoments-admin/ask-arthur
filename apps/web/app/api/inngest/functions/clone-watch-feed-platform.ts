@@ -2,12 +2,11 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCostAsync } from "@/lib/cost-telemetry";
 import {
-  FEED_ENTITY_COST_FEATURE,
   feedCloneEntity,
 } from "@/lib/clone-watch/feed-entity";
 
@@ -146,23 +145,16 @@ export const cloneWatchFeedPlatform = inngest.createFunction(
 
       // Per-run summary row (each write already logged its own `feed` row):
       // the shape the silent-zero detector reads is `pool > 0 ∧ written = 0`.
-      await step.run("log-cost", async () => {
-        await logCostAsync({
-          feature: FEED_ENTITY_COST_FEATURE,
-          provider: "internal",
-          operation: "feed_batch",
-          units: worklist.length,
-          unitCostUsd: 0,
-          metadata: {
-            pool: worklist.length,
-            written: batch.written,
-            not_written: batch.notWritten,
-            failed: batch.failed,
-            cut_off: batch.cutOff,
-            reasons: batch.reasons,
-          },
-        });
-      });
+      await step.run("log-cost", () =>
+        recordLaneOutcome("shopfront-clone-feed-platform", worklist.length, {
+          pool: worklist.length,
+          written: batch.written,
+          not_written: batch.notWritten,
+          failed: batch.failed,
+          cut_off: batch.cutOff,
+          reasons: batch.reasons,
+        }),
+      );
 
       // Rare, high-value: always-ship warn so the transition is in Axiom.
       if (batch.written > 0) {

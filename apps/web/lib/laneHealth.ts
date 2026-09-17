@@ -1,5 +1,5 @@
 /**
- * Clone-watch lane health — the "ran, did nothing, reported ok:true" detector
+ * Clone-watch Lane health — the "ran, did nothing, reported ok:true" detector
  * (#1145, map #1143). The decision half of health-digest's fourth check, the
  * same seam as feedHealth.ts: rows in, problems out, no I/O.
  *
@@ -9,39 +9,55 @@
  * submit lane logged `units 75, submitted 0, failed 0, rate_limited 0` daily
  * from Sep 12 (#1124's spanning budget expiring at index 0). Neither shape
  * alerted anywhere; both were found by a human reading cost_telemetry a week
- * later. This module is the table of those shapes, one per lane, evaluated
- * against the lane's most recent rows.
+ * later. This module is the table of those shapes, one per Lane, evaluated
+ * against the Lane's most recent Outcome Rows.
+ *
+ * The roster and the outcome shapes are NOT declared here. They live in
+ * `@askarthur/scam-engine/lane-outcome` (`LANES` + `LaneOutcome`), which is
+ * also the only writer — so a predicate here is typed against the keys the
+ * Lane actually writes, and a misspelt key is a compile error on whichever
+ * side drifts instead of a silent 0. `LANE_SHAPES` is a mapped type over
+ * `LaneId`: adding a Lane to the roster without a shape does not compile
+ * (proof of life enforced by the type, not by a length assertion).
  *
  * Two rules from the feed-health incident carry over:
  *
- *   - Start from the ROSTER, not from what is present in the log. A lane that
+ *   - Start from the ROSTER, not from what is present in the log. A Lane that
  *     stops writing drops out of any query grouped by what is there, so the
- *     harder it failed the more certainly it was invisible. LANE_SHAPES is the
- *     roster; a lane with no row inside its `expectEvery` window is `absent`.
+ *     harder it failed the more certainly it was invisible. A Lane with no
+ *     row inside its `expectEvery` window is `absent`. Every roster Lane
+ *     writes one Outcome Row per run including its quiet-day path (#1166), so
+ *     absence is a real signal; skip-paths (flag off, brake, cooldown, no DB)
+ *     write nothing on purpose — a disabled Lane SHOULD read as absent.
  *   - Never gate proof-of-life on "nothing to report" (#884). The digest
  *     records lanes_checked whether or not anything fired.
  *
- * Every roster lane writes ONE outcome row per run, including its quiet-day
- * path (`reason` in metadata, units 0) — that is what makes `absent` a real
- * signal. Before the #1145 follow-up the daily lanes wrote nothing when they
- * had nothing to do, and prod showed resubmit row-less on 4 of 13 days and
- * issue on 3 of 13: "absent" would have paged on 7 of 13 days for lanes that
- * ran fine. Skip-paths (flag off, brake engaged, cooldown, no DB) still write
- * nothing on purpose: a disabled lane SHOULD read as absent.
+ * Brake state is an INPUT (`feature_brakes.paused_until`), not inferred from
+ * the latest row: after an operator clears a brake the row still says
+ * `braked:true` until the next run overwrites it, which read as a live brake
+ * for up to a day (the Sep 16–17 case).
  *
- * Lanes with NO per-run cost row (notify-brand, notify-weaponised,
+ * Lanes with NO per-run Outcome Row (notify-brand, notify-weaponised,
  * enforcement-*, auto-triage, reemergence, enrich-attribution, report-summary,
- * the digests, scan-one) cannot be watched from telemetry and are not listed
- * here — listing them would be a guard that reads as protection. They are the
- * graduated ticket "every lane logs one outcome row per run".
+ * the digests, scan-one) cannot be watched from telemetry and are not listed —
+ * listing them would be a guard that reads as protection. They are the
+ * graduated ticket "every lane logs one outcome row per run". Preclassify
+ * writes per-alert Claude rows, not a per-run outcome, and is watched for
+ * absence only.
  */
+
+import {
+  LANES,
+  type LaneId,
+  type LaneOutcome,
+} from "@askarthur/scam-engine/lane-outcome";
 
 export type LaneProblemKind =
   /** No row inside the lane's expected window. */
   | "absent"
   /** Rows arrive on schedule and every one is a no-op. */
   | "silent_zero"
-  /** The lane says it is braked / paused. */
+  /** `feature_brakes` says the lane is paused right now. */
   | "braked";
 
 export interface LaneProblem {
@@ -60,24 +76,20 @@ export interface LaneCostRow {
   metadata: Record<string, unknown> | null;
 }
 
-/** Predicates see the row's `units` beside its metadata keys. */
-const metaOf = (r: LaneCostRow): Meta => ({
-  units: r.units ?? 0,
-  ...(r.metadata ?? {}),
-});
+/** What a predicate sees: the Lane's typed outcome plus the row's `units`. */
+type Seen<L extends LaneId> = Partial<LaneOutcome[L]> & { units: number };
 
-type Meta = Record<string, unknown>;
-
-const num = (m: Meta, k: string): number => {
-  const v = m[k];
+/**
+ * Read a numeric key, treating missing / non-numeric as 0. The key is typed
+ * against the Lane's outcome so it cannot be misspelt; the 0 default keeps a
+ * Lane that STOPS logging a field reading as zero — loud, not silent.
+ */
+const n = <L extends LaneId>(o: Seen<L>, k: keyof Seen<L> & string): number => {
+  const v = (o as Record<string, unknown>)[k];
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 };
 
-export interface LaneShape {
-  /** Human name, matches the Inngest function id without the app prefix. */
-  lane: string;
-  feature: string;
-  operation: string;
+interface Shape<L extends LaneId> {
   /** Longest gap between rows that is still healthy, in ms. */
   expectEvery: number;
   /**
@@ -86,185 +98,240 @@ export interface LaneShape {
    * that run several times a day and legitimately find nothing sometimes).
    */
   consecutive: number;
-  /** True when this row is "did nothing while reporting success". */
-  silentZero: (m: Meta) => boolean;
-  /** Optional: true when this row says the lane is braked. */
-  braked?: (m: Meta) => boolean;
   /** Short description of the shape for the digest line. */
   shape: string;
+  /** True when this row is "did nothing while reporting success". */
+  silentZero: (o: Seen<L>) => boolean;
 }
 
 const H = 3_600_000;
 
 /**
- * The roster. Predicates are written against the metadata each lane actually
- * logs (docs/ops/clone-watch-config.md §4b lists a sample row per lane);
- * `num()` reads a missing key as 0, so a lane that stops logging a field
- * reads as zero — loud, not silent.
+ * One shape per roster Lane. Predicates are written against the metadata each
+ * Lane actually writes (`LaneOutcome`); docs/ops/clone-watch-config.md §4b
+ * lists a sample row per lane.
  */
-export const LANE_SHAPES: LaneShape[] = [
-  {
-    lane: "shopfront-clone-lifecycle-recheck",
-    feature: "shopfront_clone_recheck",
-    operation: "recheck_batch",
+export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
+  "shopfront-clone-lifecycle-recheck": {
     expectEvery: 9 * H, // 6h cron + slack
     consecutive: 2,
     shape: "pool>0 ∧ rechecked=0, or every recheck failed to submit",
-    silentZero: (m) =>
-      (num(m, "pool") > 0 && num(m, "rechecked") === 0) ||
-      (num(m, "rechecked") > 0 &&
-        num(m, "submitted") === 0 &&
-        num(m, "submit_failed") >= num(m, "rechecked")),
+    silentZero: (o) =>
+      (n(o, "pool") > 0 && n(o, "rechecked") === 0) ||
+      (n(o, "rechecked") > 0 &&
+        n(o, "submitted") === 0 &&
+        n(o, "submit_failed") >= n(o, "rechecked")),
   },
-  {
-    lane: "shopfront-clone-urlscan-submit",
-    feature: "shopfront_clone_urlscan",
-    operation: "submit_batch",
+  "shopfront-clone-urlscan-submit": {
     expectEvery: 26 * H, // daily 09:00
     consecutive: 1,
     shape: "units>0 ∧ submitted=0 ∧ rate_limited=0",
-    silentZero: (m) =>
-      num(m, "units") > 0 &&
-      num(m, "submitted") === 0 &&
-      num(m, "rate_limited") === 0,
+    silentZero: (o) =>
+      n(o, "units") > 0 &&
+      n(o, "submitted") === 0 &&
+      n(o, "rate_limited") === 0,
   },
-  {
-    lane: "shopfront-clone-urlscan-retrieve",
-    feature: "shopfront_clone_urlscan",
-    operation: "retrieve_batch",
+  "shopfront-clone-urlscan-retrieve": {
     expectEvery: 9 * H,
     consecutive: 3,
     shape: "classified=0 while still_pending>0, or unnotified_weaponised>0",
-    silentZero: (m) =>
-      (num(m, "classified") === 0 && num(m, "still_pending") > 0) ||
-      num(m, "unnotified_weaponised") > 0,
+    silentZero: (o) =>
+      (n(o, "classified") === 0 && n(o, "still_pending") > 0) ||
+      n(o, "unnotified_weaponised") > 0,
   },
-  {
-    lane: "shopfront-clone-netcraft-issue",
-    feature: "shopfront_clone_netcraft_issue",
-    operation: "issue_report",
+  "shopfront-clone-netcraft-issue": {
     expectEvery: 26 * H, // daily 11:00
     consecutive: 1,
     shape: "every uuid permanently rejected (the #1157 'not yet' shape)",
-    silentZero: (m) =>
-      num(m, "uuids") > 0 && num(m, "permanentRejects") >= num(m, "uuids"),
-    braked: (m) => m.braked === true,
+    silentZero: (o) =>
+      n(o, "uuids") > 0 && n(o, "permanentRejects") >= n(o, "uuids"),
   },
-  {
-    lane: "shopfront-clone-netcraft-resubmit",
-    feature: "shopfront_clone_netcraft_resubmit",
-    operation: "resubmit_bulk",
+  "shopfront-clone-netcraft-resubmit": {
     expectEvery: 26 * H,
     consecutive: 1,
     shape: "candidates>0 ∧ marked=0 ∧ deferred=0",
-    silentZero: (m) =>
-      num(m, "candidates") > 0 &&
-      num(m, "marked") === 0 &&
-      num(m, "deferred") === 0,
+    silentZero: (o) =>
+      n(o, "candidates") > 0 &&
+      n(o, "marked") === 0 &&
+      n(o, "deferred") === 0,
   },
-  {
-    lane: "shopfront-clone-netcraft-reconcile",
-    feature: "shopfront_clone_netcraft_reconcile",
-    operation: "lifecycle_reconcile",
+  "shopfront-clone-netcraft-reconcile": {
     expectEvery: 26 * H,
     consecutive: 3,
     shape: "uuids=0 on every recent run",
-    silentZero: (m) => num(m, "uuids") === 0,
+    silentZero: (o) => n(o, "uuids") === 0,
   },
-  {
-    lane: "shopfront-clone-nrd-daily-ingest",
-    feature: "shopfront_clone_watch",
-    operation: "nrd_daily_ingest",
+  "shopfront-clone-nrd-daily-ingest": {
     expectEvery: 26 * H,
     consecutive: 1,
     shape: "domains_scanned=0, or every chunk failed",
-    silentZero: (m) =>
-      num(m, "domains_scanned") === 0 ||
-      (num(m, "total_chunks") > 0 &&
-        num(m, "failed_chunks") >= num(m, "total_chunks")),
+    silentZero: (o) =>
+      n(o, "domains_scanned") === 0 ||
+      (n(o, "total_chunks") > 0 &&
+        n(o, "failed_chunks") >= n(o, "total_chunks")),
   },
-  {
-    lane: "shopfront-clone-feed-platform",
-    feature: "clone_watch_feed_entity",
-    operation: "feed_batch",
+  "shopfront-clone-feed-platform": {
     // Event-driven (per weaponisation); absence is not a signal here.
     expectEvery: Number.POSITIVE_INFINITY,
     consecutive: 1,
     shape: "pool>0 ∧ written=0",
-    silentZero: (m) => num(m, "pool") > 0 && num(m, "written") === 0,
+    silentZero: (o) => n(o, "pool") > 0 && n(o, "written") === 0,
   },
+};
+
+/**
+ * Absence-only watches: streams with no per-run outcome where the only
+ * readable signal is that nothing arrived. Not in the roster because nothing
+ * writes them through `recordLaneOutcome`.
+ */
+export const ABSENCE_WATCHES: ReadonlyArray<{
+  lane: string;
+  feature: string;
+  operation: string;
+  expectEvery: number;
+}> = [
   {
     lane: "shopfront-clone-haiku-preclassify",
     feature: "shopfront_clone_preclassify",
     operation: "classify",
-    // Per-alert rows; the only readable signal is that none arrived.
     expectEvery: 26 * H,
-    consecutive: 1,
-    shape: "no classify row in 26h",
-    silentZero: () => false,
   },
 ];
 
+/** The `feature` values the digest must fetch to evaluate everything above. */
+export const WATCHED_FEATURES: readonly string[] = Array.from(
+  new Set([
+    ...Object.values(LANES).map((l) => l.feature),
+    ...ABSENCE_WATCHES.map((w) => w.feature),
+  ]),
+);
+
+/** Number of lanes evaluated — the digest's proof-of-life counter. */
+export const LANES_CHECKED =
+  Object.keys(LANE_SHAPES).length + ABSENCE_WATCHES.length;
+
+export interface LaneHealthInput {
+  now?: number;
+  /** `feature_brakes.feature` → `paused_until` ISO, for the roster's brake keys. */
+  brakes?: Record<string, string | null | undefined>;
+}
+
+const seenOf = <L extends LaneId>(r: LaneCostRow): Seen<L> =>
+  ({ units: r.units ?? 0, ...(r.metadata ?? {}) }) as Seen<L>;
+
 /**
- * Evaluate every lane in LANE_SHAPES against the rows the digest fetched.
- * `rows` may be in any order and may include features not in the roster.
+ * Generic so the predicate and the row view share one `L`; the mapped-type
+ * lookup is a union until `L` is fixed, hence the one cast.
+ */
+function allSilentZero<L extends LaneId>(
+  lane: L,
+  recent: LaneCostRow[],
+): boolean {
+  const shape = LANE_SHAPES[lane] as Shape<L>;
+  return recent.every((r) => shape.silentZero(seenOf<L>(r)));
+}
+
+function rowsFor(
+  rows: LaneCostRow[],
+  feature: string,
+  operation: string,
+): LaneCostRow[] {
+  return rows
+    .filter((r) => r.feature === feature && r.operation === operation)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+}
+
+/** `absent` problem for a lane whose latest row is missing or too old, else null. */
+function absence(
+  lane: string,
+  feature: string,
+  operation: string,
+  latest: LaneCostRow | undefined,
+  expectEvery: number,
+  now: number,
+): LaneProblem | null {
+  if (!Number.isFinite(expectEvery)) return null;
+  if (!latest) {
+    return {
+      lane,
+      kind: "absent",
+      detail: `no ${feature}/${operation} row in the window`,
+    };
+  }
+  const ageMs = now - Date.parse(latest.created_at);
+  if (ageMs > expectEvery) {
+    return {
+      lane,
+      kind: "absent",
+      detail: `last row ${Math.round(ageMs / H)}h ago (expected every ${Math.round(expectEvery / H)}h)`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Evaluate every roster Lane and absence watch against the rows the digest
+ * fetched. `rows` may be in any order and may include features outside the
+ * roster.
  */
 export function classifyLaneHealth(
   rows: LaneCostRow[],
-  now: number = Date.now(),
+  input: LaneHealthInput = {},
 ): LaneProblem[] {
+  const now = input.now ?? Date.now();
+  const brakes = input.brakes ?? {};
   const problems: LaneProblem[] = [];
 
-  for (const shape of LANE_SHAPES) {
-    const mine = rows
-      .filter(
-        (r) => r.feature === shape.feature && r.operation === shape.operation,
-      )
-      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  for (const lane of Object.keys(LANE_SHAPES) as LaneId[]) {
+    const key = LANES[lane];
+    const shape = LANE_SHAPES[lane];
+    const mine = rowsFor(rows, key.feature, key.operation);
 
-    const latest = mine[0];
-    if (!latest) {
-      if (Number.isFinite(shape.expectEvery)) {
+    const absent = absence(
+      lane,
+      key.feature,
+      key.operation,
+      mine[0],
+      shape.expectEvery,
+      now,
+    );
+    if (absent) {
+      problems.push(absent);
+      continue;
+    }
+
+    if ("brake" in key) {
+      const pausedUntil = brakes[key.brake];
+      if (pausedUntil && Date.parse(pausedUntil) > now) {
         problems.push({
-          lane: shape.lane,
-          kind: "absent",
-          detail: `no ${shape.feature}/${shape.operation} row in the window`,
+          lane,
+          kind: "braked",
+          detail: `feature_brakes.${key.brake} paused until ${pausedUntil}`,
         });
+        continue;
       }
-      continue;
-    }
-
-    const ageMs = now - Date.parse(latest.created_at);
-    if (Number.isFinite(shape.expectEvery) && ageMs > shape.expectEvery) {
-      problems.push({
-        lane: shape.lane,
-        kind: "absent",
-        detail: `last row ${Math.round(ageMs / H)}h ago (expected every ${Math.round(shape.expectEvery / H)}h)`,
-      });
-      continue;
-    }
-
-    const latestMeta = metaOf(latest);
-    if (shape.braked?.(latestMeta)) {
-      problems.push({
-        lane: shape.lane,
-        kind: "braked",
-        detail: "latest run reports braked=true",
-      });
-      continue;
     }
 
     const recent = mine.slice(0, shape.consecutive);
-    if (
-      recent.length >= shape.consecutive &&
-      recent.every((r) => shape.silentZero(metaOf(r)))
-    ) {
+    if (recent.length >= shape.consecutive && allSilentZero(lane, recent)) {
       problems.push({
-        lane: shape.lane,
+        lane,
         kind: "silent_zero",
         detail: `${recent.length} consecutive run${recent.length === 1 ? "" : "s"}: ${shape.shape}`,
       });
     }
+  }
+
+  for (const w of ABSENCE_WATCHES) {
+    const absent = absence(
+      w.lane,
+      w.feature,
+      w.operation,
+      rowsFor(rows, w.feature, w.operation)[0],
+      w.expectEvery,
+      now,
+    );
+    if (absent) problems.push(absent);
   }
 
   return problems;

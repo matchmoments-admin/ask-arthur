@@ -14,6 +14,7 @@
 // the RPC's return. That is how the bridge shows on /admin/costs and how the
 // silent-zero detector (#1145) can see it doing nothing.
 
+import { LANES } from "@askarthur/scam-engine/lane-outcome";
 import { normalizeURL } from "@askarthur/scam-engine/url-normalize";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -21,7 +22,9 @@ import { logger } from "@askarthur/utils/logger";
 
 import { logCostAsync } from "@/lib/cost-telemetry";
 
-export const FEED_ENTITY_COST_FEATURE = "clone_watch_feed_entity";
+/** One feature for the per-write `feed` rows AND the per-run Outcome Row — the
+ *  roster owns the string so the detector and the dashboard read one value. */
+export const FEED_ENTITY_COST_FEATURE = LANES["shopfront-clone-feed-platform"].feature;
 
 export interface PlatformEntityUrlArgs {
   p_normalized_url: string;

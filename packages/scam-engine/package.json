@@ -11,6 +11,7 @@
     "./whois-cached": "./src/whois-cached.ts",
     "./backfill": "./src/backfill.ts",
     "./cost-log": "./src/cost-log.ts",
+    "./lane-outcome": "./src/lane-outcome.ts",
     "./embeddings": "./src/embeddings.ts",
     "./rerank": "./src/rerank.ts",
     "./claude": "./src/claude.ts",
