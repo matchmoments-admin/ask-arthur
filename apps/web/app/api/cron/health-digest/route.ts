@@ -247,7 +247,8 @@ export async function GET(req: Request) {
   // Fetch by ROSTER feature list over a window wider than the longest
   // cadence in LANE_SHAPES (26h) plus the consecutive-run depth (3 × 6h), so
   // a lane that stopped writing is judged absent rather than dropping out of
-  // the result set. ~200 rows/day across the lanes; trivial.
+  // the result set. Measured 149 rows / 72h across the roster (2026-09-17);
+  // 1000 is PostgREST's hard cap (rowCap.test.ts) and ~7x the observed volume.
   const laneFeatures = Array.from(new Set(LANE_SHAPES.map((s) => s.feature)));
   const { data: laneRows, error: laneError } = await supabase
     .from("cost_telemetry")
@@ -255,7 +256,7 @@ export async function GET(req: Request) {
     .in("feature", laneFeatures)
     .gte("created_at", new Date(now - 72 * 3600 * 1000).toISOString())
     .order("created_at", { ascending: false })
-    .limit(2000);
+    .limit(1000);
 
   if (laneError) {
     logger.error("health-digest: lane query failed", {
