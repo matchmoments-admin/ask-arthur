@@ -251,6 +251,129 @@ describe("classifyLaneHealth", () => {
     ]);
   });
 
+  it("a quiet-day outcome row (units 0, reason set) is neither absent nor silent_zero", () => {
+    // Every roster lane now writes one row per run even when it had nothing
+    // to do (#1145 follow-up). Before that, resubmit had no row on 4 of 13
+    // days and issue on 3 of 13 — each would have paged "absent". These are
+    // the exact quiet-row shapes the lanes write.
+    const rows = healthyRows().filter(
+      (r) =>
+        ![
+          "recheck_batch",
+          "submit_batch",
+          "issue_report",
+          "resubmit_bulk",
+        ].includes(r.operation),
+    );
+    rows.push(
+      row(
+        "shopfront_clone_recheck",
+        "recheck_batch",
+        1,
+        {
+          reason: "nothing_due",
+          pool: 0,
+          rechecked: 0,
+          submitted: 0,
+          submit_failed: 0,
+        },
+        0,
+      ),
+      row(
+        "shopfront_clone_recheck",
+        "recheck_batch",
+        7,
+        {
+          reason: "nothing_due",
+          pool: 0,
+          rechecked: 0,
+          submitted: 0,
+          submit_failed: 0,
+        },
+        0,
+      ),
+      row(
+        "shopfront_clone_urlscan",
+        "submit_batch",
+        21,
+        {
+          reason: "no_gated_candidates",
+          submitted: 0,
+          submit_failed: 0,
+          rate_limited: 0,
+          dormant_retired: 0,
+        },
+        0,
+      ),
+      row(
+        "shopfront_clone_netcraft_issue",
+        "issue_report",
+        19,
+        {
+          reason: "nothing_pending",
+          uuids: 0,
+          filed: 0,
+          permanentRejects: 0,
+          braked: false,
+        },
+        0,
+      ),
+      row(
+        "shopfront_clone_netcraft_resubmit",
+        "resubmit_bulk",
+        20,
+        {
+          reason: "all_dead",
+          candidates: 9,
+          dead: 9,
+          deferred: 9,
+          marked: 0,
+        },
+        0,
+      ),
+    );
+    expect(classifyLaneHealth(rows, NOW)).toEqual([]);
+
+    // The one quiet shape that MUST page: all dead but the deferral wrote
+    // nothing — that is the worklist starvation itself.
+    const starved = rows.map((r) =>
+      r.operation === "resubmit_bulk"
+        ? { ...r, metadata: { ...r.metadata, deferred: 0 } }
+        : r,
+    );
+    expect(classifyLaneHealth(starved, NOW)).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-netcraft-resubmit",
+        kind: "silent_zero",
+      }),
+    ]);
+
+    // Reconcile's quiet row is allowed to count: three in a row is a page.
+    const noReconcile = rows.filter(
+      (r) => r.operation !== "lifecycle_reconcile",
+    );
+    for (const h of [3, 15, 27]) {
+      noReconcile.push(
+        row(
+          "shopfront_clone_netcraft_reconcile",
+          "lifecycle_reconcile",
+          h,
+          {
+            reason: "nothing_pending",
+            uuids: 0,
+          },
+          0,
+        ),
+      );
+    }
+    expect(classifyLaneHealth(noReconcile, NOW)).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-netcraft-reconcile",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
   it("ignores rows for features outside the roster", () => {
     const rows = [
       ...healthyRows(),

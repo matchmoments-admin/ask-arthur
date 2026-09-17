@@ -21,6 +21,14 @@
  *   - Never gate proof-of-life on "nothing to report" (#884). The digest
  *     records lanes_checked whether or not anything fired.
  *
+ * Every roster lane writes ONE outcome row per run, including its quiet-day
+ * path (`reason` in metadata, units 0) — that is what makes `absent` a real
+ * signal. Before the #1145 follow-up the daily lanes wrote nothing when they
+ * had nothing to do, and prod showed resubmit row-less on 4 of 13 days and
+ * issue on 3 of 13: "absent" would have paged on 7 of 13 days for lanes that
+ * ran fine. Skip-paths (flag off, brake engaged, cooldown, no DB) still write
+ * nothing on purpose: a disabled lane SHOULD read as absent.
+ *
  * Lanes with NO per-run cost row (notify-brand, notify-weaponised,
  * enforcement-*, auto-triage, reemergence, enrich-attribution, report-summary,
  * the digests, scan-one) cannot be watched from telemetry and are not listed

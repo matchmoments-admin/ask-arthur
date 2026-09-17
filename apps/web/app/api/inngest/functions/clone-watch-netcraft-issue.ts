@@ -7,7 +7,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCost, logCostAsync } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
@@ -264,13 +264,33 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       });
 
       if (plan.groups.length === 0) {
-        return {
-          ok: true,
-          dryRun,
-          reason:
-            plan.remaining === 0 ? "daily_cap_reached" : "nothing_pending",
-          filed: 0,
-        };
+        const reason =
+          plan.remaining === 0 ? "daily_cap_reached" : "nothing_pending";
+        // One outcome row per run (#1145). The digest's silent-zero detector
+        // judges this lane ABSENT when no issue_report row lands inside 26h;
+        // 3 of the 13 days before this change had no row because nothing was
+        // pending. uuids 0 / braked false satisfies no predicate. The 10-min
+        // cooldown above reads this feature's latest row, so a quiet run
+        // extends it by at most 10 min — harmless.
+        await step.run("log-cost-quiet", async () => {
+          await logCostAsync({
+            feature: "shopfront_clone_netcraft_issue",
+            provider: "netcraft",
+            operation: "issue_report",
+            units: 0,
+            unitCostUsd: 0,
+            metadata: {
+              reason,
+              dryRun,
+              uuids: 0,
+              filed: 0,
+              permanentRejects: 0,
+              braked: false,
+              daily_remaining: plan.remaining,
+            },
+          });
+        });
+        return { ok: true, dryRun, reason, filed: 0 };
       }
 
       const counts = {
