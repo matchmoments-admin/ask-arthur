@@ -636,6 +636,58 @@ files false-negative `report_issue` escalations. Plans:
    has NO screenshot field — evidence travels as the urlscan link in `reason`).
 6. `FF_BRAND_STEWARDSHIP_REPORT=true` → the monthly email renders the "What Netcraft did with them" story.
 
+### Platform Entity bridge (v309, #1151)
+
+`shopfront-clone-feed-platform` is the PLATFORM-facing consumer of
+`shopfront/clone.weaponised.v1` (brand = notify-weaponised, takedown =
+enforcement-plan / netcraft-issue). Worklist-driven: every run calls
+`list_clone_alerts_pending_platform_entity(50)` (weaponised ∧ not `fp` ∧ no
+`submitted_to.platform_entity` stamp) and feeds each row through
+`feed_clone_platform_entity` — `scam_entities` domain (+ hosting IP) and a
+`scam_urls` row (`confidence_level='high'`, so the 7-day staleness sweep
+never expires it), one transaction, stamp included. Gated
+`FF_CLONE_WATCH_FEED_ENTITIES`. Telemetry: `cost_telemetry
+feature='clone_watch_feed_entity'`, `operation IN ('feed','retract')` per
+row and `'feed_batch'` per run (`pool / written / not_written / failed /
+cut_off / reasons`). Silent-zero shape: `pool > 0 ∧ written = 0`.
+
+Why the bridge existed for four months without firing: the only writer was
+auto-triage's per-alert step behind `triage_status IS NULL`, and the retrieve
+lane stamps `tp_actioned` hours before auto-triage runs — 136 of 147
+weaponised rows. The worklist above has no triage gate except `fp`.
+
+**Backfill / re-fire (same code path — never a script):**
+
+```bash
+curl -X POST https://inn.gs/e/$INNGEST_EVENT_KEY -H 'Content-Type: application/json' \
+  -d '{"name":"shopfront/clone.feed-platform.manual-trigger.v1","data":{"source":"operator"}}'
+```
+
+50 per fire; the 2026-09-17 backlog of 149 took three.
+
+**Retraction (the reverse; triage `fp` calls it automatically):**
+
+```sql
+select retract_clone_platform_entity(<alert_id>);
+-- {retracted, entities_deleted, entities_detached, scam_url_deactivated}
+```
+
+Withdraws the `clone_watch` source from both rows; DELETEs the entity only
+when clone_watch was its sole source and no `report_entity_links` row points
+at it; sets the `scam_urls` row `is_active=false` (and `high` → `low`) only
+when clone_watch was its sole source. Stamps `platform_entity.retracted_at`,
+which also keeps the alert out of the worklist forever.
+
+**Verify:**
+
+```sql
+select count(*) filter (where entity_type='domain') domains,
+       count(*) filter (where entity_type='ip') ips
+  from scam_entities where 'clone_watch' = any(feed_sources);
+select count(*) from scam_urls where feed_sources @> '{clone_watch}' and is_active;
+select count(*) from list_clone_alerts_pending_platform_entity(500);  -- expect 0 after backfill
+```
+
 ### Weaponisation early-warning alert (F1, v220)
 
 `shopfront-clone-notify-weaponised` is the BRAND-facing consumer of

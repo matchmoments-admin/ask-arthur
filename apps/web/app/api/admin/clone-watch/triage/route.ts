@@ -9,7 +9,10 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_TRIAGED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { logCost } from "@/lib/cost-telemetry";
-import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
+import {
+  feedCloneEntity,
+  retractCloneEntity,
+} from "@/lib/clone-watch/feed-entity";
 
 const TriageBodySchema = z.object({
   alertId: z.number().int().positive(),
@@ -117,17 +120,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "triage_failed" }, { status: 500 });
   }
 
-  // Feed an operator-confirmed clone (+ hosting IP) into the unified
-  // scam_entities index (flag-gated FF_CLONE_WATCH_FEED_ENTITIES; non-fatal).
+  // Platform Entity bridge (v309, #1151). tp_confirmed → feed (flag-gated;
+  // the RPC still refuses a row that has not weaponised). fp → RETRACT: the
+  // one retraction trigger, since weaponised_at is first-touch and never
+  // reverts on its own. Both non-fatal for the triage write itself.
   if (parsed.status === "tp_confirmed") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const server = (alert as any).urlscan_evidence?.server ?? null;
-    await feedCloneEntity(
-      alert.candidate_domain as string,
-      server?.ip ?? null,
-      server?.country ?? null,
-    ).catch((err) =>
+    await feedCloneEntity({
+      id: alert.id as number,
+      candidate_url: alert.candidate_url as string,
+    }).catch((err) =>
       logger.warn("clone-watch triage: feed-entity failed", {
+        alertId: parsed.alertId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  } else if (parsed.status === "fp") {
+    await retractCloneEntity(alert.id as number).catch((err) =>
+      logger.warn("clone-watch triage: retract-entity failed", {
         alertId: parsed.alertId,
         error: err instanceof Error ? err.message : String(err),
       }),
@@ -176,11 +185,14 @@ export async function POST(req: Request) {
       ) {
         // Suppression check — STOP-replied recipients never even hit the
         // queue. Same logic as notify-brand's check-suppression step.
-        const { data: suppressed, error: suppressionError } = await supabase.rpc(
-          "clone_alert_recipient_is_suppressed",
-          { p_email: directoryRow.recipient },
-        );
-        if (suppressionError) throw new Error(`suppression lookup failed: ${suppressionError.message}`);
+        const { data: suppressed, error: suppressionError } =
+          await supabase.rpc("clone_alert_recipient_is_suppressed", {
+            p_email: directoryRow.recipient,
+          });
+        if (suppressionError)
+          throw new Error(
+            `suppression lookup failed: ${suppressionError.message}`,
+          );
         if (!suppressed) {
           const { error: enqueueErr } = await supabase.rpc(
             "enqueue_clone_alert_notification",
@@ -298,20 +310,18 @@ export async function POST(req: Request) {
         candidateDomain: alert.candidate_domain,
         candidateUrl: alert.candidate_url,
         severityTier: alert.severity_tier,
-        signalType:
-          (signal &&
-          typeof signal === "object" &&
-          "signal_type" in signal &&
-          typeof signal.signal_type === "string"
-            ? signal.signal_type
-            : "unknown") as string,
-        score:
-          (signal &&
-          typeof signal === "object" &&
-          "score" in signal &&
-          typeof signal.score === "number"
-            ? signal.score
-            : 0) as number,
+        signalType: (signal &&
+        typeof signal === "object" &&
+        "signal_type" in signal &&
+        typeof signal.signal_type === "string"
+          ? signal.signal_type
+          : "unknown") as string,
+        score: (signal &&
+        typeof signal === "object" &&
+        "score" in signal &&
+        typeof signal.score === "number"
+          ? signal.score
+          : 0) as number,
         triagedAt: new Date().toISOString(),
       },
     };

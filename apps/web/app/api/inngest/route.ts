@@ -40,6 +40,10 @@ import { cloneWatchLifecycleRecheck } from "./functions/clone-watch-lifecycle-re
 // Enforcement plan (Wave 1) — opens multi-channel takedown cases (audit record)
 // when a lookalike weaponises. Opens cases only; sends stay human-gated.
 import { cloneWatchEnforcementPlan } from "./functions/clone-watch-enforcement-plan";
+// Platform bridge (#1151) — third weaponised.v1 consumer: weaponised clones
+// become Platform Entities (scam_entities + scam_urls, v309), worklist-driven
+// so a missed event self-heals. Gated FF_CLONE_WATCH_FEED_ENTITIES.
+import { cloneWatchFeedPlatform } from "./functions/clone-watch-feed-platform";
 // F1 (brand-value features) — the BRAND-facing weaponised.v1 consumer: stages
 // an urgent single-alert batch for the four-eyes dashboard send the moment a
 // monitored lookalike flips to likely_phishing. Gated FF_CLONE_WEAPONISED_ALERT.
@@ -121,6 +125,7 @@ const appFunctions = [
   // Clone-watch measurement closure Phase B (v145)
   cloneWatchLifecycleRecheck,
   cloneWatchEnforcementPlan,
+  cloneWatchFeedPlatform,
   // F1 — brand-facing weaponisation early-warning alert (v220)
   cloneWatchNotifyWeaponised,
   cloneWatchEnforcementExecute,

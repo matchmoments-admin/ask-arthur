@@ -349,6 +349,61 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(result?.exempt_feeds).toContain("crtsh");
   });
 
+  // ── migration-v308: the three staleness sweeps share one batched shape ─
+  it("mark_stale_ips / mark_stale_crypto_wallets accept (p_stale_days, p_limit) and no-op at an absurd threshold", async () => {
+    const supabase = getClient();
+    for (const fn of ["mark_stale_ips", "mark_stale_crypto_wallets"]) {
+      const { data, error } = await supabase.rpc(fn, {
+        p_stale_days: 100000,
+        p_limit: 10,
+      });
+      expect(error, fn).toBeNull();
+      const result = data as { deactivated_count: number; batch_limit: number } | null;
+      expect(result?.deactivated_count, fn).toBe(0);
+      expect(result?.batch_limit, fn).toBe(10);
+    }
+  });
+
+  // ── migration-v309: the Platform Entity bridge ───────────────────────
+  //
+  // The worklist is called (never reasoned from its WHERE), and the two
+  // write RPCs are exercised with an alert id that cannot exist so the
+  // PL/pgSQL bodies compile and the refusal path runs without a write.
+  it("list_clone_alerts_pending_platform_entity executes and returns the worklist shape", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc(
+      "list_clone_alerts_pending_platform_entity",
+      { p_limit: 5 },
+    );
+    expect(error).toBeNull();
+    expect(Array.isArray(data)).toBe(true);
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      expect(typeof row.id).toBe("number");
+      expect(typeof row.candidate_url).toBe("string");
+      expect(row.weaponised_at).toBeTruthy();
+      // The gate the old writer had (`triage_status IS NULL`) must NOT be here.
+      expect(row.triage_status).not.toBe("fp");
+    }
+  });
+
+  it("feed_clone_platform_entity / retract_clone_platform_entity refuse an absent alert without writing", async () => {
+    const supabase = getClient();
+    const fed = await supabase.rpc("feed_clone_platform_entity", {
+      p_alert_id: -1,
+      p_normalized_url: "https://example.invalid/",
+      p_domain: "example.invalid",
+      p_tld: ".invalid",
+    });
+    expect(fed.error).toBeNull();
+    expect(fed.data).toMatchObject({ written: false, reason: "not_found" });
+
+    const retracted = await supabase.rpc("retract_clone_platform_entity", {
+      p_alert_id: -1,
+    });
+    expect(retracted.error).toBeNull();
+    expect(retracted.data).toMatchObject({ retracted: false, reason: "not_found" });
+  });
+
   // ── migration-v264: feed_health ──────────────────────────────────────
   //
   // A view rather than a function, but the same failure mode: health-digest is
