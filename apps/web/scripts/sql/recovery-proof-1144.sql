@@ -1,7 +1,10 @@
 -- Recovery proof for #1142 (map #1143, ticket #1144).
 -- Run each block on its own with:
---   pnpm --filter @askarthur/web tsx scripts/_query.ts --sql "<block>"
--- (the Management API runner takes one statement; do not paste the file whole).
+--   pnpm --filter @askarthur/web exec tsx scripts/_query.ts --sql "<block>"
+-- (`exec` is required — `pnpm --filter X tsx` looks for a package script named
+-- "tsx" and fails; the Management API runner takes one statement, so do not
+-- paste the file whole). `scripts/_query.ts` is UNTRACKED session tooling
+-- (Management API, `postgres` role) — see the handoff's prod-access section.
 -- The REST sweep for cancelled runs (block 5) is not SQL — see the bottom.
 
 -- ── 1a. recheck lane per run: rechecked must be ≈50 with a MIXED submitted /
@@ -24,7 +27,15 @@ select count(*) as dead_400,
  where urlscan_evidence->>'status' = '400'
    and lifecycle_state in ('declined','monitoring');
 
-select count(*) as dead_400_in_worklist
+-- The invariant is "a dead row stamped inside 168h is not in the worklist" —
+-- `dead_400_restamped_but_present` MUST be 0. `dead_400_in_worklist` is NOT
+-- the invariant: dead rows re-present after their 168h window BY DESIGN (a
+-- revived host must get another look), and on 2026-09-17 it read 79 (all
+-- stamped Aug 29 – Sep 3) with the invariant at 0. Do not read 79 as failure.
+select count(*) as dead_400_in_worklist,
+       count(*) filter (where a.last_rechecked_at > now() - interval '168 hours')
+         as dead_400_restamped_but_present,
+       min(a.last_rechecked_at) as oldest_stamp_present
   from list_clone_alerts_for_recheck(200, 6, 168) w
   join shopfront_clone_alerts a on a.id = w.id
  where a.urlscan_evidence->>'status' = '400';
