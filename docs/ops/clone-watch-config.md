@@ -372,6 +372,38 @@ as a result, so **submit→weaponised precision is expected to be low** (~1–3%
 That is the cost of not dropping the tail early, and it is a deliberate
 trade — not something to tune back without revisiting v285.
 
+### 4b. Silent-zero shapes — what "ran, did nothing, reported ok:true" looks like per lane
+
+Twice (Sep 9–16 recheck starvation #1127; Sep 12–16 submit budget-at-index-0
+#1124) the feature went to zero while every run returned `ok:true` and every
+cost row was honest. The detector is Check 4 of `/api/cron/health-digest`
+(daily 22:00 UTC, silence-on-healthy, `recordNoAlertNeeded` carries
+`lanes_checked` so proof-of-life is unconditional); the roster and predicates
+are `apps/web/lib/laneHealth.ts` `LANE_SHAPES` — evaluated by ROSTER, so a
+lane that stops logging is `absent`, never invisible.
+
+| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                      | consecutive |
+| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
+| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed≥rechecked`           | 2           |
+| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                       | 1           |
+| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                             | 3           |
+| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `braked=true` → **braked**; `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape) | 1           |
+| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                     | 1           |
+| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                  | 3           |
+| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`                                       | 1           |
+| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                               | 1           |
+| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                        | —           |
+
+Absence windows: 9h for the 6h lanes, 26h for the daily ones. Lanes with **no
+per-run cost row** (notify-brand, notify-weaponised, enforcement-plan/-execute,
+auto-triage, reemergence-monitor, enrich-attribution, report-summary, the
+three digests, scan-one, submit-netcraft) are deliberately NOT in the roster —
+a predicate over rows that never exist would be a guard that reads as
+protection. Their hop is covered only by `unnotified_weaponised` in
+`retrieve_batch`; "every lane logs one outcome row per run" is the graduated
+ticket. Predicates read a missing metadata key as 0, so a lane that stops
+logging a field reads as zero — loud, not silent.
+
 ### Daily hit count + acceptance-gate floor check
 
 The acceptance gate requires ≥3 daily hits (the "floor" — distinguishes

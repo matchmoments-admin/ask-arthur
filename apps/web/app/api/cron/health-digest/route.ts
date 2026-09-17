@@ -13,6 +13,13 @@ import {
   type FeedProblem,
   type FeedProblemKind,
 } from "@/lib/feedHealth";
+import {
+  classifyLaneHealth,
+  LANE_SHAPES,
+  type LaneCostRow,
+  type LaneProblem,
+  type LaneProblemKind,
+} from "@/lib/laneHealth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,10 +30,13 @@ export const dynamic = "force-dynamic";
  * Schedule: 0 22 * * * UTC = 08:00 AEST (one ping/day, intentional).
  * Auth: Bearer CRON_SECRET (Vercel-Cron auto-attached).
  *
- * Three checks, all read-only SQL:
+ * Four checks, all read-only SQL:
  *   1. Error rows in cost_telemetry (feature LIKE '%error%') in last 24h
  *   2. Stale feeds in feed_ingestion_log per per-feed threshold
  *   3. Cost summary (informational only)
+ *   4. Clone-watch lanes that ran, did nothing, and reported ok:true — the
+ *      silent-zero detector (#1145). Roster + predicates in @/lib/laneHealth;
+ *      this route only fetches the lanes' recent cost rows and renders.
  *
  * Silence-on-perfect-day is deliberate — silence on Telegram = success,
  * ping = action. Vercel's cron dashboard is the meta-monitor for the cron
@@ -58,6 +68,7 @@ function escapeHtml(s: string): string {
 function buildMessage(
   errors: ErrorRow[],
   problems: FeedProblem[],
+  laneProblems: LaneProblem[],
   cost: CostSummary,
   mutedCount: number,
 ): string {
@@ -102,6 +113,27 @@ function buildMessage(
       lines.push(LABEL[kind]);
       for (const p of group) {
         lines.push(`  • ${escapeHtml(p.feed_name)} — ${escapeHtml(p.detail)}`);
+      }
+      lines.push("");
+    }
+  }
+
+  if (laneProblems.length > 0) {
+    const LANE_LABEL: Record<LaneProblemKind, string> = {
+      absent: "🚫 <b>Clone-watch lane not running:</b>",
+      braked: "🛑 <b>Clone-watch lane braked:</b>",
+      silent_zero: "🕳️ <b>Clone-watch lane running but doing nothing:</b>",
+    };
+    for (const kind of [
+      "absent",
+      "braked",
+      "silent_zero",
+    ] as LaneProblemKind[]) {
+      const group = laneProblems.filter((p) => p.kind === kind);
+      if (group.length === 0) continue;
+      lines.push(LANE_LABEL[kind]);
+      for (const p of group) {
+        lines.push(`  • ${escapeHtml(p.lane)} — ${escapeHtml(p.detail)}`);
       }
       lines.push("");
     }
@@ -211,8 +243,35 @@ export async function GET(req: Request) {
     events: (costRows ?? []).length,
   };
 
+  // ── Check 4: clone-watch silent-zero lanes (#1145) ────────────────────
+  // Fetch by ROSTER feature list over a window wider than the longest
+  // cadence in LANE_SHAPES (26h) plus the consecutive-run depth (3 × 6h), so
+  // a lane that stopped writing is judged absent rather than dropping out of
+  // the result set. ~200 rows/day across the lanes; trivial.
+  const laneFeatures = Array.from(new Set(LANE_SHAPES.map((s) => s.feature)));
+  const { data: laneRows, error: laneError } = await supabase
+    .from("cost_telemetry")
+    .select("feature, operation, created_at, units, metadata")
+    .in("feature", laneFeatures)
+    .gte("created_at", new Date(now - 72 * 3600 * 1000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  if (laneError) {
+    logger.error("health-digest: lane query failed", {
+      error: laneError.message,
+    });
+  }
+  // A failed query must not read as "all lanes healthy": with no rows every
+  // roster lane classifies as absent, which is the loud outcome.
+  const laneProblems = classifyLaneHealth(
+    (laneRows ?? []) as unknown as LaneCostRow[],
+    now,
+  );
+
   // ── Decision: alert or stay silent ────────────────────────────────────
-  const issues = errors.length > 0 || problems.length > 0;
+  const issues =
+    errors.length > 0 || problems.length > 0 || laneProblems.length > 0;
   if (!issues) {
     logger.info("health-digest: all clear", {
       cost_usd: cost.cost_usd,
@@ -226,6 +285,7 @@ export async function GET(req: Request) {
       errors_24h: 0,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
+      lanes_checked: LANE_SHAPES.length,
       cost_usd: cost.cost_usd,
     });
     return NextResponse.json({
@@ -233,12 +293,19 @@ export async function GET(req: Request) {
       errors_24h: 0,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
+      lanes_checked: LANE_SHAPES.length,
       problems: 0,
       cost,
     });
   }
 
-  const message = buildMessage(errors, problems, cost, mutedCount);
+  const message = buildMessage(
+    errors,
+    problems,
+    laneProblems,
+    cost,
+    mutedCount,
+  );
 
   // Telegram send is gated by FF_LEGACY_DIGEST_TELEGRAM. The signal now rides
   // in the consolidated 7am founder brief (Claude Code Routine "Daily Founder
@@ -254,8 +321,11 @@ export async function GET(req: Request) {
       error_count: errors.reduce((s, e) => s + e.hits, 0),
       problem_count: problems.length,
       problems: problems.map((p) => `${p.kind}:${p.feed_name}`),
+      lane_problem_count: laneProblems.length,
+      lane_problems: laneProblems.map((p) => `${p.kind}:${p.lane}`),
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
+      lanes_checked: LANE_SHAPES.length,
       cost_usd: cost.cost_usd,
       mutedBy: legacyTelegramEnabled ? null : "FF_LEGACY_DIGEST_TELEGRAM",
     },
@@ -283,8 +353,10 @@ export async function GET(req: Request) {
     muted: !legacyTelegramEnabled,
     errors,
     problems,
+    lane_problems: laneProblems,
     feeds_checked: rows.length,
     feeds_muted: mutedCount,
+    lanes_checked: LANE_SHAPES.length,
     cost,
   });
 }
