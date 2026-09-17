@@ -1,6 +1,14 @@
 // Enrichment fan-out — every 12h, fetches pending URLs, runs WHOIS+SSL per unique domain.
-// Capped at 20 domains per run with step.run() parallelism to avoid Edge Function timeouts.
-// Copies enrichment data across all same-domain URLs.
+// Capped at 20 domains per run. Copies enrichment data across all same-domain URLs.
+//
+// One batch step, not 20 per-domain steps (v308/#1156). The per-domain
+// `step.run` fan-out cost a slot-queue wait at every boundary — 21 boundaries
+// on the 5-slot account measured 12 m 45 s trigger→finish for ~25 s of actual
+// lookups (whois caps at 5 s, ssl at 3 s, neither throws), and 8 of 18 runs
+// were cancelled at the 13 m finish with no retry and no telemetry. The
+// lookups now run 4 at a time inside ONE in-step budget; a domain whose write
+// fails is stamped `failed` so it never re-presents at the head of the
+// newest-first worklist (worklist-gate-starvation-rule).
 //
 // Ordering (2026-07-12 fleet review): NEWEST-first. The pending-active queue is
 // ~235k rows, ALL source_type='feed' (blocklist imports — phishing_army,
@@ -23,15 +31,81 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { lookupWhois } from "../whois";
 import { checkSSL } from "../ssl";
+import { budgetedStep } from "./step-budget";
 
 const MAX_DOMAINS_PER_RUN = 20;
+const LOOKUP_PARALLELISM = 4;
+// In-step: 20 domains / 4-wide × ≤5 s per wave ≈ 25 s; 150 s leaves room for
+// slow registries. Checked between waves; an unprocessed tail stays `pending`
+// and is picked up next run. Floor = 2 × 30 s + 150 s + 60 s = 270 s < 5 m.
+const ENRICH_WALL_CLOCK_MS = 150_000;
 
-// inngest-finish-budget: 23 boundaries — 3 static + 1 per-domain enrich step x
-// MAX_DOMAINS_PER_RUN (20).
+interface EnrichOutcome {
+  domain: string;
+  updated: number;
+  error?: string;
+  skipped?: "budget_expired";
+}
+
+async function enrichDomain(entry: {
+  domain: string;
+  urlIds: number[];
+}): Promise<EnrichOutcome> {
+  const supabase = createServiceClient();
+  if (!supabase) return { domain: entry.domain, updated: 0 };
+  const attemptedAt = new Date().toISOString();
+  try {
+    const [whois, ssl] = await Promise.all([
+      lookupWhois(entry.domain),
+      checkSSL(entry.domain),
+    ]);
+
+    // Update all URLs for this domain
+    const { error } = await supabase
+      .from("scam_urls")
+      .update({
+        whois_registrar: whois.registrar,
+        whois_registrant_country: whois.registrantCountry,
+        whois_created_date: whois.createdDate,
+        whois_expires_date: whois.expiresDate,
+        whois_name_servers: whois.nameServers,
+        whois_is_private: whois.isPrivate,
+        whois_raw: whois.raw,
+        whois_lookup_at: attemptedAt,
+        ssl_valid: ssl.valid,
+        ssl_issuer: ssl.issuer,
+        ssl_days_remaining: ssl.daysRemaining,
+        enrichment_status: "completed",
+        enrichment_attempted_at: attemptedAt,
+      })
+      .in("id", entry.urlIds);
+    if (error) throw new Error(error.message);
+    return { domain: entry.domain, updated: entry.urlIds.length };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("Enrichment update failed", {
+      domain: entry.domain,
+      error: message,
+    });
+    // Stamp as failed so the row leaves the pending worklist rather than
+    // re-presenting at the head every run.
+    await supabase
+      .from("scam_urls")
+      .update({
+        enrichment_status: "failed",
+        enrichment_attempted_at: attemptedAt,
+      })
+      .in("id", entry.urlIds);
+    return { domain: entry.domain, updated: 0, error: message };
+  }
+}
+
 export const enrichmentFanOut = inngest.createFunction(
   {
     id: "pipeline-enrichment-fanout",
-    timeouts: { finish: "13m" },
+    // 5m, was 13m: the budget is derived from 2 boundaries + the in-step
+    // wall clock (inngestFinishBudgets.test.ts), not from the old 21-step fan-out.
+    timeouts: { finish: "5m" },
     name: "Pipeline: Enrich Pending URLs",
     concurrency: { limit: 1 }, // Only one enrichment run at a time
     // Defence-in-depth against manual re-trigger storms from the Inngest
@@ -40,7 +114,7 @@ export const enrichmentFanOut = inngest.createFunction(
     // 5×20 WHOIS+SSL lookups on the same domains. Cron-safe because 30m < 6h.
     rateLimit: { limit: 1, period: "30m" },
   },
-  { cron: "0 */12 * * *" }, // Every 12h (was 6h). Capped per run (MAX_DOMAINS_PER_RUN); the ~235k feed backlog exceeds throughput by orders of magnitude, so ordering (newest-first, see header) — not cadence — is what determines which URLs get enriched.
+  { cron: "35 */12 * * *" }, // Every 12h at :35 (off the :00 pileup, v308). Capped per run (MAX_DOMAINS_PER_RUN); the ~235k feed backlog exceeds throughput by orders of magnitude, so ordering (newest-first, see header) — not cadence — is what determines which URLs get enriched.
   withAxiomLogging({ fnId: "pipeline-enrichment-fanout" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
@@ -112,57 +186,32 @@ export const enrichmentFanOut = inngest.createFunction(
       return { enriched: 0, reason: "no pending domains" };
     }
 
-    // Step 2: Fan out WHOIS+SSL per domain using parallel step.run()
-    const results = await Promise.all(
-      pendingDomains.map((entry) =>
-        step.run(`enrich-${entry.domain}`, async () => {
-          const [whois, ssl] = await Promise.all([
-            lookupWhois(entry.domain),
-            checkSSL(entry.domain),
-          ]);
-
-          // Update all URLs for this domain
-          const supabase = createServiceClient();
-          if (!supabase) return { domain: entry.domain, updated: 0 };
-
-          const { error } = await supabase
-            .from("scam_urls")
-            .update({
-              whois_registrar: whois.registrar,
-              whois_registrant_country: whois.registrantCountry,
-              whois_created_date: whois.createdDate,
-              whois_expires_date: whois.expiresDate,
-              whois_name_servers: whois.nameServers,
-              whois_is_private: whois.isPrivate,
-              whois_raw: whois.raw,
-              whois_lookup_at: new Date().toISOString(),
-              ssl_valid: ssl.valid,
-              ssl_issuer: ssl.issuer,
-              ssl_days_remaining: ssl.daysRemaining,
-              enrichment_status: "completed",
-              enrichment_attempted_at: new Date().toISOString(),
-            })
-            .in("id", entry.urlIds);
-
-          if (error) {
-            logger.error("Enrichment update failed", {
-              domain: entry.domain,
-              error: String(error),
-            });
-            // Mark as failed so we retry next run
-            await supabase
-              .from("scam_urls")
-              .update({
-                enrichment_status: "failed",
-                enrichment_attempted_at: new Date().toISOString(),
-              })
-              .in("id", entry.urlIds);
-            return { domain: entry.domain, updated: 0, error: error.message };
+    // Step 2: WHOIS+SSL per domain, LOOKUP_PARALLELISM-wide waves inside one
+    // budgeted step (see header).
+    const results = await budgetedStep(
+      step,
+      "enrich-domains",
+      ENRICH_WALL_CLOCK_MS,
+      async (budget) => {
+        const out: EnrichOutcome[] = [];
+        for (let i = 0; i < pendingDomains.length; i += LOOKUP_PARALLELISM) {
+          if (budget.expired()) {
+            // Remaining rows stay `pending` and re-present next run — the
+            // worklist is newest-first so they are not starved by the tail.
+            out.push(
+              ...pendingDomains.slice(i).map((e) => ({
+                domain: e.domain,
+                updated: 0,
+                skipped: "budget_expired" as const,
+              })),
+            );
+            break;
           }
-
-          return { domain: entry.domain, updated: entry.urlIds.length };
-        }),
-      ),
+          const wave = pendingDomains.slice(i, i + LOOKUP_PARALLELISM);
+          out.push(...(await Promise.all(wave.map(enrichDomain))));
+        }
+        return out;
+      },
     );
 
     const totalUpdated = results.reduce((sum, r) => sum + (r.updated || 0), 0);
