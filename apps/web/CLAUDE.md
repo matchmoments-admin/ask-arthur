@@ -17,11 +17,13 @@ app/
 │   ├── v1/                # B2B endpoints (API-key gated, tier-throttled)
 │   ├── webhooks/          # bot platforms + Stripe
 │   ├── cron/              # Vercel cron handlers
+│   ├── inngest/functions/ # Durable consumers for analyze.completed.v1
 │   └── ...
 ├── app/                   # authenticated consumer pages
-│   ├── dashboard/         # main user dashboard
+│   ├── page.tsx           # main user dashboard (route root, no dashboard/ subdir)
 │   ├── billing/           # Stripe portal entry
-│   ├── reports/threats/   # user's own analyses
+│   ├── threats/           # user's own analyses (Threat Feed)
+│   ├── reports/           # report generation & exports
 │   └── ...
 ├── banking/, telco/, digital-platforms/   # SPF sector landing pages
 ├── blog/                  # MDX blog posts
@@ -36,7 +38,6 @@ lib/                       # Local-only utilities (use @/lib/...)
   └── ...
 __tests__/                 # vitest, mocks the @askarthur/* packages
 middleware.ts              # Auth wrapping (Promise.race 3s), bot routing
-inngest/                   # Durable consumers for analyze.completed.v1
 emails/                    # React Email templates
 ```
 

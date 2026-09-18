@@ -27,7 +27,7 @@ If you fix a phishing-URL display in `format-telegram.ts` and don't touch the ot
 | Export                     | Purpose                                                   | Consumers                               |
 | -------------------------- | --------------------------------------------------------- | --------------------------------------- |
 | `analyzeForBot`            | Shared analysis entry point for bot routes                | `apps/web/app/api/webhooks/*/route.ts`  |
-| `toTelegramMessage`        | Render `AnalysisResult` to Telegram HTML                  | telegram webhook handler                |
+| `toTelegramHTML`           | Render `AnalysisResult` to Telegram HTML                  | telegram webhook handler                |
 | `toWhatsAppMessage`        | Render `AnalysisResult` to WhatsApp markdown              | whatsapp webhook handler                |
 | `toSlackBlocks`            | Render `AnalysisResult` to Slack Block Kit JSON           | slack webhook handler                   |
 | `toMessengerMessage`       | Render `AnalysisResult` to Messenger plain text           | messenger webhook handler               |
