@@ -131,6 +131,16 @@ function headlineFor(verdict: string): string {
 // ~50s, which is why /api/inbound-scan needs maxDuration: 60 in
 // vercel.json. Anything non-transient (validation errors, our own bugs)
 // throws on the first attempt — retrying would just delay the failure.
+//
+// Shared by the retry loop and the apology copy: only an error that matches
+// here is genuinely "overloaded, try again". Incident 2026-09-17: a
+// max_tokens truncation (a JSON parse error, non-transient) fell through to
+// the "temporarily overloaded" apology — false, and a retry would have failed
+// the same way. Truncation is now recovered inside analyzeWithClaude; the
+// copy split below keeps the apology honest for whatever comes next.
+const TRANSIENT_ANALYSIS_ERROR =
+  /\b(408|429|5\d\d)\b|overloaded|rate.?limit|timeout|ECONNRESET|ETIMEDOUT|fetch failed|network/i;
+
 async function analyzeWithRetries(
   blob: string,
   region: string,
@@ -143,10 +153,7 @@ async function analyzeWithRetries(
     } catch (err) {
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
-      const isTransient =
-        /\b(408|429|5\d\d)\b|overloaded|rate.?limit|timeout|ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(
-          msg,
-        );
+      const isTransient = TRANSIENT_ANALYSIS_ERROR.test(msg);
       if (!isTransient || attempt === maxAttempts) throw err;
       const delayMs = 1000 * Math.pow(3, attempt - 1); // 1s, 3s
       logger.warn("inbound-scan: analyzeForBot retrying", {
@@ -398,19 +405,28 @@ export async function POST(req: NextRequest) {
         const fromEmail =
           process.env.RESEND_FROM_EMAIL ||
           "Ask Arthur <brendan@askarthur.au>";
+        const transient = TRANSIENT_ANALYSIS_ERROR.test(errMsg);
         const sendResult = await resend.emails.send({
           from: fromEmail,
           to: sender.email,
           headers: threadingHeaders(payload.message_id),
-          subject: "Ask Arthur — temporarily overloaded, please retry",
+          subject: transient
+            ? "Ask Arthur — temporarily overloaded, please retry"
+            : "Ask Arthur — we couldn't analyse that email",
           text: [
             sender.displayName ? `Hi ${sender.displayName.split(" ")[0]},` : "Hi,",
             "",
-            "We received the email you forwarded, but our scam-detection AI is temporarily overloaded and couldn't analyse it just now.",
+            transient
+              ? "We received the email you forwarded, but our scam-detection AI is temporarily overloaded and couldn't analyse it just now."
+              : "We received the email you forwarded, but something went wrong on our side while analysing it. We've logged it and will look into why.",
             "",
             "Two ways to get a verdict right now:",
-            "  1. Forward the same email again in a few minutes — these blips usually clear in 1–2 minutes.",
-            "  2. Paste it directly at https://askarthur.au — same AI, different queue, often clearer when the email path is busy.",
+            transient
+              ? "  1. Forward the same email again in a few minutes — these blips usually clear in 1–2 minutes."
+              : "  1. Paste the email's text directly at https://askarthur.au — the web checker takes a different path and usually succeeds.",
+            transient
+              ? "  2. Paste it directly at https://askarthur.au — same AI, different queue, often clearer when the email path is busy."
+              : "  2. If you're worried right now: don't click any links in it, and check with the company through a phone number or website you already know.",
             "",
             "Apologies for the inconvenience. We treat every forward as a real request — there's no risk you'll fall through the cracks.",
             "",

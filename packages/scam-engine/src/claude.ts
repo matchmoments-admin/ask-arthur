@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 import { scrubPII } from "./sanitize";
+import { closeTruncatedJson } from "./truncated-json";
 import {
   PROMPT_VERSION,
   type Verdict,
@@ -224,8 +226,8 @@ Respond with ONLY valid JSON matching this schema:
   "verdict": "SAFE" | "SUSPICIOUS" | "HIGH_RISK",
   "confidence": 0.0-1.0,
   "summary": "2-3 sentence explanation in plain, reassuring language suitable for elderly users",
-  "redFlags": ["specific red flag 1", "specific red flag 2"],
-  "nextSteps": ["actionable step 1", "actionable step 2"],
+  "redFlags": ["specific red flag 1", "specific red flag 2"],  // at most 6, most important first, one short sentence each
+  "nextSteps": ["actionable step 1", "actionable step 2"],      // at most 5, in the order to do them
   "scamType": "phishing|advance_fee|tech_support|romance|investment|impersonation|smishing|other|none",
   "impersonatedBrand": "brand name if applicable, or null",
   "channel": "email|sms|social_media|phone|website|other",
@@ -604,10 +606,16 @@ export async function analyzeWithClaude(
   //     headroom inside 60s, so one cheap auto-retry is kept.
   const timeoutMs = hasImages ? 25_000 : 15_000;
   const maxRetries = hasImages ? 0 : 1;
+  // Output cap. 700 sat INSIDE the natural output range for a content-rich
+  // email (measured 2026-09-17 on the incident email: 635–807 tokens at an
+  // uncapped run; prod web_analyze p90 was 628), so brand-shaped emails with
+  // several contacts were a coin-flip to truncate. 1000 clears the highest
+  // observed by ~25%; the truncation recovery below is the backstop.
+  const maxTokens = multiImage ? 1400 : 1000;
   const response = await client.messages.create(
     {
       model: "claude-haiku-4-5-20251001",
-      max_tokens: multiImage ? 1200 : 700,
+      max_tokens: maxTokens,
       system: [
         {
           type: "text" as const,
@@ -638,13 +646,51 @@ export async function analyzeWithClaude(
   // Prepend the "{" we used as prefill
   const fullJson = "{" + responseText;
 
-  // Parse JSON from response (handle any trailing text after the JSON)
-  const jsonMatch = fullJson.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("Failed to parse Claude response as JSON");
+  // A max_tokens stop means the JSON was cut mid-write. The schema is
+  // serialised in prompt order, so verdict/summary/redFlags/nextSteps are
+  // normally complete and only the trailing scammerContacts block is
+  // partial — recover those rather than throw away a finished verdict.
+  // Incident 2026-09-17: a scan@ forward's verdict was discarded this way
+  // and the user got an "overloaded" apology instead. warn, not info: info
+  // is sampled at 10% and this is exactly the rare event sampling hides.
+  const truncated = response.stop_reason === "max_tokens";
+  let jsonText: string;
+  if (truncated) {
+    const outputTokens = response.usage.output_tokens;
+    const repaired = closeTruncatedJson(fullJson);
+    const recoveredVerdict =
+      repaired !== null &&
+      typeof (JSON.parse(repaired) as { verdict?: unknown }).verdict === "string";
+    logger.warn("Claude analysis output truncated at max_tokens", {
+      outputTokens,
+      maxTokens,
+      hasImages: Boolean(hasImages),
+      recoveredVerdict,
+    });
+    const axiom = getLogger({ source: "scam-engine/claude" });
+    axiom.warn("Claude analysis output truncated at max_tokens", {
+      outputTokens,
+      maxTokens,
+      hasImages: Boolean(hasImages),
+      recoveredVerdict,
+    });
+    void axiom.flush().catch(() => {});
+    if (!repaired || !recoveredVerdict) {
+      throw new Error(
+        `Claude output truncated at max_tokens (${outputTokens} tokens) before a verdict was written`,
+      );
+    }
+    jsonText = repaired;
+  } else {
+    // Parse JSON from response (handle any trailing text after the JSON)
+    const jsonMatch = fullJson.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Failed to parse Claude response as JSON");
+    }
+    jsonText = jsonMatch[0];
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = JSON.parse(jsonText);
 
   const result = validateResult(parsed);
   result.usage = {
