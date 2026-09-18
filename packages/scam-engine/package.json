@@ -17,6 +17,7 @@
     "./claude": "./src/claude.ts",
     "./pipeline": "./src/pipeline.ts",
     "./sanitize": "./src/sanitize.ts",
+    "./truncated-json": "./src/truncated-json.ts",
     "./safebrowsing": "./src/safebrowsing.ts",
     "./ssrf-dispatcher": "./src/ssrf-dispatcher.ts",
     "./whois": "./src/whois.ts",

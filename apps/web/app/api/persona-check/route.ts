@@ -7,6 +7,7 @@ import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import { sanitizeUnicode, escapeXml } from "@askarthur/scam-engine/claude";
+import { parsePersonaResponse, PERSONA_MAX_TOKENS } from "@/lib/persona-check-parse";
 import { analyzeEmail } from "@askarthur/scam-engine/local-intel";
 import { lookupWhois } from "@askarthur/scam-engine/whois";
 import { z } from "zod";
@@ -282,11 +283,12 @@ export async function POST(req: NextRequest) {
     const userMessage = messageParts.join("\n");
 
     let responseText: string;
+    let stopReason: string | null;
     try {
       const client = new Anthropic({ apiKey });
       const response = await client.messages.create({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 800,
+        max_tokens: PERSONA_MAX_TOKENS,
         system: PERSONA_SYSTEM_PROMPT,
         messages: [
           {
@@ -296,6 +298,7 @@ export async function POST(req: NextRequest) {
         ],
       });
       responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
+      stopReason = response.stop_reason ?? null;
 
       // Cost telemetry — this route was previously invisible to /admin/costs
       // (no logCost). Haiku 4.5; fire-and-forget, never blocks the response.
@@ -310,6 +313,7 @@ export async function POST(req: NextRequest) {
         metadata: {
           input_tokens: inputTokens,
           output_tokens: outputTokens,
+          stop_reason: stopReason,
           type,
         },
       });
@@ -318,25 +322,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Analysis service temporarily unavailable. Please try again." }, { status: 503 });
     }
 
-    // Extract JSON from response
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      logger.error("Persona check: no JSON in response", { text: responseText.slice(0, 200) });
-      return NextResponse.json({ error: "Analysis failed — please try again." }, { status: 500 });
+    const modelOutput = parsePersonaResponse(responseText, stopReason);
+    if (!modelOutput.ok) {
+      logger.error(`Persona check: ${modelOutput.reason}`, {
+        stop_reason: stopReason,
+        text: responseText.slice(0, 200),
+      });
+      return NextResponse.json({ error: modelOutput.userMessage }, { status: 500 });
     }
-
-    let result: Record<string, unknown>;
-    try {
-      result = JSON.parse(jsonMatch[0]);
-    } catch {
-      logger.error("Persona check: invalid JSON", { text: jsonMatch[0].slice(0, 200) });
-      return NextResponse.json({ error: "Analysis failed — please try again." }, { status: 500 });
-    }
-
-    // Validate required fields
-    if (!result.verdict || !result.summary) {
-      return NextResponse.json({ error: "Analysis incomplete — please try again." }, { status: 500 });
-    }
+    const result = modelOutput.result;
 
     return NextResponse.json({
       verdict: result.verdict,

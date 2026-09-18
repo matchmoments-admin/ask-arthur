@@ -147,6 +147,16 @@ export async function ocrLanyard(
       { timeout: 15_000 },
     );
 
+    // Fail-soft is this module's contract, but a max_tokens stop must not be
+    // silent: it reads as "couldn't extract" while the real fix is the cap
+    // (#1168). warn is unsampled in Axiom; info is not.
+    if (response.stop_reason === "max_tokens") {
+      logger.warn("ocr-lanyard: Claude output truncated at max_tokens", {
+        maxTokens: 400,
+        outputTokens: response.usage.output_tokens,
+      });
+    }
+
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {
       logger.warn("ocr-lanyard: no text block in Claude response");
