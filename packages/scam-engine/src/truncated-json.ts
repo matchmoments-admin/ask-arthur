@@ -42,7 +42,9 @@ export function closeTruncatedJson(text: string): string | null {
 }
 
 function closeOpenStructures(text: string): string {
-  const stack: Array<"{" | "["> = [];
+  // Each open container with the offset of its bracket, so a partial
+  // array element can be cut away at its own `{`.
+  const stack: Array<{ open: "{" | "["; at: number }> = [];
   let inString = false;
   let escaped = false;
   let stringStart = -1;
@@ -59,7 +61,7 @@ function closeOpenStructures(text: string): string {
       inString = true;
       stringStart = i;
     } else if (ch === "{" || ch === "[") {
-      stack.push(ch);
+      stack.push({ open: ch, at: i });
     } else if (ch === "}" || ch === "]") {
       stack.pop();
     }
@@ -68,6 +70,23 @@ function closeOpenStructures(text: string): string {
   // A cut inside a string leaves a partial value or key — drop it rather
   // than ship half a sentence as a red flag.
   let out = inString ? text.slice(0, stringStart) : text;
+
+  // A cut inside an object that is itself an array element leaves a
+  // half-written element (`{"step": "…"` with its `why` never reached).
+  // That is not content the model finished; drop the element, not just the
+  // field. The top-level object is exempt — a cut inside it is the normal
+  // case this whole function exists for.
+  // Walk outward from the cut: the nearest enclosing object whose parent is
+  // an array is the element in progress (the cut may be inside one of its
+  // own nested arrays or objects).
+  for (let k = stack.length - 1; k >= 1; k--) {
+    if (stack[k].open === "{" && stack[k - 1].open === "[") {
+      out = out.slice(0, stack[k].at);
+      stack.length = k;
+      break;
+    }
+  }
+
   out = out.replace(/\s+$/, "").replace(/,$/, "");
   // A complete key with no value (`"emailAddresses":` or `"emailAddresses"`)
   // cannot be closed into anything valid — drop it too.
@@ -75,7 +94,7 @@ function closeOpenStructures(text: string): string {
 
   const closers = stack
     .reverse()
-    .map((open) => (open === "{" ? "}" : "]"))
+    .map(({ open }) => (open === "{" ? "}" : "]"))
     .join("");
   return out + closers;
 }

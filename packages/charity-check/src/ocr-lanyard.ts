@@ -18,6 +18,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 
 export interface LanyardExtraction {
@@ -146,6 +147,18 @@ export async function ocrLanyard(
       },
       { timeout: 15_000 },
     );
+
+    // Fail-soft is this module's contract, but a max_tokens stop must not be
+    // silent: it reads as "couldn't extract" while the real fix is the cap
+    // (#1168). `logger` is console-only; the Axiom copy via getLogger is the
+    // one an operator can query, and warn there is unsampled.
+    if (response.stop_reason === "max_tokens") {
+      const fields = { maxTokens: 400, outputTokens: response.usage.output_tokens };
+      logger.warn("ocr-lanyard: Claude output truncated at max_tokens", fields);
+      const axiom = getLogger({ source: "charity-check/ocr-lanyard" });
+      axiom.warn("ocr-lanyard: Claude output truncated at max_tokens", fields);
+      void axiom.flush().catch(() => {});
+    }
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {

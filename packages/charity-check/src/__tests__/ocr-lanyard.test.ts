@@ -9,7 +9,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 // factory runs (the factory is hoisted to before normal imports). Without
 // hoisted, `createMock` would be undefined at factory-evaluation time.
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, warnMock } = vi.hoisted(() => ({
+  createMock: vi.fn(),
+  warnMock: vi.fn(),
+}));
+vi.mock("@askarthur/utils/logger", () => ({
+  logger: { warn: warnMock, error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
 vi.mock("@anthropic-ai/sdk", () => {
   // ocrLanyard does `new Anthropic()`. vi.fn().mockImplementation() returns
   // an arrow function which can't be `new`'d, so use a real class instead.
@@ -24,6 +30,7 @@ import { ocrLanyard } from "../ocr-lanyard";
 describe("ocrLanyard", () => {
   beforeEach(() => {
     createMock.mockReset();
+    warnMock.mockReset();
     process.env.ANTHROPIC_API_KEY = "test-key";
   });
   afterEach(() => {
@@ -126,5 +133,22 @@ describe("ocrLanyard", () => {
     expect(out.charity_name).toBe("Real Charity");
     expect(out.abn).toBeUndefined();
     expect(out.extracted).toBe(true); // charity_name is enough
+  });
+
+  it("warns (not silently fails) when Claude stopped at max_tokens", async () => {
+    // A cut inside the JSON reads as "couldn't extract" — fail-soft is the
+    // contract, but the operator must be able to tell cap-exhaustion from a
+    // blurry photo. Existing tests omit stop_reason/usage; this one sets them.
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: '{"charity_name": "Australian Red Cro' }],
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 1200, output_tokens: 400 },
+    });
+    const out = await ocrLanyard("data", "image/jpeg");
+    expect(out.extracted).toBe(false);
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringMatching(/truncated at max_tokens/),
+      expect.objectContaining({ maxTokens: 400, outputTokens: 400 }),
+    );
   });
 });
