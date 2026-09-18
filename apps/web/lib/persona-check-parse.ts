@@ -5,6 +5,7 @@
 // (rate limit, SSRF guard, WHOIS, Claude) to exercise in a unit test — so the
 // one piece with a real failure history lives here.
 import { closeTruncatedJson } from "@askarthur/scam-engine/truncated-json";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 
 export const PERSONA_MAX_TOKENS = 800;
@@ -31,12 +32,16 @@ export function parsePersonaResponse(
   const truncated = stopReason === "max_tokens";
   let jsonText: string | null;
   if (truncated) {
-    // warn, not info: info is sampled at 10% and this is the rare event
-    // the sampling would hide.
-    logger.warn("Persona check: Claude output truncated at max_tokens", {
-      maxTokens: PERSONA_MAX_TOKENS,
-      text_chars: responseText.length,
-    });
+    // Two sinks on purpose: `logger` is console-only (Vercel runtime logs,
+    // 1h retention) and has no Axiom transport; `getLogger` is the Axiom
+    // path, and warn there is unsampled where info is 10%. Same pair as
+    // claude.ts. Flush explicitly — a serverless request can end before a
+    // buffered log ships.
+    const fields = { maxTokens: PERSONA_MAX_TOKENS, text_chars: responseText.length };
+    logger.warn("Persona check: Claude output truncated at max_tokens", fields);
+    const axiom = getLogger({ source: "persona-check" });
+    axiom.warn("Persona check: Claude output truncated at max_tokens", fields);
+    void axiom.flush().catch(() => {});
     const start = responseText.indexOf("{");
     jsonText = start === -1 ? null : closeTruncatedJson(responseText.slice(start));
   } else {
