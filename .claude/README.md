@@ -66,19 +66,19 @@ The pattern is established and proven — reuse it, don't reinvent.
 
 | Reviewer                            | Triggers on                                                                             | Checks                                                                                                                                                                                                                                                                           |
 | ----------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `db-migration.sh`                   | `supabase/migrations/*`, `pipeline/scrapers/*`                                          | `SET statement_timeout = 0`, large unchunked writes on hot tables, HNSW/GIN on hot tables (ADR-0005), PL/pgSQL `#variable_conflict use_column` and SECURITY-INVOKER `search_path` rules                                                                                          |
+| `db-migration.sh`                   | `supabase/migration-*.sql`, `pipeline/scrapers/*`                                       | `SET statement_timeout = 0`, large unchunked writes on hot tables, HNSW/GIN on hot tables (ADR-0005), PL/pgSQL `#variable_conflict use_column` and SECURITY-INVOKER `search_path` rules                                                                                          |
 | `cron-impact.sh`                    | `apps/web/app/api/cron/*`, `apps/web/vercel.json`, `packages/scam-engine/src/inngest/*` | Cron route changes against the watchdog 10-min budget                                                                                                                                                                                                                            |
 | `flag-governance.sh`                | `packages/utils/src/feature-flags.ts`                                                   | Default-ON consumer flags, quoted `*_CAP_USD` values (NaN brakes), missing `server-only` markers, system-map updates                                                                                                                                                             |
 | `cost-telemetry-instrumentation.sh` | `apps/web/app/api/**/*.ts`                                                              | Paid-API client imports (Anthropic / Resend / Twilio / Vonage / APIVoid / IPQS / AbuseIPDB / VirusTotal / HIBP / URLScan / S3) without any `logCost` / `cost-telemetry` / `feature_brakes` reference                                                                             |
 | `rls-and-tenant-isolation.sh`       | `apps/web/**/*.ts(x)`, `packages/**/*.ts(x)` (excluding worker tier)                    | `createServiceClient` outside the allowed worker tier (`apps/web/app/api/**`, `packages/scam-engine/`, `packages/supabase/`). Forbidden in: server components, pages, layouts, middleware, `apps/web/lib/`. See [`packages/supabase/CLAUDE.md`](../packages/supabase/CLAUDE.md). |
 
-**Known issue:** `db-migration.sh`'s `supabase/migrations/*` matcher doesn't match the actual file layout (`supabase/migration-v<N>-*.sql` directly under `supabase/`). The reviewer's Python-scraper checks (case 7 in its body) DO fire because `pipeline/scrapers/*.py` is correct. The migration checks themselves currently never fire. Tracked as a follow-up; not in scope of this PR to fix because changing the matcher would surface advisory noise on every migration edit (behaviour change to an advisory reviewer that's been silent).
+**Fixed 2026-08-28:** `db-migration.sh`'s matcher used to be `supabase/migrations/*`, which didn't match the actual file layout (`supabase/migration-v<N>-*.sql` directly under `supabase/`) and matched 0 of 289 migrations. The dispatcher in `run-reviewer.sh` now matches `supabase/migration-*.sql` (commit `14f992b0`, PR #1055) — see [`supabase/CLAUDE.md`](../supabase/CLAUDE.md) gotchas for detail.
 
 ---
 
 ## Skills (project-scoped, in `.claude/skills/`)
 
-**Committed — these are what a fresh clone gets (5):**
+**Committed — these are what a fresh clone gets (7):**
 
 | Skill                            | What it owns                                                                                                                                                                                                                    |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -87,10 +87,12 @@ The pattern is established and proven — reuse it, don't reinvent.
 | `system-map/`                    | Quick reference for the deployed-surface map (web routes / DB tables / cron jobs / feature flags).                                                                                                                              |
 | `add-inbound-email-source/`      | Adding a newsletter / gov-alert source to the inbound-email pipeline (Cloudflare Email Routing → Worker → Edge Function → `feed_items`).                                                                                        |
 | `publish-to-linkedin/`           | The approval-gated GitHub Actions publishing lanes for the company page — link cards and document carousels. Copy itself comes from the user-scoped `linkedin-writing` skill.                                                   |
+| `software-architecture/`         | Applies *Fundamentals of Software Architecture* (Richards & Ford) to system-design decisions — architecture-characteristic trade-offs, ADRs, fitness functions.                                                                 |
+| `generate-illustration.md`       | Loose skill file (not a directory) — generates faceless flat-vector illustrations via Gemini MCP.                                                                                                                                |
 
-**Present on the maintainer's machine but NOT committed (6):** `clean-code/`,
+**Present on the maintainer's machine but NOT committed (5):** `clean-code/`,
 `refactoring/`, `pragmatic-programmer/`, `clean-architecture/`,
-`software-architecture/`, `data-intensive-design/` — the book-derived coding
+`data-intensive-design/` — the book-derived coding
 skills, seeded per the user-scoped convention. They load locally and are
 invisible to anyone else, including CI and any agent working from a fresh
 clone. Commit them or accept that they are personal tooling; do not reference

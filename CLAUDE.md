@@ -142,7 +142,7 @@ import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { storeVerifiedScam } from "@askarthur/scam-engine/pipeline";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
-import { toTelegramMessage } from "@askarthur/bot-core/format-telegram";
+import { toTelegramHTML } from "@askarthur/bot-core/format-telegram";
 import { TIER_LIMITS } from "@askarthur/types/billing";
 import type { UnifiedScanResult } from "@askarthur/types/scanner";
 import { scanExtension } from "@askarthur/extension-audit";

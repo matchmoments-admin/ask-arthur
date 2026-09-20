@@ -52,6 +52,6 @@ This package has no `typecheck` or `test` script of its own — schemas are exer
 
 | Looking for                     | Where                                                                                 |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
-| Tier configuration & quotas     | `packages/types/src/billing.ts` + `apps/web/lib/billing.ts` (logic)                   |
+| Tier configuration & quotas     | `packages/types/src/billing.ts` (shapes); logic lives per-surface, e.g. `apps/web/lib/stripe.ts`, `apps/web/lib/documentSkus.ts`, `apps/web/lib/document-allowance.ts` |
 | Database schema source of truth | `supabase/migration-v*.sql` (DDL) → regenerate `db.generated.ts`                      |
 | Zod 4 migration notes           | [`grill-with-docs/STACK-PINS.md`](../../.claude/skills/grill-with-docs/STACK-PINS.md) |
