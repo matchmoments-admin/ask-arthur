@@ -106,6 +106,12 @@ export const PRICING = {
   // and the extension image-check route; the HIVE_AI_CAP_USD daily brake in
   // cost-daily-check assumes this constant is real, so never zero it out.
   HIVE_AI_USD_PER_IMAGE: 0.003,
+
+  // TypeSafe Jev (decision-only model) — list price 2026-09-20: $0.042 per
+  // million INPUT tokens, output tokens free. Consumed by the clone-watch
+  // Jev shadow lane (v311); spend rolls into the shopfront_clone_outreach
+  // brake in cost-daily-check.
+  JEV_USD_PER_INPUT_TOKEN: 0.042 / 1_000_000,
 } as const;
 
 /**
