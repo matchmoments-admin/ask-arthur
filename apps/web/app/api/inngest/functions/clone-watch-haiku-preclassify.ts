@@ -6,10 +6,19 @@ import {
   parseCloneWatchPreclassifyRequestedData,
 } from "@askarthur/scam-engine/inngest/events";
 import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
+import { askJev } from "@askarthur/scam-engine/providers/jev";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCostAsync } from "@/lib/cost-telemetry";
+import { PRICING, logCostAsync } from "@/lib/cost-telemetry";
+import {
+  JEV_PROMPT_VERSION,
+  JevAnswerShapeError,
+  buildJevPreclassifyQuestions,
+  buildJevState,
+  mapJevAnswersToRow,
+  toJevRpcArgs,
+} from "@/lib/clone-watch/jev-preclassify";
 import {
   ATTACK_INTENT_VALUES,
   CLONE_TACTIC_VALUES,
@@ -49,6 +58,16 @@ import {
  * usage that could trigger rate limits.
  *
  * Plan: docs/plans/clone-watch-outreach.md §15 Phase E follow-up.
+ *
+ * Jev SHADOW LANE (v311, 2026-09-21). A third step, `jev-shadow`, runs after
+ * `persist` when FF_CLONE_WATCH_JEV_SHADOW is ON: the same three input
+ * fields go to TypeSafe Jev (a decision-only model returning calibrated
+ * probabilities) and land in `clone_watch_jev_classifications`, read by
+ * NOTHING downstream. Why: Haiku's `confidence` above was measured to have
+ * no predictive power over outcomes (see clone-watch-netcraft-auto.ts
+ * header + v311's), yet it gates four worklist RPCs. The shadow lane
+ * exists to be measured by `clone_watch_jev_calibration()`; the decision
+ * rule and delete plan live in docs/ops/clone-watch-config.md.
  */
 
 // Prompt rubric version. Bump on every change so trend queries can
@@ -66,7 +85,8 @@ const PROMPT_VERSION = "v2";
 
 // System prompt — cached via cache_control:ephemeral (callClaudeJson
 // default). Static across calls so the Anthropic cache hits.
-const SYSTEM_PROMPT = `You are a phishing/clone classifier for an Australian scam-detection
+const SYSTEM_PROMPT =
+  `You are a phishing/clone classifier for an Australian scam-detection
 platform. Given a candidate domain and the brand it might be cloning,
 classify it across four dimensions and return JSON only via the
 submit_response tool.
@@ -149,181 +169,316 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     timeouts: { finish: "10m" },
   },
   { event: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT },
-  withAxiomLogging({ fnId: "shopfront-clone-haiku-preclassify" }, async ({ event, step }) => {
-    const data = parseCloneWatchPreclassifyRequestedData(event.data);
+  withAxiomLogging(
+    { fnId: "shopfront-clone-haiku-preclassify" },
+    async ({ event, step }) => {
+      const data = parseCloneWatchPreclassifyRequestedData(event.data);
 
-    if (!featureFlags.shopfrontClonePreclassify) {
-      return { skipped: true, reason: "FF_SHOPFRONT_CLONE_PRECLASSIFY disabled" };
-    }
-
-    const sb = createServiceClient();
-    if (!sb) return { skipped: true, reason: "supabase_unavailable" };
-
-    const userMessage = JSON.stringify({
-      brand: data.brand,
-      candidate_domain: data.candidateDomain,
-      candidate_url: data.candidateUrl,
-    });
-
-    // Call Haiku with tool-use forced JSON output (matches the pattern
-    // proven on Reddit Intel). Cache the system prompt (default) so
-    // repeat calls within the cache TTL hit at ~10x lower cost.
-    //
-    // The cost-brake check (`shopfront_clone_outreach`, the shared brake
-    // across all clone-watch sub-features) rides INSIDE this step rather than
-    // owning its own: each step boundary costs one account-concurrency queue
-    // wait (~30–60s under contention, #1069), and a single-row SELECT does not
-    // earn that. The brake still gates the Claude call — it just shares the
-    // step. A braked run returns a sentinel instead of the call result.
-    //
-    // Error path (local-ultrareview F5): emit a $0 `_error` cost-telemetry
-    // row BEFORE re-throwing so Inngest's retry+failure surface in the
-    // health-digest aggregator (matches `reddit-intel-error` pattern).
-    // Without this row, a degraded Anthropic endpoint produces invisible
-    // failures — the only signal is the absence of clone_watch_classifications
-    // rows, which the operator wouldn't notice for hours. Awaited (not
-    // fire-and-forget): a cancelled run kills deferred promises, which is
-    // exactly when the error row matters most.
-    const callOutcome = await step.run("classify-haiku", async () => {
-      const { data: brakeRow, error: brakeError } = await sb
-        .from("feature_brakes")
-        .select("paused_until")
-        .eq("feature", "shopfront_clone_outreach")
-        .maybeSingle();
-      if (brakeError) {
-        logger.warn("clone-watch preclassify: brake lookup failed", {
-          error: brakeError.message,
-        });
-        return { braked: true as const }; // conservative
-      }
-      if (
-        brakeRow?.paused_until &&
-        new Date(brakeRow.paused_until).getTime() > Date.now()
-      ) {
-        return { braked: true as const };
+      if (!featureFlags.shopfrontClonePreclassify) {
+        return {
+          skipped: true,
+          reason: "FF_SHOPFRONT_CLONE_PRECLASSIFY disabled",
+        };
       }
 
-      try {
-        const call = await callClaudeJson({
-          model: "HAIKU_4_5",
-          system: SYSTEM_PROMPT,
-          user: userMessage,
-          // The removed `userIsTrusted: true` said "structured envelope, not
-          // raw user text". The envelope's SHAPE is ours; its CONTENTS are
-          // not. `candidate_domain` and `candidate_url` come from the whoisds
-          // newly-registered-domain feed — strings an attacker chose and paid
-          // to register, which is as untrusted as input gets. JSON.stringify
-          // escapes quotes and control characters, so the JSON cannot be
-          // broken out of; it does nothing about instruction-shaped text
-          // inside a value. The sandwich is what handles that.
-          schema: ClassificationOutputSchema,
-          maxTokens: 256,
-          cacheSystem: true,
-          useToolUse: true,
-          toolName: "submit_classification",
-          requestId: `clone-watch-preclassify:${data.alertId}`,
+      const sb = createServiceClient();
+      if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+      const userMessage = JSON.stringify({
+        brand: data.brand,
+        candidate_domain: data.candidateDomain,
+        candidate_url: data.candidateUrl,
+      });
+
+      // Call Haiku with tool-use forced JSON output (matches the pattern
+      // proven on Reddit Intel). Cache the system prompt (default) so
+      // repeat calls within the cache TTL hit at ~10x lower cost.
+      //
+      // The cost-brake check (`shopfront_clone_outreach`, the shared brake
+      // across all clone-watch sub-features) rides INSIDE this step rather than
+      // owning its own: each step boundary costs one account-concurrency queue
+      // wait (~30–60s under contention, #1069), and a single-row SELECT does not
+      // earn that. The brake still gates the Claude call — it just shares the
+      // step. A braked run returns a sentinel instead of the call result.
+      //
+      // Error path (local-ultrareview F5): emit a $0 `_error` cost-telemetry
+      // row BEFORE re-throwing so Inngest's retry+failure surface in the
+      // health-digest aggregator (matches `reddit-intel-error` pattern).
+      // Without this row, a degraded Anthropic endpoint produces invisible
+      // failures — the only signal is the absence of clone_watch_classifications
+      // rows, which the operator wouldn't notice for hours. Awaited (not
+      // fire-and-forget): a cancelled run kills deferred promises, which is
+      // exactly when the error row matters most.
+      const callOutcome = await step.run("classify-haiku", async () => {
+        const { data: brakeRow, error: brakeError } = await sb
+          .from("feature_brakes")
+          .select("paused_until")
+          .eq("feature", "shopfront_clone_outreach")
+          .maybeSingle();
+        if (brakeError) {
+          logger.warn("clone-watch preclassify: brake lookup failed", {
+            error: brakeError.message,
+          });
+          return { braked: true as const }; // conservative
+        }
+        if (
+          brakeRow?.paused_until &&
+          new Date(brakeRow.paused_until).getTime() > Date.now()
+        ) {
+          return { braked: true as const };
+        }
+
+        try {
+          const call = await callClaudeJson({
+            model: "HAIKU_4_5",
+            system: SYSTEM_PROMPT,
+            user: userMessage,
+            // The removed `userIsTrusted: true` said "structured envelope, not
+            // raw user text". The envelope's SHAPE is ours; its CONTENTS are
+            // not. `candidate_domain` and `candidate_url` come from the whoisds
+            // newly-registered-domain feed — strings an attacker chose and paid
+            // to register, which is as untrusted as input gets. JSON.stringify
+            // escapes quotes and control characters, so the JSON cannot be
+            // broken out of; it does nothing about instruction-shaped text
+            // inside a value. The sandwich is what handles that.
+            schema: ClassificationOutputSchema,
+            maxTokens: 256,
+            cacheSystem: true,
+            useToolUse: true,
+            toolName: "submit_classification",
+            requestId: `clone-watch-preclassify:${data.alertId}`,
+          });
+          return { braked: false as const, call };
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          await logCostAsync({
+            feature: "shopfront_clone_preclassify_error",
+            provider: "anthropic",
+            operation: "classify_error",
+            units: 0,
+            unitCostUsd: 0,
+            requestId: `clone-watch-preclassify:${data.alertId}`,
+            metadata: {
+              alert_id: data.alertId,
+              brand: data.brand,
+              error_message: errorMessage.slice(0, 500),
+              model_id: "claude-haiku-4-5-20251001",
+              prompt_version: PROMPT_VERSION,
+            },
+          });
+          throw err; // Re-throw so Inngest applies retries:2 + finally fails the run
+        }
+      });
+
+      if (callOutcome.braked) {
+        return { skipped: true, reason: "cost_brake_engaged" };
+      }
+      const callResult = callOutcome.call;
+      const classification = callResult.result;
+
+      // Persist via the v157 idempotent UPSERT RPC. Cost telemetry rides the
+      // same step (fold, #1069): a dedicated log-cost step cost one more
+      // concurrency-queue wait per run and was the FIRST thing a finish-cancel
+      // chopped — 58% of cost rows were lost on 2026-09-01. The insert is
+      // awaited after a successful RPC; a step retry after the RPC succeeded can
+      // duplicate one telemetry row (rare crash window), which beats silently
+      // losing the majority. units = total token count so the dashboard slices
+      // by tokens/day cleanly; estimatedCostUsd already accounts for cache hits.
+      await step.run("persist", async () => {
+        const { error } = await sb.rpc("record_clone_watch_classification", {
+          p_alert_id: data.alertId,
+          p_brand: data.brand,
+          p_candidate_domain: data.candidateDomain,
+          p_is_clone: classification.is_clone,
+          p_confidence: classification.confidence,
+          p_clone_tactic: classification.clone_tactic,
+          p_attack_intent: classification.attack_intent,
+          p_risk_indicators: classification.risk_indicators,
+          p_reason: classification.reason,
+          p_model_id: callResult.modelId,
+          p_prompt_version: PROMPT_VERSION,
+          p_input_tokens: callResult.usage.inputTokens,
+          p_output_tokens: callResult.usage.outputTokens,
         });
-        return { braked: false as const, call };
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (error) {
+          throw new Error(
+            `record_clone_watch_classification: ${error.message}`,
+          );
+        }
+        const totalTokens =
+          callResult.usage.inputTokens + callResult.usage.outputTokens;
         await logCostAsync({
-          feature: "shopfront_clone_preclassify_error",
+          feature: "shopfront_clone_preclassify",
           provider: "anthropic",
-          operation: "classify_error",
-          units: 0,
-          unitCostUsd: 0,
+          operation: callResult.cacheHit ? "classify_cache_hit" : "classify",
+          units: totalTokens,
+          unitCostUsd:
+            totalTokens > 0 ? callResult.estimatedCostUsd / totalTokens : 0,
           requestId: `clone-watch-preclassify:${data.alertId}`,
           metadata: {
             alert_id: data.alertId,
             brand: data.brand,
-            error_message: errorMessage.slice(0, 500),
-            model_id: "claude-haiku-4-5-20251001",
+            is_clone: classification.is_clone,
+            confidence: classification.confidence,
+            clone_tactic: classification.clone_tactic,
+            attack_intent: classification.attack_intent,
             prompt_version: PROMPT_VERSION,
+            model_id: callResult.modelId,
+            cache_hit: callResult.cacheHit,
+            estimated_cost_usd: callResult.estimatedCostUsd,
           },
         });
-        throw err; // Re-throw so Inngest applies retries:2 + finally fails the run
-      }
-    });
-
-    if (callOutcome.braked) {
-      return { skipped: true, reason: "cost_brake_engaged" };
-    }
-    const callResult = callOutcome.call;
-    const classification = callResult.result;
-
-    // Persist via the v157 idempotent UPSERT RPC. Cost telemetry rides the
-    // same step (fold, #1069): a dedicated log-cost step cost one more
-    // concurrency-queue wait per run and was the FIRST thing a finish-cancel
-    // chopped — 58% of cost rows were lost on 2026-09-01. The insert is
-    // awaited after a successful RPC; a step retry after the RPC succeeded can
-    // duplicate one telemetry row (rare crash window), which beats silently
-    // losing the majority. units = total token count so the dashboard slices
-    // by tokens/day cleanly; estimatedCostUsd already accounts for cache hits.
-    await step.run("persist", async () => {
-      const { error } = await sb.rpc("record_clone_watch_classification", {
-        p_alert_id: data.alertId,
-        p_brand: data.brand,
-        p_candidate_domain: data.candidateDomain,
-        p_is_clone: classification.is_clone,
-        p_confidence: classification.confidence,
-        p_clone_tactic: classification.clone_tactic,
-        p_attack_intent: classification.attack_intent,
-        p_risk_indicators: classification.risk_indicators,
-        p_reason: classification.reason,
-        p_model_id: callResult.modelId,
-        p_prompt_version: PROMPT_VERSION,
-        p_input_tokens: callResult.usage.inputTokens,
-        p_output_tokens: callResult.usage.outputTokens,
       });
-      if (error) {
-        throw new Error(`record_clone_watch_classification: ${error.message}`);
-      }
-      const totalTokens =
-        callResult.usage.inputTokens + callResult.usage.outputTokens;
-      await logCostAsync({
-        feature: "shopfront_clone_preclassify",
-        provider: "anthropic",
-        operation: callResult.cacheHit ? "classify_cache_hit" : "classify",
-        units: totalTokens,
-        unitCostUsd:
-          totalTokens > 0 ? callResult.estimatedCostUsd / totalTokens : 0,
-        requestId: `clone-watch-preclassify:${data.alertId}`,
-        metadata: {
-          alert_id: data.alertId,
-          brand: data.brand,
-          is_clone: classification.is_clone,
-          confidence: classification.confidence,
-          clone_tactic: classification.clone_tactic,
-          attack_intent: classification.attack_intent,
-          prompt_version: PROMPT_VERSION,
-          model_id: callResult.modelId,
-          cache_hit: callResult.cacheHit,
-          estimated_cost_usd: callResult.estimatedCostUsd,
-        },
-      });
-    });
 
-    logger.info("clone-watch preclassify: done", {
+      // Jev SHADOW LANE (v311). Runs AFTER Haiku's row and cost row are
+      // persisted, on the identical input, and is read by nothing downstream —
+      // it exists to be measured by clone_watch_jev_calibration(). Fail-soft
+      // by design: a Jev failure must never fail the Haiku result, so this
+      // step returns a discriminated outcome instead of throwing. Fail-soft
+      // is only acceptable because it is OBSERVABLE: every non-ok path writes
+      // a $0 `_jev_error` diagnostic row (keyed on the adapter's reason), and
+      // the outcome rides in the fn's return. The shared brake was already
+      // consulted in classify-haiku; a braked run never reaches this step.
+      const jev = featureFlags.cloneWatchJevShadow
+        ? await step.run("jev-shadow", () => runJevShadow(sb, data))
+        : { jev: "off" as const };
+
+      logger.info("clone-watch preclassify: done", {
+        alertId: data.alertId,
+        brand: data.brand,
+        is_clone: classification.is_clone,
+        confidence: classification.confidence,
+        clone_tactic: classification.clone_tactic,
+        input_tokens: callResult.usage.inputTokens,
+        output_tokens: callResult.usage.outputTokens,
+        cost_usd: callResult.estimatedCostUsd,
+        jev: jev.jev,
+        jev_is_clone_p: jev.jev === "ok" ? jev.is_clone_p : undefined,
+        jev_reason: jev.jev === "error" ? jev.reason : undefined,
+      });
+
+      return {
+        ok: true,
+        alertId: data.alertId,
+        is_clone: classification.is_clone,
+        confidence: classification.confidence,
+        clone_tactic: classification.clone_tactic,
+        attack_intent: classification.attack_intent,
+        jev: jev.jev,
+      };
+    },
+  ),
+);
+
+type JevShadowOutcome =
+  | { jev: "ok"; is_clone_p: number }
+  | { jev: "error"; reason: string };
+
+/**
+ * The body of the `jev-shadow` step. Same three input fields as Haiku;
+ * persists through `record_clone_watch_jev_classification` with
+ * source='live'; logs cost under feature `shopfront_clone_preclassify_jev`
+ * (provider `typesafe`). Never throws — see the step comment for why that
+ * is acceptable here and not in general.
+ */
+async function runJevShadow(
+  sb: NonNullable<ReturnType<typeof createServiceClient>>,
+  data: {
+    alertId: number;
+    brand: string;
+    candidateDomain: string;
+    candidateUrl: string;
+  },
+): Promise<JevShadowOutcome> {
+  const requestId = `clone-watch-preclassify-jev:${data.alertId}`;
+
+  const fail = async (
+    reason: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<JevShadowOutcome> => {
+    await logCostAsync({
+      feature: "shopfront_clone_preclassify_jev_error",
+      provider: "typesafe",
+      operation: "classify_error",
+      units: 0,
+      unitCostUsd: 0,
+      requestId,
+      metadata: {
+        alert_id: data.alertId,
+        brand: data.brand,
+        reason,
+        prompt_version: JEV_PROMPT_VERSION,
+        ...extra,
+      },
+    });
+    return { jev: "error", reason };
+  };
+
+  const res = await askJev(
+    buildJevState({
+      brand: data.brand,
+      candidateDomain: data.candidateDomain,
+      candidateUrl: data.candidateUrl,
+    }),
+    buildJevPreclassifyQuestions(),
+    { requestId },
+  );
+  if (!res.ok) return fail(res.reason, { status: res.status ?? null });
+
+  let rpcArgs: Record<string, unknown>;
+  try {
+    rpcArgs = toJevRpcArgs({
       alertId: data.alertId,
       brand: data.brand,
-      is_clone: classification.is_clone,
-      confidence: classification.confidence,
-      clone_tactic: classification.clone_tactic,
-      input_tokens: callResult.usage.inputTokens,
-      output_tokens: callResult.usage.outputTokens,
-      cost_usd: callResult.estimatedCostUsd,
+      candidateDomain: data.candidateDomain,
+      row: mapJevAnswersToRow(res.answers),
+      modelId: res.model,
+      source: "live",
+      inputTokens: res.usage.inputTokens,
+      latencyMs: res.elapsedMs,
     });
+  } catch (err) {
+    if (err instanceof JevAnswerShapeError) {
+      return fail("bad_answers", { error_message: err.message.slice(0, 500) });
+    }
+    throw err;
+  }
 
-    return {
-      ok: true,
+  const { error: rpcError } = await sb.rpc(
+    "record_clone_watch_jev_classification",
+    rpcArgs,
+  );
+  if (rpcError) {
+    logger.warn("clone-watch preclassify: jev persist failed", {
       alertId: data.alertId,
-      is_clone: classification.is_clone,
-      confidence: classification.confidence,
-      clone_tactic: classification.clone_tactic,
-      attack_intent: classification.attack_intent,
-    };
-  }),
-);
+      error: rpcError.message,
+    });
+    return fail("persist_failed", {
+      error_message: rpcError.message.slice(0, 500),
+    });
+  }
+
+  const isCloneP = rpcArgs.p_is_clone_p as number;
+  await logCostAsync({
+    feature: "shopfront_clone_preclassify_jev",
+    provider: "typesafe",
+    operation: "classify",
+    units: res.usage.inputTokens,
+    unitCostUsd: PRICING.JEV_USD_PER_INPUT_TOKEN,
+    requestId,
+    metadata: {
+      alert_id: data.alertId,
+      brand: data.brand,
+      is_clone_p: isCloneP,
+      clone_tactic: rpcArgs.p_clone_tactic,
+      attack_intent: rpcArgs.p_attack_intent,
+      model_id: res.model,
+      prompt_version: JEV_PROMPT_VERSION,
+      latency_ms: res.elapsedMs,
+    },
+  });
+  return { jev: "ok", is_clone_p: isCloneP };
+}
 
 // Export the schema + prompt version for unit testing.
 export { ClassificationOutputSchema, PROMPT_VERSION, SYSTEM_PROMPT };

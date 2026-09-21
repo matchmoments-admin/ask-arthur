@@ -45,7 +45,8 @@ export const featureFlags = {
   siteAudit: process.env.NEXT_PUBLIC_FF_SITE_AUDIT === "true",
 
   /** Email security checks (SPF/DMARC/DKIM) in site audit — zero cost, default ON */
-  emailSecurityChecks: process.env.NEXT_PUBLIC_FF_EMAIL_SECURITY_CHECKS !== "false",
+  emailSecurityChecks:
+    process.env.NEXT_PUBLIC_FF_EMAIL_SECURITY_CHECKS !== "false",
 
   /** Recovery guidance steps on HIGH_RISK / SUSPICIOUS verdicts */
   recoveryGuidance: process.env.NEXT_PUBLIC_FF_RECOVERY_GUIDANCE === "true",
@@ -208,7 +209,8 @@ export const featureFlags = {
   multiTenancy: process.env.NEXT_PUBLIC_FF_MULTI_TENANCY === "true",
 
   /** Corporate onboarding flow with ABN verification */
-  corporateOnboarding: process.env.NEXT_PUBLIC_FF_CORPORATE_ONBOARDING === "true",
+  corporateOnboarding:
+    process.env.NEXT_PUBLIC_FF_CORPORATE_ONBOARDING === "true",
 
   /** Phase 14 Sprint 2: Claude Haiku enrichment of vulnerabilities.au_context
    *  (banks_affected, gov_affected, essential_eight_relevance, cps234_relevance).
@@ -272,7 +274,8 @@ export const featureFlags = {
   /** Breach Defence F2 — browser-extension proactive breach warning ribbon.
    *  Server-side gate paired with the WXT build-time WXT_BD_BREACH_WARNING
    *  flag; both must be on for the ribbon to render. */
-  bdExtensionWarning: process.env.NEXT_PUBLIC_FF_BD_EXTENSION_WARNING === "true",
+  bdExtensionWarning:
+    process.env.NEXT_PUBLIC_FF_BD_EXTENSION_WARNING === "true",
 
   /** Breach Defence F3 — auto-rotate compromised credentials via password-
    *  manager deep links (1Password / Bitwarden / Apple Keychain). Gates the
@@ -342,8 +345,7 @@ export const featureFlags = {
   // The two display gates are NEXT_PUBLIC_* on the literal pattern so the
   // client bundle's build-time inlining still works.
   arthursTakeGenerate: readBoolEnv("FF_ARTHURS_TAKE_GENERATE"),
-  arthursTakeDetail:
-    process.env.NEXT_PUBLIC_FF_ARTHURS_TAKE_DETAIL === "true",
+  arthursTakeDetail: process.env.NEXT_PUBLIC_FF_ARTHURS_TAKE_DETAIL === "true",
   arthursTakeCards: process.env.NEXT_PUBLIC_FF_ARTHURS_TAKE_CARDS === "true",
 
   /** Reddit Brands Discover — weekly cron that aggregates
@@ -407,8 +409,7 @@ export const featureFlags = {
 
   /** Reddit Intel Wave 3 — public B2B API at /api/v1/intel/* (themes, digest,
    *  quotes). Returns 503 when off; validateApiKey is checked first regardless. */
-  redditIntelB2bApi:
-    process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API === "true",
+  redditIntelB2bApi: process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API === "true",
 
   /** Reddit Intel — public /intel/themes/[slug] pages. Each page surfaces a
    *  single narrative cluster + its Reddit member permalinks, used as the
@@ -424,8 +425,7 @@ export const featureFlags = {
    *  checked first regardless. Default OFF — turn on per-deployment once
    *  the embedding backfill has run and there's enough corpus to retrieve
    *  meaningful results. */
-  scamsSearchB2bApi:
-    process.env.NEXT_PUBLIC_FF_SCAMS_SEARCH_B2B_API === "true",
+  scamsSearchB2bApi: process.env.NEXT_PUBLIC_FF_SCAMS_SEARCH_B2B_API === "true",
 
   /** Charity Legitimacy Check — consumer page (/charity-check) + main-checker
    *  deep-link CTA. Public flag so the UI can conditionally render entry
@@ -854,6 +854,19 @@ export const featureFlags = {
    *  (default $5/day) via cost-daily-check — no dedicated per-feature cap.
    *  See PR-H (local-ultrareview F1) for the aggregator wiring. */
   shopfrontClonePreclassify: readBoolEnv("FF_SHOPFRONT_CLONE_PRECLASSIFY"),
+
+  /** Jev SHADOW LANE on the clone-watch pre-classifier (v311). Server-side
+   *  only; sub-flag of shopfrontClonePreclassify (the `jev-shadow` step runs
+   *  after Haiku's persist in the same fn, so it can only fire when the
+   *  parent flag is ON). When ON, every Haiku-classified candidate is also
+   *  sent to TypeSafe Jev and the calibrated answers land in
+   *  clone_watch_jev_classifications — READ BY NOTHING in the product path;
+   *  measured by clone_watch_jev_calibration(). Default OFF. Cost: ~150
+   *  input tokens × $0.042/M ≈ $0.000006/call; rolled into the shared
+   *  `SHOPFRONT_CLONE_OUTREACH_CAP_USD` brake via cost-daily-check. Requires
+   *  TYPESAFE_API_KEY (missing key = every row skipped as `no-key`, visible
+   *  as $0 `shopfront_clone_preclassify_jev_error` telemetry). */
+  cloneWatchJevShadow: readBoolEnv("FF_CLONE_WATCH_JEV_SHADOW"),
 
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it

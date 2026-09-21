@@ -1282,6 +1282,57 @@ dark: the route is live behind `FF_BRAND_EXPOSURE` (ON in prod) but returns
 4. No new webhook events needed — the existing `/api/stripe/webhook` endpoint +
    `STRIPE_WEBHOOK_SECRET` already receive `customer.subscription.*`.
 
+## 8c. Jev shadow lane (v311, 2026-09-21)
+
+**What.** A second classifier run beside the Haiku pre-classifier on the
+identical input, persisted, and **read by nothing in the product path**. It
+exists to be measured. Vocabulary: a _shadow lane_ (`CONTEXT.md`).
+
+**Why.** Haiku's `confidence` gates four worklist RPCs (`>= 0.7`), auto-triage
+(`>= 0.9`) and `computeWeaponisationRisk`, and has no predictive power over
+outcomes. Prod, 2026-09-20, all 3,496 `clone_watch_classifications` rows:
+
+| Haiku says              |     n | weaponised later | triaged FP |
+| ----------------------- | ----: | ---------------: | ---------: |
+| clone, conf 0.8–1.0     | 2,255 |         137 (6%) |        171 |
+| clone, conf 0.6–0.8     |   649 |          17 (3%) |        166 |
+| not clone, conf 0.8–1.0 |   565 |                1 |        119 |
+
+TypeSafe **Jev** is a decision-only model whose output is a calibrated
+probability (RLCD-trained), $0.042/M input tokens, output free, ~0.1–0.5 s.
+Vendor benchmarks are self-reported; this lane is how we get our own.
+
+**Where.**
+
+- Step `jev-shadow` in `apps/web/app/api/inngest/functions/clone-watch-haiku-preclassify.ts`, after `persist`. Gated `FF_CLONE_WATCH_JEV_SHADOW` (default OFF; sub-flag of `FF_SHOPFRONT_CLONE_PRECLASSIFY`).
+- Adapter `packages/scam-engine/src/providers/jev.ts`; rubric `apps/web/lib/clone-watch/jev-preclassify.ts` (`JEV_PROMPT_VERSION`); vocabulary shared with Haiku in `apps/web/lib/clone-watch/preclassify-vocabulary.ts`.
+- Table `clone_watch_jev_classifications` + RPCs `record_clone_watch_jev_classification`, `clone_watch_jev_calibration()` — `supabase/migration-v311-clone-watch-jev-shadow.sql`.
+- Secret `TYPESAFE_API_KEY` (Vercel, Sensitive). Missing key ⇒ every row skipped as `no-key`.
+
+**Observability.** Success: `cost_telemetry WHERE feature='shopfront_clone_preclassify_jev'` (provider `typesafe`, `units` = input tokens, metadata `is_clone_p`, `model_id`, `latency_ms`). Failure: `$0` rows under `shopfront_clone_preclassify_jev_error` with `metadata.reason` ∈ `no-key | timeout | rate_limited | http_error | bad_shape | bad_answers | persist_failed`. The fn return carries `jev: "off" | "ok" | "error"`. Spend rolls into `SHOPFRONT_CLONE_OUTREACH_CAP_USD` → `feature_brakes.shopfront_clone_outreach` (filter list in `cost-daily-check/route.ts`, pinned by `costDailyCheckJevBrake.test.ts`).
+
+**Day-1 curve (backfill).** Every historic row's input is stored, so:
+
+```bash
+pnpm --filter @askarthur/web exec tsx scripts/backfill-jev-classifications.ts            # dry-run
+pnpm --filter @askarthur/web exec tsx scripts/backfill-jev-classifications.ts --apply --limit 25
+pnpm --filter @askarthur/web exec tsx scripts/backfill-jev-classifications.ts --apply     # ~3.5k calls, ≈ $0.02
+```
+
+Rows land with `source='backfill'`; the live step writes `source='live'`. Keep them separable — the backfill is the answer, the live cohort is the confirmation.
+
+**The decision instrument.**
+
+```sql
+select * from clone_watch_jev_calibration() order by classifier, bucket;
+```
+
+One row per (classifier, probability bucket) over the alerts BOTH classifiers scored. `haiku` bucket 0 = `is_clone=false`; buckets 1–10 = confidence deciles. `jev` buckets 1–10 = `is_clone_p` deciles. Columns: `n`, `urlscan_phish`, `weaponised`, `netcraft_declined`, `triaged_fp`, `tp_actioned`.
+
+**Decision rule (fixed 2026-09-20, before any data).** Adopt Jev as the confidence source — a later PR that swaps the worklist gates' input, with its own ADR — **only if** `weaponised / n` and `urlscan_phish / n` rise monotonically across Jev's buckets where Haiku's stay flat. If Jev's curve is also flat, or the top-bucket weaponisation rate is not clearly above Haiku's, **delete the lane**: unset the flag, drop the step + modules, drop the table (v3xx), remove the two feature tags from the cap filter. Do not leave a measured-and-failed lane running.
+
+**Activation (after the backfill answers).** Set `FF_CLONE_WATCH_JEV_SHADOW=true` on Vercel prod via a PR whose commit message carries `[build]` (the ignore-step trap), and in the SAME PR add an `ABSENCE_WATCHES` entry in `apps/web/lib/laneHealth.ts` for `shopfront_clone_preclassify_jev` / `classify` / 26 h — not before, or the daily health digest pages on a lane that is off.
+
 ## 9. Related
 
 - [docs/plans/clone-watch-mvp.md](../plans/clone-watch-mvp.md) — the MVP build plan + matcher evolution log

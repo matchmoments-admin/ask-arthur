@@ -277,6 +277,36 @@ This isn't a configuration step but a recurring operational task. Per
 
 ---
 
+## 4. Jev shadow lane — key, backfill, then flag (v311)
+
+**Why:** the clone-watch Haiku pre-classifier's `confidence` has no predictive
+power over outcomes yet gates four worklists; v311 shipped a dark shadow lane
+that runs TypeSafe Jev beside it so we can measure a calibrated alternative
+before any gate reads it. Runbook + decision rule:
+`docs/ops/clone-watch-config.md` § 8c.
+
+**Effort:** ~15 min operator time + one PR for the flag.
+
+**Steps:**
+
+1. Obtain a working key from `console.typesafe.ai/keys` (the first key tried
+   on 2026-09-21 returned `401 authentication_error` on `POST
+/v1/systemone` with the documented `Authorization: Bearer` header).
+   Put it in `apps/web/.env.local` as `TYPESAFE_API_KEY`.
+2. Backfill locally (day-1 curve, ≈ $0.02):
+   `pnpm --filter @askarthur/web exec tsx scripts/backfill-jev-classifications.ts --apply --limit 25`,
+   confirm 25 rows with `source='backfill'` + one `typesafe` cost row, then
+   run without `--limit`.
+3. Read `select * from clone_watch_jev_calibration() order by 1,2` and post
+   both curves on PR #1172. Apply the decision rule in § 8c.
+4. Only if the curve is worth confirming live: `vercel env add
+TYPESAFE_API_KEY production` (**Sensitive**), then a PR that sets
+   `FF_CLONE_WATCH_JEV_SHADOW=true` AND adds the `laneHealth.ts`
+   `ABSENCE_WATCHES` entry (`shopfront_clone_preclassify_jev` / `classify` /
+   26 h), commit message carrying `[build]`.
+
+---
+
 ## Status snapshot
 
 After completing items 1 + 2 above:

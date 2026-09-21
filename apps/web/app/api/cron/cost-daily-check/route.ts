@@ -311,7 +311,10 @@ export async function GET(req: Request) {
         t.feature === "shopfront_clone_urlscan" ||
         t.feature === "shopfront_clone_urlscan_rescan" ||
         t.feature === "shopfront_clone_preclassify" ||
-        t.feature === "shopfront_clone_preclassify_error",
+        t.feature === "shopfront_clone_preclassify_error" ||
+        // Jev shadow lane (v311) — same fn, same brake.
+        t.feature === "shopfront_clone_preclassify_jev" ||
+        t.feature === "shopfront_clone_preclassify_jev_error",
     )
     .reduce((sum, t) => sum + t.cost, 0);
 
