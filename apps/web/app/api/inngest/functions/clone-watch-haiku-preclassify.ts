@@ -10,6 +10,11 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCostAsync } from "@/lib/cost-telemetry";
+import {
+  ATTACK_INTENT_VALUES,
+  CLONE_TACTIC_VALUES,
+  RISK_INDICATOR_VALUES,
+} from "@/lib/clone-watch/preclassify-vocabulary";
 
 /**
  * PR-D2 (#498) — Haiku pre-classifier for clone-watch candidates.
@@ -102,40 +107,12 @@ risk_indicators[], and a one-sentence reason.`.trim();
 const ClassificationOutputSchema = z.object({
   is_clone: z.boolean(),
   confidence: z.number().min(0).max(1),
-  clone_tactic: z.enum([
-    "typosquat",
-    "homograph",
-    "brandjack",
-    "lookalike_tld",
-    "subdomain_abuse",
-    "compound_word",
-    "unrelated",
-    "parked",
-    "other",
-  ]),
-  attack_intent: z.enum([
-    "credential_phishing",
-    "payment_fraud",
-    "malware_delivery",
-    "investment_scam",
-    "fake_marketplace",
-    "crypto_scam",
-    "support_scam",
-    "unknown",
-  ]),
-  risk_indicators: z
-    .array(
-      z.enum([
-        "urgency_words",
-        "payment_form_url",
-        "login_form_url",
-        "crypto_address",
-        "fake_promotion",
-        "suspicious_tld",
-        "new_registration",
-      ]),
-    )
-    .default([]),
+  // Enum values live in lib/clone-watch/preclassify-vocabulary.ts — the one
+  // home shared with the Jev shadow lane (v311) so the two classifiers
+  // cannot drift apart. The DB CHECK constraints (v157, v311) mirror them.
+  clone_tactic: z.enum(CLONE_TACTIC_VALUES),
+  attack_intent: z.enum(ATTACK_INTENT_VALUES),
+  risk_indicators: z.array(z.enum(RISK_INDICATOR_VALUES)).default([]),
   reason: z.string().min(1).max(500),
 });
 

@@ -432,6 +432,55 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
       expect(r.feed_name.length).toBeGreaterThan(0);
     }
   });
+
+  // ── migration-v311: Jev shadow lane ──────────────────────────────────
+  //
+  // Both functions are hand-authored PL/pgSQL with the exact bite pattern
+  // this suite exists for: the calibration fn RETURNS TABLE with column
+  // names (`n`, `bucket`) that also appear in its body (#variable_conflict),
+  // and the record fn has 16 positional params where one wrong type is a
+  // 42883 at call time, never at CREATE.
+  it("clone_watch_jev_calibration executes and returns the documented shape", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("clone_watch_jev_calibration");
+    expect(error).toBeNull();
+    const rows = (data ?? []) as Record<string, unknown>[];
+    // Empty before the first Jev row is written — shape is what matters.
+    for (const r of rows) {
+      expect(["haiku", "jev"]).toContain(r.classifier);
+      expect(typeof r.bucket).toBe("number");
+      for (const k of ["n", "urlscan_phish", "weaponised", "netcraft_declined", "triaged_fp", "tp_actioned"]) {
+        expect(Number.isInteger(Number(r[k]))).toBe(true);
+      }
+    }
+  });
+
+  it("record_clone_watch_jev_classification rejects an absent alert (FK) without a type error", async () => {
+    const supabase = getClient();
+    const { error } = await supabase.rpc("record_clone_watch_jev_classification", {
+      p_alert_id: -1,
+      p_brand: "example.invalid",
+      p_candidate_domain: "examp1e.invalid",
+      p_is_clone_p: 0.5,
+      p_clone_tactic: "typosquat",
+      p_clone_tactic_conf: 0.5,
+      p_clone_tactic_probs: { typosquat: 0.5 },
+      p_attack_intent: "unknown",
+      p_attack_intent_conf: 0.5,
+      p_attack_intent_probs: { unknown: 0.5 },
+      p_risk_indicator_probs: {},
+      p_model_id: "smoke",
+      p_prompt_version: "smoke",
+      p_source: "backfill",
+      p_input_tokens: 0,
+      p_latency_ms: 0,
+    });
+    // The ONLY acceptable failure is the FK on alert_id (23503). A 42883
+    // (no matching function) or 42804 (type mismatch) means the TS args and
+    // the SQL signature have drifted.
+    expect(error).not.toBeNull();
+    expect(error?.code).toBe("23503");
+  });
 });
 
 describe.skipIf(hasEnv)("SQL RPC smoke tests — env not configured", () => {

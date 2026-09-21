@@ -483,3 +483,10 @@ The generated file is committed (NOT git-ignored) so CI typechecks have access t
 `start_newsletter_issue` serialises issue initialisation and checks the tested approval. `claim_newsletter_delivery` uses row locks/skip-locked, rechecks active/suppressed status and never reclaims uncertain sends. `claim_newsletter_test` serialises the test budget and reserves one attempt per revision. These RPCs are service-role-only.
 
 Migration v306 adds `newsletter_deliveries_subscriber_idx` for subscriber foreign-key checks; it does not rewrite rows.
+
+### Clone-watch Jev shadow lane (v311)
+
+`clone_watch_jev_classifications` — 1:1 sibling of `shopfront_clone_alerts` (FK + CASCADE, ADR-0005 shape, mirrors v157) holding TypeSafe **Jev**'s calibrated answers for the same three-field input the Haiku pre-classifier sees: `is_clone_p` (0–1 noul), `clone_tactic` / `attack_intent` (same vocabularies as v157, with per-option `_probs` jsonb + `_conf`), `risk_indicator_probs` jsonb, `model_id`, `prompt_version`, `source` (`'live'` \| `'backfill'`), tokens, latency. **Read by nothing in the product path** — a shadow lane, measured only. Service-role-only RLS, no secondary indexes.
+
+- `record_clone_watch_jev_classification(16 params) → VOID` — idempotent UPSERT on `alert_id`; called by `apps/web/scripts/backfill-jev-classifications.ts` (the day-1 curve) and, once the live-step PR lands, by the `jev-shadow` step in `clone-watch-haiku-preclassify`. DEFINER, `search_path=''`, `statement_timeout='30s'`.
+- `clone_watch_jev_calibration() → TABLE(classifier, bucket, n, urlscan_phish, weaponised, netcraft_declined, triaged_fp, tp_actioned)` — the decision instrument: Haiku (v157 `confidence`, `is_clone=false` → bucket 0) vs Jev (`is_clone_p`) in ten `width_bucket` bins over the alerts BOTH scored, with outcome counts joined from the parent. Decision rule + delete plan in `docs/ops/clone-watch-config.md` § Jev shadow lane. Both RPCs are covered by `rpcs.smoke.test.ts`.
