@@ -11,6 +11,7 @@ import {
   buildJevPreclassifyQuestions,
   buildJevState,
   mapJevAnswersToRow,
+  riskQuestionId,
   toJevRpcArgs,
 } from "@/lib/clone-watch/jev-preclassify";
 import {
@@ -41,7 +42,7 @@ function goodAnswers(): Record<string, JevAnswer> {
     },
   };
   for (const ri of RISK_INDICATOR_VALUES) {
-    answers[`ri_${ri}`] = {
+    answers[riskQuestionId(ri)] = {
       type: "noul",
       noul: ri === "urgency_words" ? 0.95 : 0.05,
     };
@@ -87,10 +88,9 @@ describe("vocabulary drift guards", () => {
       [...ATTACK_INTENT_VALUES].sort(),
     );
 
-    const riIds = Object.keys(q).filter((k) => k.startsWith("ri_"));
-    expect(riIds.sort()).toEqual(
-      RISK_INDICATOR_VALUES.map((r) => `ri_${r}`).sort(),
-    );
+    const riIds = RISK_INDICATOR_VALUES.map(riskQuestionId);
+    for (const id of riIds)
+      expect(q[id], `missing question ${id}`).toBeDefined();
     for (const id of riIds) expect(q[id]?.type).toBe("noul");
 
     expect(q.is_clone?.type).toBe("noul");
@@ -155,7 +155,7 @@ describe("mapJevAnswersToRow", () => {
 
   it("throws (never a half-row) when an answer is missing", () => {
     const a = goodAnswers();
-    delete a.ri_suspicious_tld;
+    delete a[riskQuestionId("suspicious_tld")];
     expect(() => mapJevAnswersToRow(a)).toThrow(JevAnswerShapeError);
   });
 
@@ -181,10 +181,18 @@ describe("mapJevAnswersToRow", () => {
     expect(() => mapJevAnswersToRow(a)).toThrow(/expected noul/);
   });
 
-  it("clamps probabilities into [0, 1] (the CHECK constraint would reject 1.0000001)", () => {
+  it("rejects an out-of-range probability instead of clamping it (a vendor regression must be visible)", () => {
     const a = goodAnswers();
     a.is_clone = { type: "noul", noul: 1.0000001 };
-    expect(mapJevAnswersToRow(a).is_clone_p).toBe(1);
+    expect(() => mapJevAnswersToRow(a)).toThrow(/not a probability/);
+    const b = goodAnswers();
+    b.clone_tactic = {
+      type: "choice",
+      choice: "brandjack",
+      probabilities: { brandjack: -0.2 },
+      confidence: 0.5,
+    };
+    expect(() => mapJevAnswersToRow(b)).toThrow(/probabilities\.brandjack/);
   });
 });
 

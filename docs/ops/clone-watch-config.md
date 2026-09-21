@@ -1304,12 +1304,12 @@ Vendor benchmarks are self-reported; this lane is how we get our own.
 
 **Where.**
 
-- Step `jev-shadow` in `apps/web/app/api/inngest/functions/clone-watch-haiku-preclassify.ts`, after `persist`. Gated `FF_CLONE_WATCH_JEV_SHADOW` (default OFF; sub-flag of `FF_SHOPFRONT_CLONE_PRECLASSIFY`).
+- The tail of the `persist` step in `apps/web/app/api/inngest/functions/clone-watch-haiku-preclassify.ts` (folded rather than a fourth boundary — each boundary queues 30–60 s for a slot under contention, #1069; the body is fail-soft + UPSERT-idempotent so a step retry is harmless). Body: `apps/web/lib/clone-watch/jev-shadow-one.ts` — `classifyOneWithJev`, the ONE write path shared with the backfill. Gated `FF_CLONE_WATCH_JEV_SHADOW` (**ON in prod since 2026-09-22**; sub-flag of `FF_SHOPFRONT_CLONE_PRECLASSIFY`).
 - Adapter `packages/scam-engine/src/providers/jev.ts`; rubric `apps/web/lib/clone-watch/jev-preclassify.ts` (`JEV_PROMPT_VERSION`); vocabulary shared with Haiku in `apps/web/lib/clone-watch/preclassify-vocabulary.ts`.
 - Table `clone_watch_jev_classifications` + RPCs `record_clone_watch_jev_classification`, `clone_watch_jev_calibration()` — `supabase/migration-v311-clone-watch-jev-shadow.sql`.
 - Secret `TYPESAFE_API_KEY` (Vercel, Sensitive). Missing key ⇒ every row skipped as `no-key`.
 
-**Observability.** Success: `cost_telemetry WHERE feature='shopfront_clone_preclassify_jev'` (provider `typesafe`, `units` = input tokens, metadata `is_clone_p`, `model_id`, `latency_ms`). Failure: `$0` rows under `shopfront_clone_preclassify_jev_error` with `metadata.reason` ∈ `no-key | timeout | rate_limited | http_error | bad_shape | bad_answers | persist_failed`. The fn return carries `jev: "off" | "ok" | "error"`. Spend rolls into `SHOPFRONT_CLONE_OUTREACH_CAP_USD` → `feature_brakes.shopfront_clone_outreach` (filter list in `cost-daily-check/route.ts`, pinned by `costDailyCheckJevBrake.test.ts`).
+**Observability.** Success: `cost_telemetry WHERE feature='shopfront_clone_preclassify_jev'` (provider `typesafe`, `units` = input tokens, metadata `is_clone_p`, `model_id`, `latency_ms`). Failure: `$0` rows under `shopfront_clone_preclassify_jev_error` with `metadata.reason` ∈ `no-key | timeout | rate_limited | http_error | bad_shape | bad_answers | persist_failed`. The fn return carries `jev: "off" | "ok" | "error"`. The backfill script is also the lane's **repair tool**: a live 429/timeout leaves no Jev row and the daily fan-out only re-fans alerts with no _Haiku_ row, so re-running the script closes live gaps. Spend rolls into `SHOPFRONT_CLONE_OUTREACH_CAP_USD` → `feature_brakes.shopfront_clone_outreach` (filter list in `cost-daily-check/route.ts`, pinned by `costDailyCheckJevBrake.test.ts`).
 
 **Day-1 curve (backfill).** Every historic row's input is stored, so:
 
@@ -1327,7 +1327,7 @@ Rows land with `source='backfill'`; the live step writes `source='live'`. Keep t
 select * from clone_watch_jev_calibration() order by classifier, bucket;
 ```
 
-One row per (classifier, probability bucket) over the alerts BOTH classifiers scored. `haiku` bucket 0 = `is_clone=false`; buckets 1–10 = confidence deciles. `jev` buckets 1–10 = `is_clone_p` deciles. Columns: `n`, `urlscan_phish`, `weaponised`, `netcraft_declined`, `triaged_fp`, `tp_actioned`.
+One row per (classifier, probability bucket) over the alerts BOTH classifiers scored. `haiku` bucket 0 = `is_clone=false`; buckets 1–10 = confidence deciles. `jev` buckets 1–10 = `is_clone_p` deciles. Bucket k = [(k-1)/10, k/10), 1.0 folded into 10 — **v312** fixed the edges (v311's `1.0001` bound + float32 REAL put every exact decile one bucket low; the table on PR #1172 predates the fix, the corrected one is on #1173). Columns: `n`, `urlscan_phish`, `weaponised`, `netcraft_declined`, `triaged_fp`, `tp_actioned`.
 
 **Decision rule (fixed 2026-09-20, before any data).** Adopt Jev as the confidence source — a later PR that swaps the worklist gates' input, with its own ADR — **only if** `weaponised / n` and `urlscan_phish / n` rise monotonically across Jev's buckets where Haiku's stay flat. If Jev's curve is also flat, or the top-bucket weaponisation rate is not clearly above Haiku's, **delete the lane**: unset the flag, drop the step + modules, drop the table (v3xx), remove the two feature tags from the cap filter. Do not leave a measured-and-failed lane running.
 

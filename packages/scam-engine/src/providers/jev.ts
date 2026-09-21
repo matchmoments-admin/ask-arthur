@@ -6,8 +6,9 @@
 // endpoint and returns the parsed answers. Pure provider I/O — it does NOT
 // call logCost (that lives in apps/web and a package cannot import an app).
 // The caller logs cost from `usage.input_tokens` this returns; output
-// tokens are free on this vendor. Same division of labour as the APIVoid
-// adapter beside this file.
+// tokens are free on this vendor. Unlike the APIVoid adapter beside this
+// file it does NOT check a brake either — the caller has already consulted
+// `feature_brakes.shopfront_clone_outreach` before reaching it.
 //
 // Graceful degradation is the contract: every failure mode — missing key,
 // HTTP error, rate limit, timeout, malformed JSON — returns a `JevSkip`
@@ -97,8 +98,6 @@ export const JevAnswerSchema = z.discriminatedUnion("type", [
   ScoreAnswerSchema,
 ]);
 export type JevAnswer = z.infer<typeof JevAnswerSchema>;
-export type JevChoiceAnswer = z.infer<typeof ChoiceAnswerSchema>;
-export type JevNoulAnswer = z.infer<typeof NoulAnswerSchema>;
 
 // Extra top-level keys are tolerated (`.passthrough()` is implicit for
 // unknown keys in z.object) so a vendor-side addition never turns into a
@@ -137,8 +136,6 @@ export interface JevSkip {
 export interface AskJevOptions {
   /** Correlation id echoed into log lines only — never sent to the vendor. */
   requestId?: string;
-  /** Test seam — defaults to `globalThis.fetch`. */
-  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -156,7 +153,6 @@ export async function askJev(
     return { ok: false, reason: "no-key", elapsedMs: 0 };
   }
 
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const startedAt = Date.now();
   const logCtx = {
     requestId: opts.requestId,
@@ -165,7 +161,7 @@ export async function askJev(
 
   let res: Response;
   try {
-    res = await fetchImpl(JEV_ENDPOINT, {
+    res = await fetch(JEV_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

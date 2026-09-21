@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The Jev shadow step (v311) inside clone-watch-haiku-preclassify. Three
-// properties matter and each is pinned here: (a) with the flag OFF the
-// vendor is never called and Haiku's persist is untouched; (b) a Jev failure
-// is fail-soft AND observable — Haiku's row still lands, the fn still
-// returns ok, and a $0 diagnostic cost row keyed on the adapter's reason is
-// written; (c) on success the row goes through the same RPC the backfill
-// uses, stamped source='live', with a `typesafe` cost row.
+// The Jev shadow lane (v311) inside clone-watch-haiku-preclassify — the
+// HANDLER's contract only (the body is unit-tested in jevShadowOne.test.ts):
+// (a) flag OFF → the vendor is never reached, Haiku's persist untouched, no
+// extra step; (b) flag ON → the Jev call rides at the tail of `persist`
+// (no fourth boundary) AFTER Haiku's row + cost row, stamped source='live';
+// (c) a Jev failure never fails the Haiku result.
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -168,7 +167,22 @@ describe("jev-shadow step", () => {
 
     expect(out.ok).toBe(true);
     expect(out.jev).toBe("ok");
-    expect(steps).toEqual(["classify-haiku", "persist", "jev-shadow"]);
+    // Folded: no fourth boundary.
+    expect(steps).toEqual(["classify-haiku", "persist"]);
+    // …and Haiku's row + cost row are written BEFORE Jev is asked.
+    const order = mocks.rpc.mock.calls.map(([n]) => n as string);
+    expect(order.indexOf("record_clone_watch_classification")).toBeLessThan(
+      order.indexOf("record_clone_watch_jev_classification"),
+    );
+    const haikuCostIdx = mocks.log.mock.calls.findIndex(
+      ([ev]) =>
+        (ev as { feature: string }).feature === "shopfront_clone_preclassify",
+    );
+    expect(haikuCostIdx).toBeGreaterThanOrEqual(0);
+    expect(mocks.askJev.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mocks.log.mock.invocationCallOrder[haikuCostIdx] ??
+        Number.POSITIVE_INFINITY,
+    );
 
     // Apples to apples: the state Jev sees is the same three fields.
     expect(mocks.askJev).toHaveBeenCalledTimes(1);
@@ -231,41 +245,5 @@ describe("jev-shadow step", () => {
       }),
     });
     expect(costRows("shopfront_clone_preclassify_jev")).toHaveLength(0);
-  });
-
-  it("a malformed answer set never writes a half-row: no RPC, bad_answers diagnostic", async () => {
-    const answers = goodJevAnswers();
-    delete answers.ri_suspicious_tld;
-    mocks.askJev.mockResolvedValue({
-      ok: true,
-      answers,
-      model: "jev-1.13.0",
-      usage: { inputTokens: 150, outputTokens: 0 },
-      elapsedMs: 100,
-    });
-
-    const out = (await invoke()) as { jev: string };
-
-    expect(out.jev).toBe("error");
-    expect(rpcCalls("record_clone_watch_jev_classification")).toHaveLength(0);
-    expect(costRows("shopfront_clone_preclassify_jev_error")[0]).toMatchObject({
-      metadata: expect.objectContaining({ reason: "bad_answers" }),
-    });
-  });
-
-  it("a persist failure is a diagnostic, not a success cost row", async () => {
-    mocks.rpc.mockImplementation(async (name: string) =>
-      name === "record_clone_watch_jev_classification"
-        ? { data: null, error: { message: "boom" } }
-        : { data: null, error: null },
-    );
-
-    const out = (await invoke()) as { jev: string };
-
-    expect(out.jev).toBe("error");
-    expect(costRows("shopfront_clone_preclassify_jev")).toHaveLength(0);
-    expect(costRows("shopfront_clone_preclassify_jev_error")[0]).toMatchObject({
-      metadata: expect.objectContaining({ reason: "persist_failed" }),
-    });
   });
 });

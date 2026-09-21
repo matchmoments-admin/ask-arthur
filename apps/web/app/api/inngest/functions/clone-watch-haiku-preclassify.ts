@@ -6,19 +6,12 @@ import {
   parseCloneWatchPreclassifyRequestedData,
 } from "@askarthur/scam-engine/inngest/events";
 import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
-import { askJev } from "@askarthur/scam-engine/providers/jev";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { PRICING, logCostAsync } from "@/lib/cost-telemetry";
-import {
-  JEV_PROMPT_VERSION,
-  JevAnswerShapeError,
-  buildJevPreclassifyQuestions,
-  buildJevState,
-  mapJevAnswersToRow,
-  toJevRpcArgs,
-} from "@/lib/clone-watch/jev-preclassify";
+import { logCostAsync } from "@/lib/cost-telemetry";
+import { buildJevState } from "@/lib/clone-watch/jev-preclassify";
+import { classifyOneWithJev } from "@/lib/clone-watch/jev-shadow-one";
 import {
   ATTACK_INTENT_VALUES,
   CLONE_TACTIC_VALUES,
@@ -59,8 +52,9 @@ import {
  *
  * Plan: docs/plans/clone-watch-outreach.md §15 Phase E follow-up.
  *
- * Jev SHADOW LANE (v311, 2026-09-21). A third step, `jev-shadow`, runs after
- * `persist` when FF_CLONE_WATCH_JEV_SHADOW is ON: the same three input
+ * Jev SHADOW LANE (v311, 2026-09-21). The tail of the `persist` step, when
+ * FF_CLONE_WATCH_JEV_SHADOW is ON (body in lib/clone-watch/jev-shadow-one.ts,
+ * shared with the backfill script): the same three input
  * fields go to TypeSafe Jev (a decision-only model returning calibrated
  * probabilities) and land in `clone_watch_jev_classifications`, read by
  * NOTHING downstream. Why: Haiku's `confidence` above was measured to have
@@ -184,11 +178,9 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      const userMessage = JSON.stringify({
-        brand: data.brand,
-        candidate_domain: data.candidateDomain,
-        candidate_url: data.candidateUrl,
-      });
+      // The same three fields the Jev shadow lane sees — built by ONE function
+      // so "identical input" is structural, not a claim (v311).
+      const userMessage = JSON.stringify(buildJevState(data));
 
       // Call Haiku with tool-use forced JSON output (matches the pattern
       // proven on Reddit Intel). Cache the system prompt (default) so
@@ -284,7 +276,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // duplicate one telemetry row (rare crash window), which beats silently
       // losing the majority. units = total token count so the dashboard slices
       // by tokens/day cleanly; estimatedCostUsd already accounts for cache hits.
-      await step.run("persist", async () => {
+      const jev = await step.run("persist", async () => {
         const { error } = await sb.rpc("record_clone_watch_classification", {
           p_alert_id: data.alertId,
           p_brand: data.brand,
@@ -328,20 +320,26 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
             estimated_cost_usd: callResult.estimatedCostUsd,
           },
         });
+
+        // Jev SHADOW LANE (v311) — folded into this step rather than a
+        // fourth boundary: under morning contention every boundary queues
+        // 30–60 s for one of the account's 5 slots (#1069), and the Jev body
+        // is fail-soft + UPSERT-idempotent, so a retry of this step re-asking
+        // Jev costs $0.00005 and changes nothing. Runs AFTER Haiku's row +
+        // cost row are written, on the identical input, and is read by
+        // nothing downstream — it exists to be measured by
+        // clone_watch_jev_calibration().
+        if (!featureFlags.cloneWatchJevShadow) return { kind: "off" as const };
+        return classifyOneWithJev({
+          sb,
+          alertId: data.alertId,
+          input: data,
+          source: "live",
+          requestId: `clone-watch-preclassify-jev:${data.alertId}`,
+        });
       });
 
-      // Jev SHADOW LANE (v311). Runs AFTER Haiku's row and cost row are
-      // persisted, on the identical input, and is read by nothing downstream —
-      // it exists to be measured by clone_watch_jev_calibration(). Fail-soft
-      // by design: a Jev failure must never fail the Haiku result, so this
-      // step returns a discriminated outcome instead of throwing. Fail-soft
-      // is only acceptable because it is OBSERVABLE: every non-ok path writes
-      // a $0 `_jev_error` diagnostic row (keyed on the adapter's reason), and
-      // the outcome rides in the fn's return. The shared brake was already
-      // consulted in classify-haiku; a braked run never reaches this step.
-      const jev = featureFlags.cloneWatchJevShadow
-        ? await step.run("jev-shadow", () => runJevShadow(sb, data))
-        : { jev: "off" as const };
+      // (The Jev shadow lane rides at the tail of `persist` — see that step.)
 
       logger.info("clone-watch preclassify: done", {
         alertId: data.alertId,
@@ -352,9 +350,9 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
         input_tokens: callResult.usage.inputTokens,
         output_tokens: callResult.usage.outputTokens,
         cost_usd: callResult.estimatedCostUsd,
-        jev: jev.jev,
-        jev_is_clone_p: jev.jev === "ok" ? jev.is_clone_p : undefined,
-        jev_reason: jev.jev === "error" ? jev.reason : undefined,
+        jev: jev.kind,
+        jev_is_clone_p: jev.kind === "ok" ? jev.isCloneP : undefined,
+        jev_reason: jev.kind === "error" ? jev.reason : undefined,
       });
 
       return {
@@ -364,121 +362,11 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
         confidence: classification.confidence,
         clone_tactic: classification.clone_tactic,
         attack_intent: classification.attack_intent,
-        jev: jev.jev,
+        jev: jev.kind,
       };
     },
   ),
 );
-
-type JevShadowOutcome =
-  | { jev: "ok"; is_clone_p: number }
-  | { jev: "error"; reason: string };
-
-/**
- * The body of the `jev-shadow` step. Same three input fields as Haiku;
- * persists through `record_clone_watch_jev_classification` with
- * source='live'; logs cost under feature `shopfront_clone_preclassify_jev`
- * (provider `typesafe`). Never throws — see the step comment for why that
- * is acceptable here and not in general.
- */
-async function runJevShadow(
-  sb: NonNullable<ReturnType<typeof createServiceClient>>,
-  data: {
-    alertId: number;
-    brand: string;
-    candidateDomain: string;
-    candidateUrl: string;
-  },
-): Promise<JevShadowOutcome> {
-  const requestId = `clone-watch-preclassify-jev:${data.alertId}`;
-
-  const fail = async (
-    reason: string,
-    extra: Record<string, unknown> = {},
-  ): Promise<JevShadowOutcome> => {
-    await logCostAsync({
-      feature: "shopfront_clone_preclassify_jev_error",
-      provider: "typesafe",
-      operation: "classify_error",
-      units: 0,
-      unitCostUsd: 0,
-      requestId,
-      metadata: {
-        alert_id: data.alertId,
-        brand: data.brand,
-        reason,
-        prompt_version: JEV_PROMPT_VERSION,
-        ...extra,
-      },
-    });
-    return { jev: "error", reason };
-  };
-
-  const res = await askJev(
-    buildJevState({
-      brand: data.brand,
-      candidateDomain: data.candidateDomain,
-      candidateUrl: data.candidateUrl,
-    }),
-    buildJevPreclassifyQuestions(),
-    { requestId },
-  );
-  if (!res.ok) return fail(res.reason, { status: res.status ?? null });
-
-  let rpcArgs: Record<string, unknown>;
-  try {
-    rpcArgs = toJevRpcArgs({
-      alertId: data.alertId,
-      brand: data.brand,
-      candidateDomain: data.candidateDomain,
-      row: mapJevAnswersToRow(res.answers),
-      modelId: res.model,
-      source: "live",
-      inputTokens: res.usage.inputTokens,
-      latencyMs: res.elapsedMs,
-    });
-  } catch (err) {
-    if (err instanceof JevAnswerShapeError) {
-      return fail("bad_answers", { error_message: err.message.slice(0, 500) });
-    }
-    throw err;
-  }
-
-  const { error: rpcError } = await sb.rpc(
-    "record_clone_watch_jev_classification",
-    rpcArgs,
-  );
-  if (rpcError) {
-    logger.warn("clone-watch preclassify: jev persist failed", {
-      alertId: data.alertId,
-      error: rpcError.message,
-    });
-    return fail("persist_failed", {
-      error_message: rpcError.message.slice(0, 500),
-    });
-  }
-
-  const isCloneP = rpcArgs.p_is_clone_p as number;
-  await logCostAsync({
-    feature: "shopfront_clone_preclassify_jev",
-    provider: "typesafe",
-    operation: "classify",
-    units: res.usage.inputTokens,
-    unitCostUsd: PRICING.JEV_USD_PER_INPUT_TOKEN,
-    requestId,
-    metadata: {
-      alert_id: data.alertId,
-      brand: data.brand,
-      is_clone_p: isCloneP,
-      clone_tactic: rpcArgs.p_clone_tactic,
-      attack_intent: rpcArgs.p_attack_intent,
-      model_id: res.model,
-      prompt_version: JEV_PROMPT_VERSION,
-      latency_ms: res.elapsedMs,
-    },
-  });
-  return { jev: "ok", is_clone_p: isCloneP };
-}
 
 // Export the schema + prompt version for unit testing.
 export { ClassificationOutputSchema, PROMPT_VERSION, SYSTEM_PROMPT };

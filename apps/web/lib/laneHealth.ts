@@ -194,7 +194,7 @@ export const ABSENCE_WATCHES: ReadonlyArray<{
     operation: "classify",
     expectEvery: 26 * H,
   },
-  // Jev shadow lane (v311): the `jev-shadow` step in the same fn. Fail-soft
+  // Jev shadow lane (v311): the tail of the same fn's `persist` step. Fail-soft
   // by design, so silence here is the ONLY signal that the vendor, the key,
   // or the persist path went dark — the fn keeps returning ok:true.
   // Activated together with FF_CLONE_WATCH_JEV_SHADOW (never before it, or
