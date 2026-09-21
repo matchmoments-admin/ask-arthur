@@ -1331,7 +1331,7 @@ One row per (classifier, probability bucket) over the alerts BOTH classifiers sc
 
 **Decision rule (fixed 2026-09-20, before any data).** Adopt Jev as the confidence source — a later PR that swaps the worklist gates' input, with its own ADR — **only if** `weaponised / n` and `urlscan_phish / n` rise monotonically across Jev's buckets where Haiku's stay flat. If Jev's curve is also flat, or the top-bucket weaponisation rate is not clearly above Haiku's, **delete the lane**: unset the flag, drop the step + modules, drop the table (v3xx), remove the two feature tags from the cap filter. Do not leave a measured-and-failed lane running.
 
-**Activation (after the backfill answers).** Set `FF_CLONE_WATCH_JEV_SHADOW=true` on Vercel prod via a PR whose commit message carries `[build]` (the ignore-step trap), and in the SAME PR add an `ABSENCE_WATCHES` entry in `apps/web/lib/laneHealth.ts` for `shopfront_clone_preclassify_jev` / `classify` / 26 h — not before, or the daily health digest pages on a lane that is off.
+**Activation (2026-09-22).** Backfill done (3,501 rows, ≈ $0.17); the curve met the decision rule (see PR #1172's closing comment for the full table + gate simulation). `TYPESAFE_API_KEY` (Sensitive) and `FF_CLONE_WATCH_JEV_SHADOW=true` are set on Vercel prod; the live-step PR carries the `laneHealth.ts` `ABSENCE_WATCHES` entry (`shopfront-clone-haiku-preclassify:jev-shadow`, feature `shopfront_clone_preclassify_jev`, 26 h) and a `[build]` commit so the deploy picks the vars up. Deactivating = unset the flag AND remove the watch in the same PR, or the digest pages daily.
 
 ## 9. Related
 
