@@ -38,6 +38,11 @@ export const JEV_PROMPT_VERSION = "jev-v1";
 
 const RISK_QUESTION_PREFIX = "ri_";
 
+/** Question id for one risk indicator — the join key between the question set and the row mapping. */
+export function riskQuestionId(indicator: RiskIndicator): string {
+  return `${RISK_QUESTION_PREFIX}${indicator}`;
+}
+
 export interface JevPreclassifyInput {
   brand: string;
   candidateDomain: string;
@@ -81,7 +86,7 @@ export function buildJevPreclassifyQuestions(): Record<string, JevQuestion> {
     },
   };
   for (const indicator of RISK_INDICATOR_VALUES) {
-    questions[`${RISK_QUESTION_PREFIX}${indicator}`] = {
+    questions[riskQuestionId(indicator)] = {
       type: "noul",
       instructions: `Risk indicator present in the \`candidate_domain\` or \`candidate_url\`: ${RISK_INDICATORS[indicator]}.`,
     };
@@ -121,7 +126,7 @@ function requireNoul(answers: Record<string, JevAnswer>, id: string): number {
   const a = requireAnswer(answers, id);
   if (a.type !== "noul")
     throw new JevAnswerShapeError(`answer "${id}" is ${a.type}, expected noul`);
-  return clamp01(a.noul);
+  return requireProbability(a.noul, `answer "${id}".noul`);
 }
 
 function requireChoice<T extends string>(
@@ -139,16 +144,26 @@ function requireChoice<T extends string>(
       `answer "${id}" chose "${a.choice}", not in vocabulary`,
     );
   }
+  for (const [k, v] of Object.entries(a.probabilities)) {
+    requireProbability(v, `answer "${id}".probabilities.${k}`);
+  }
   return {
     choice: a.choice as T,
-    confidence: clamp01(a.confidence),
+    confidence: requireProbability(a.confidence, `answer "${id}".confidence`),
     probabilities: a.probabilities,
   };
 }
 
-function clamp01(n: number): number {
-  if (Number.isNaN(n)) throw new JevAnswerShapeError("probability is NaN");
-  return Math.min(1, Math.max(0, n));
+/**
+ * A probability outside [0, 1] is a vendor regression, and this lane exists
+ * to MEASURE the vendor — so it is an error (lands as `bad_answers`), never a
+ * silent clamp that would hide it from the calibration curve.
+ */
+function requireProbability(n: number, what: string): number {
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    throw new JevAnswerShapeError(`${what} is not a probability: ${String(n)}`);
+  }
+  return n;
 }
 
 /**
@@ -163,10 +178,7 @@ export function mapJevAnswersToRow(
   const intent = requireChoice(answers, "attack_intent", ATTACK_INTENT_VALUES);
   const risk = {} as Record<RiskIndicator, number>;
   for (const indicator of RISK_INDICATOR_VALUES) {
-    risk[indicator] = requireNoul(
-      answers,
-      `${RISK_QUESTION_PREFIX}${indicator}`,
-    );
+    risk[indicator] = requireNoul(answers, riskQuestionId(indicator));
   }
   return {
     is_clone_p: requireNoul(answers, "is_clone"),

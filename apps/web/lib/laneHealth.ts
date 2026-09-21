@@ -151,9 +151,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     consecutive: 1,
     shape: "candidates>0 ∧ marked=0 ∧ deferred=0",
     silentZero: (o) =>
-      n(o, "candidates") > 0 &&
-      n(o, "marked") === 0 &&
-      n(o, "deferred") === 0,
+      n(o, "candidates") > 0 && n(o, "marked") === 0 && n(o, "deferred") === 0,
   },
   "shopfront-clone-netcraft-reconcile": {
     expectEvery: 26 * H,
@@ -193,6 +191,17 @@ export const ABSENCE_WATCHES: ReadonlyArray<{
   {
     lane: "shopfront-clone-haiku-preclassify",
     feature: "shopfront_clone_preclassify",
+    operation: "classify",
+    expectEvery: 26 * H,
+  },
+  // Jev shadow lane (v311): the tail of the same fn's `persist` step. Fail-soft
+  // by design, so silence here is the ONLY signal that the vendor, the key,
+  // or the persist path went dark — the fn keeps returning ok:true.
+  // Activated together with FF_CLONE_WATCH_JEV_SHADOW (never before it, or
+  // this pages daily on a lane that is off).
+  {
+    lane: "shopfront-clone-haiku-preclassify:jev-shadow",
+    feature: "shopfront_clone_preclassify_jev",
     operation: "classify",
     expectEvery: 26 * H,
   },

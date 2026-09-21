@@ -121,11 +121,13 @@ function healthyRows(): LaneCostRow[] {
     }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
     rawRow("shopfront_clone_preclassify", "classify", 5, { is_clone: true }),
+    rawRow("shopfront_clone_preclassify_jev", "classify", 5, {
+      is_clone_p: 0.8,
+    }),
   ];
 }
 
-const without = (op: string) =>
-  healthyRows().filter((r) => r.operation !== op);
+const without = (op: string) => healthyRows().filter((r) => r.operation !== op);
 
 describe("classifyLaneHealth", () => {
   it("has a shape for every roster Lane and counts them (proof of life is not conditional)", () => {
@@ -204,14 +206,14 @@ describe("classifyLaneHealth", () => {
   });
 
   it("reports a lane by ROSTER when it has logged nothing at all", () => {
-    expect(classifyLaneHealth(without("nrd_daily_ingest"), { now: NOW })).toEqual(
-      [
-        expect.objectContaining({
-          lane: "shopfront-clone-nrd-daily-ingest",
-          kind: "absent",
-        }),
-      ],
-    );
+    expect(
+      classifyLaneHealth(without("nrd_daily_ingest"), { now: NOW }),
+    ).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-nrd-daily-ingest",
+        kind: "absent",
+      }),
+    ]);
   });
 
   it("reports a lane whose last row is older than its cadence", () => {
@@ -227,10 +229,28 @@ describe("classifyLaneHealth", () => {
     ]);
   });
 
-  it("reports the absence-only preclassify stream when no per-alert row arrived", () => {
+  it("reports the absence-only preclassify streams when no per-alert row arrived", () => {
+    // Both watches share operation "classify" but differ by feature; dropping
+    // the operation removes both, and both must surface.
     expect(classifyLaneHealth(without("classify"), { now: NOW })).toEqual([
       expect.objectContaining({
         lane: "shopfront-clone-haiku-preclassify",
+        kind: "absent",
+      }),
+      expect.objectContaining({
+        lane: "shopfront-clone-haiku-preclassify:jev-shadow",
+        kind: "absent",
+      }),
+    ]);
+  });
+
+  it("the Jev shadow watch is independent: Haiku rows present, Jev rows absent → only Jev absent", () => {
+    const rows = healthyRows().filter(
+      (r) => r.feature !== "shopfront_clone_preclassify_jev",
+    );
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-haiku-preclassify:jev-shadow",
         kind: "absent",
       }),
     ]);
@@ -249,7 +269,9 @@ describe("classifyLaneHealth", () => {
     );
 
     // Brake live → braked (and the row's reject shape is not double-reported).
-    const live = { clone_netcraft_issue: new Date(NOW + 3_600_000).toISOString() };
+    const live = {
+      clone_netcraft_issue: new Date(NOW + 3_600_000).toISOString(),
+    };
     expect(classifyLaneHealth(rows, { now: NOW, brakes: live })).toEqual([
       expect.objectContaining({
         lane: "shopfront-clone-netcraft-issue",
