@@ -23,8 +23,9 @@
  * via the Management API. `--limit N` caps the rows for a smoke run
  * (`--apply --limit 25` first, then the full run).
  *
- * Spend: ~150 input tokens per row at $0.042/M ≈ $0.000006 per row; the
- * full ~3.5k-row population is ≈ $0.02. Telemetry: ONE cost_telemetry row
+ * Spend: instructions count as input, so ~1,100 tokens per row (measured
+ * 2026-09-22: 28,335 for 25) at $0.042/M ≈ $0.00005 per row; the full
+ * ~3.5k-row population is ≈ $0.17. Telemetry: ONE cost_telemetry row
  * per page (feature shopfront_clone_preclassify_jev, operation backfill)
  * rather than one per call, so the dashboard shows the run without 3,500
  * near-zero rows. Concurrency 5 sits far under the vendor's ~1,200 rpm;

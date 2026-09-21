@@ -61,8 +61,11 @@ export function buildJevPreclassifyQuestions(): Record<string, JevQuestion> {
       type: "noul",
       instructions:
         "The `candidate_domain` was registered with deliberate intent to impersonate the `brand` (an Australian brand's legitimate domain) for fraudulent purposes.",
-      criteria:
-        "Yes: a deliberate lookalike of the brand built to deceive its customers. No: coincidental name overlap, a dictionary word, a parked domain, or a legitimate subsidiary or reseller.",
+      criteria: {
+        true: "A deliberate lookalike of the brand built to deceive its customers.",
+        false:
+          "Coincidental name overlap, a dictionary word, a parked domain, or a legitimate subsidiary or reseller.",
+      },
     },
     clone_tactic: {
       type: "choice",

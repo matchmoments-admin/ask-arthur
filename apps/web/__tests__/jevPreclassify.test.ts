@@ -94,6 +94,14 @@ describe("vocabulary drift guards", () => {
     for (const id of riIds) expect(q[id]?.type).toBe("noul");
 
     expect(q.is_clone?.type).toBe("noul");
+    // The API 422s on a string here (`model_attributes_type`, 2026-09-22):
+    // noul criteria must be the { true, false } pair or nothing.
+    if (q.is_clone?.type === "noul") {
+      expect(q.is_clone.criteria).toEqual({
+        true: expect.any(String),
+        false: expect.any(String),
+      });
+    }
     expect(Object.keys(q)).toHaveLength(3 + RISK_INDICATOR_VALUES.length);
   });
 

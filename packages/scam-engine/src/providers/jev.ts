@@ -52,8 +52,9 @@ export interface JevChoiceQuestion {
 export interface JevNoulQuestion {
   type: "noul";
   instructions: string;
-  /** Optional clarification of what a "yes" means. */
-  criteria?: string;
+  /** Optional: what a "yes" and a "no" each mean. The API rejects a bare
+   *  string here (422 `model_attributes_type`, measured 2026-09-22). */
+  criteria?: { true: string; false: string };
 }
 
 export interface JevScoreQuestion {
