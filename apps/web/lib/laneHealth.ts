@@ -38,7 +38,7 @@
  * for up to a day (the Sep 16–17 case).
  *
  * Lanes with NO per-run Outcome Row (notify-brand, notify-weaponised,
- * enforcement-*, auto-triage, reemergence, enrich-attribution, report-summary,
+ * enforcement-*, reemergence, enrich-attribution, report-summary,
  * the digests, scan-one) cannot be watched from telemetry and are not listed —
  * listing them would be a guard that reads as protection. They are the
  * graduated ticket "every lane logs one outcome row per run". Preclassify
@@ -167,6 +167,19 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       n(o, "domains_scanned") === 0 ||
       (n(o, "total_chunks") > 0 &&
         n(o, "failed_chunks") >= n(o, "total_chunks")),
+  },
+  "shopfront-clone-auto-triage": {
+    expectEvery: 26 * H, // daily 13:00
+    consecutive: 2,
+    // The lane's job is to CLEAR the queue: park the weak tail, confirm the
+    // strict one. A run that parks nothing while the pending queue is the
+    // reason it exists is the silent-zero shape. `eligible>0 ∧ confirmed=0 ∧
+    // offline=0` is the other: rows passed every gate and none was actioned
+    // or explained by liveness — which is exactly how a mis-set
+    // AUTO_CONFIRM_MIN_CONFIDENCE would present.
+    shape: "eligible>0 ∧ confirmed=0 ∧ offline=0",
+    silentZero: (o) =>
+      n(o, "eligible") > 0 && n(o, "confirmed") === 0 && n(o, "offline") === 0,
   },
   "shopfront-clone-feed-platform": {
     // Event-driven (per weaponisation); absence is not a signal here.

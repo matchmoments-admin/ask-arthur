@@ -77,6 +77,11 @@ export const LANES = {
     provider: "whoisds",
     operation: "nrd_daily_ingest",
   },
+  "shopfront-clone-auto-triage": {
+    feature: "shopfront_clone_auto_triage",
+    provider: "diagnostic",
+    operation: "run",
+  },
   "shopfront-clone-feed-platform": {
     feature: "clone_watch_feed_entity",
     provider: "internal",
@@ -103,20 +108,20 @@ export interface LaneOutcome {
     rechecked: number;
     submitted: number;
     submit_failed: number;
-   };
+  };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
     submitted: number;
     submit_failed: number;
     rate_limited: number;
     dormant_retired: number;
-   };
+  };
   "shopfront-clone-urlscan-retrieve": {
     classified: number;
     still_pending: number;
     /** null = the probe itself failed; 0 = genuinely none outstanding. */
     unnotified_weaponised: number | null;
-   };
+  };
   "shopfront-clone-netcraft-issue": {
     reason?: "nothing_pending" | "daily_cap_reached";
     uuids: number;
@@ -124,27 +129,35 @@ export interface LaneOutcome {
     permanentRejects: number;
     /** True when THIS run tripped the brake. Live brake state is feature_brakes. */
     braked: boolean;
-   };
+  };
   "shopfront-clone-netcraft-resubmit": {
     reason?: "none_pending_or_cap" | "all_dead" | "bulk_submit_failed";
     candidates: number;
     marked: number;
     deferred: number;
     dead: number;
-   };
+  };
   "shopfront-clone-netcraft-reconcile": {
     reason?: "nothing_pending";
     uuids: number;
-   };
+  };
   "shopfront-clone-nrd-daily-ingest": {
     domains_scanned: number;
     total_chunks: number;
     failed_chunks: number;
-   };
+  };
+  "shopfront-clone-auto-triage": {
+    /** Set when the confirm path found nothing eligible; the park path still ran. */
+    reason?: "no_eligible";
+    parked: number;
+    eligible: number;
+    confirmed: number;
+    offline: number;
+  };
   "shopfront-clone-feed-platform": {
     pool: number;
     written: number;
-   };
+  };
 }
 
 /**

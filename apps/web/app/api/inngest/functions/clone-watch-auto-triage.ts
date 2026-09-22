@@ -11,6 +11,7 @@ import CloneWatchRunSummary, {
 } from "@/emails/CloneWatchRunSummary";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { AUTO_CONFIRM_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 
 /**
@@ -280,6 +281,15 @@ export const cloneWatchAutoTriage = inngest.createFunction(
     });
 
     if (eligible.length === 0) {
+      // The quiet path still writes an Outcome Row (ADR-0025): "the confirm
+      // path found nothing" and "the lane never ran" must not look the same.
+      await recordLaneOutcome("shopfront-clone-auto-triage", parked, {
+        reason: "no_eligible",
+        parked,
+        eligible: 0,
+        confirmed: 0,
+        offline: 0,
+      });
       return { ok: true, parked, eligible: 0, confirmed: 0, emailed: 0 };
     }
 
@@ -419,6 +429,13 @@ export const cloneWatchAutoTriage = inngest.createFunction(
         return true;
       });
     }
+
+    await recordLaneOutcome("shopfront-clone-auto-triage", eligible.length, {
+      parked,
+      eligible: eligible.length,
+      confirmed,
+      offline,
+    });
 
     logger.info("clone-watch auto-triage: complete", {
       parked,
