@@ -9,7 +9,7 @@ import { Resend } from "resend";
 import CloneWatchRunSummary, {
   type CloneWatchRunSummaryItem,
 } from "@/emails/CloneWatchRunSummary";
-import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logCostAsync, PRICING } from "@/lib/cost-telemetry";
 import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { AUTO_CONFIRM_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
@@ -283,7 +283,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
     if (eligible.length === 0) {
       // The quiet path still writes an Outcome Row (ADR-0025): "the confirm
       // path found nothing" and "the lane never ran" must not look the same.
-      await recordLaneOutcome("shopfront-clone-auto-triage", parked, {
+      await recordLaneOutcome("clone-watch-auto-triage", parked, {
         reason: "no_eligible",
         parked,
         eligible: 0,
@@ -418,7 +418,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           });
           return false;
         }
-        logCost({
+        await logCostAsync({
           feature: "shopfront_clone_auto_triage",
           provider: "resend",
           operation: "run_summary",
@@ -430,7 +430,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
       });
     }
 
-    await recordLaneOutcome("shopfront-clone-auto-triage", eligible.length, {
+    await recordLaneOutcome("clone-watch-auto-triage", eligible.length, {
       parked,
       eligible: eligible.length,
       confirmed,

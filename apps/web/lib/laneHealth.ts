@@ -51,6 +51,7 @@ import {
   type LaneId,
   type LaneOutcome,
 } from "@askarthur/scam-engine/lane-outcome";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 export type LaneProblemKind =
   /** No row inside the lane's expected window. */
@@ -92,6 +93,12 @@ const n = <L extends LaneId>(o: Seen<L>, k: keyof Seen<L> & string): number => {
 interface Shape<L extends LaneId> {
   /** Longest gap between rows that is still healthy, in ms. */
   expectEvery: number;
+  /**
+   * The Lane's own gate. A flag-off Lane writes nothing by design (skip paths
+   * are silent), so without this a disabled Lane would page "absent" every
+   * day. Evaluated at digest time; omitted = always expected to run.
+   */
+  enabled?: () => boolean;
   /**
    * How many consecutive most-recent rows must ALL be zero before it counts.
    * 1 = one bad run pages (daily lanes); 3 = tolerate two quiet runs (lanes
@@ -146,7 +153,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     silentZero: (o) =>
       n(o, "uuids") > 0 && n(o, "permanentRejects") >= n(o, "uuids"),
   },
-  "shopfront-clone-netcraft-resubmit": {
+  "shopfront-clone-netcraft-auto/resubmit": {
     expectEvery: 26 * H,
     consecutive: 1,
     shape: "candidates>0 ∧ marked=0 ∧ deferred=0",
@@ -159,7 +166,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     shape: "uuids=0 on every recent run",
     silentZero: (o) => n(o, "uuids") === 0,
   },
-  "shopfront-clone-nrd-daily-ingest": {
+  "shopfront-nrd-daily-ingest": {
     expectEvery: 26 * H,
     consecutive: 1,
     shape: "domains_scanned=0, or every chunk failed",
@@ -168,7 +175,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       (n(o, "total_chunks") > 0 &&
         n(o, "failed_chunks") >= n(o, "total_chunks")),
   },
-  "shopfront-clone-auto-triage": {
+  "clone-watch-auto-triage": {
     expectEvery: 26 * H, // daily 13:00
     consecutive: 2,
     // The lane's job is to CLEAR the queue: park the weak tail, confirm the
@@ -180,6 +187,57 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     shape: "eligible>0 ∧ confirmed=0 ∧ offline=0",
     silentZero: (o) =>
       n(o, "eligible") > 0 && n(o, "confirmed") === 0 && n(o, "offline") === 0,
+  },
+  "shopfront-clone-netcraft-auto/auto": {
+    expectEvery: 26 * H, // daily 13:00
+    enabled: () =>
+      featureFlags.shopfrontCloneNetcraftAuto &&
+      featureFlags.shopfrontCloneSubmitNetcraft &&
+      featureFlags.shopfrontCloneOutreach,
+    consecutive: 1,
+    shape: "candidates>0 ∧ marked=0",
+    silentZero: (o) => n(o, "candidates") > 0 && n(o, "marked") === 0,
+  },
+  "clone-watch-enrich-attribution": {
+    expectEvery: 26 * H, // daily 13:30
+    enabled: () => featureFlags.cloneWatchAttribution,
+    // Two runs: a one-off RDAP outage should not page; six silent days
+    // (2026-09-11..16, found by the 09-22 audit) must.
+    consecutive: 2,
+    shape: "pending>0 ∧ enriched=0",
+    silentZero: (o) => n(o, "pending") > 0 && n(o, "enriched") === 0,
+  },
+  "shopfront-clone-notify-brand-prepare": {
+    expectEvery: 26 * H, // daily 09:30
+    enabled: () =>
+      featureFlags.shopfrontCloneOutreach && featureFlags.shopfrontCloneNotifyBrand,
+    consecutive: 1,
+    shape: "every prepared group failed",
+    silentZero: (o) =>
+      n(o, "groups_failed") > 0 && n(o, "batches_prepared") === 0,
+  },
+  "shopfront-clone-reemergence-monitor": {
+    expectEvery: 26 * H, // daily 06:45
+    enabled: () =>
+      featureFlags.cloneEnforcement && featureFlags.cloneReemergenceMonitor,
+    consecutive: 1,
+    shape: "(absence only)",
+    silentZero: () => false,
+  },
+  "shopfront-clone-weekly-digest": {
+    expectEvery: 8 * 24 * H, // Sundays 10:00
+    enabled: () =>
+      featureFlags.shopfrontCloneOutreach && featureFlags.shopfrontCloneWeeklyDigest,
+    consecutive: 1,
+    shape: "(absence only)",
+    silentZero: () => false,
+  },
+  "shopfront-clone-fp-cluster-digest": {
+    expectEvery: 8 * 24 * H, // Sundays 09:30
+    enabled: () => featureFlags.shopfrontCloneWatch,
+    consecutive: 1,
+    shape: "(absence only)",
+    silentZero: () => false,
   },
   "shopfront-clone-feed-platform": {
     // Event-driven (per weaponisation); absence is not a signal here.
@@ -300,6 +358,7 @@ export function classifyLaneHealth(
   for (const lane of Object.keys(LANE_SHAPES) as LaneId[]) {
     const key = LANES[lane];
     const shape = LANE_SHAPES[lane];
+    if (shape.enabled && !shape.enabled()) continue;
     const mine = rowsFor(rows, key.feature, key.operation);
 
     const absent = absence(

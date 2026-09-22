@@ -37,7 +37,14 @@ export interface LaneRowKey {
   brake?: string;
 }
 
-/** The roster: Inngest function id minus the app prefix → the row it writes. */
+/**
+ * The roster: a Lane key → the row it writes. The key IS the Lane's Inngest
+ * function id (CONTEXT.md "Lane"); a function that runs two independently
+ * watched sub-lanes writes `<fnId>/<sub>`. apps/web/__tests__/laneRoster.test.ts
+ * checks every key against the real function ids and every clone-watch
+ * function against roster ∪ absence watches ∪ an explicit, reasoned exemption
+ * list — so "not watched" is always a decision, never drift.
+ */
 export const LANES = {
   "shopfront-clone-lifecycle-recheck": {
     feature: "shopfront_clone_recheck",
@@ -61,7 +68,7 @@ export const LANES = {
     operation: "issue_report",
     brake: "clone_netcraft_issue",
   },
-  "shopfront-clone-netcraft-resubmit": {
+  "shopfront-clone-netcraft-auto/resubmit": {
     feature: "shopfront_clone_netcraft_resubmit",
     provider: "netcraft",
     operation: "resubmit_bulk",
@@ -72,12 +79,12 @@ export const LANES = {
     provider: "netcraft",
     operation: "lifecycle_reconcile",
   },
-  "shopfront-clone-nrd-daily-ingest": {
+  "shopfront-nrd-daily-ingest": {
     feature: "shopfront_clone_watch",
     provider: "whoisds",
     operation: "nrd_daily_ingest",
   },
-  "shopfront-clone-auto-triage": {
+  "clone-watch-auto-triage": {
     feature: "shopfront_clone_auto_triage",
     provider: "diagnostic",
     operation: "run",
@@ -86,6 +93,38 @@ export const LANES = {
     feature: "clone_watch_feed_entity",
     provider: "internal",
     operation: "feed_batch",
+  },
+  "shopfront-clone-netcraft-auto/auto": {
+    feature: "shopfront_clone_netcraft_auto",
+    provider: "netcraft",
+    operation: "bulk_submit",
+  },
+  "clone-watch-enrich-attribution": {
+    feature: "shopfront_clone_enrich",
+    provider: "internal",
+    operation: "enrich_batch",
+    brake: "shopfront_clone_outreach",
+  },
+  "shopfront-clone-notify-brand-prepare": {
+    feature: "shopfront_clone_notify_brand_prepare",
+    provider: "telegram",
+    operation: "summary_notification",
+    brake: "shopfront_clone_outreach",
+  },
+  "shopfront-clone-reemergence-monitor": {
+    feature: "clone_enforcement",
+    provider: "internal",
+    operation: "reemergence_batch",
+  },
+  "shopfront-clone-weekly-digest": {
+    feature: "shopfront_clone_weekly_digest",
+    provider: "telegram",
+    operation: "weekly_digest_send",
+  },
+  "shopfront-clone-fp-cluster-digest": {
+    feature: "shopfront_clone_fp_cluster_digest",
+    provider: "telegram",
+    operation: "weekly_digest",
   },
 } as const satisfies Record<string, LaneRowKey>;
 
@@ -130,7 +169,7 @@ export interface LaneOutcome {
     /** True when THIS run tripped the brake. Live brake state is feature_brakes. */
     braked: boolean;
   };
-  "shopfront-clone-netcraft-resubmit": {
+  "shopfront-clone-netcraft-auto/resubmit": {
     reason?: "none_pending_or_cap" | "all_dead" | "bulk_submit_failed";
     candidates: number;
     marked: number;
@@ -141,12 +180,12 @@ export interface LaneOutcome {
     reason?: "nothing_pending";
     uuids: number;
   };
-  "shopfront-clone-nrd-daily-ingest": {
+  "shopfront-nrd-daily-ingest": {
     domains_scanned: number;
     total_chunks: number;
     failed_chunks: number;
   };
-  "shopfront-clone-auto-triage": {
+  "clone-watch-auto-triage": {
     /** Set when the confirm path found nothing eligible; the park path still ran. */
     reason?: "no_eligible";
     parked: number;
@@ -157,6 +196,34 @@ export interface LaneOutcome {
   "shopfront-clone-feed-platform": {
     pool: number;
     written: number;
+  };
+  "shopfront-clone-netcraft-auto/auto": {
+    reason?: "no_candidates_or_cap_reached" | "bulk_submit_failed";
+    candidates: number;
+    marked: number;
+  };
+  "clone-watch-enrich-attribution": {
+    reason?: "nothing_pending";
+    pending: number;
+    enriched: number;
+  };
+  "shopfront-clone-notify-brand-prepare": {
+    reason?: "no_unbatched_rows";
+    batches_prepared: number;
+    groups_failed: number;
+  };
+  "shopfront-clone-reemergence-monitor": {
+    reason?: "nothing_due";
+    checked: number;
+    reemerged: number;
+  };
+  "shopfront-clone-weekly-digest": {
+    candidates_total: number;
+  };
+  "shopfront-clone-fp-cluster-digest": {
+    reason?: "no_fps_in_window" | "no_clusters_above_threshold";
+    clusters: number;
+    fp_count: number;
   };
 }
 
@@ -183,6 +250,31 @@ export async function recordLaneOutcome<L extends LaneId>(
     units,
     estimatedCostUsd: 0,
     metadata: outcome,
+  });
+}
+
+/**
+ * A Lane's failure row: `<feature>_error`, $0, awaited. The ONE shape for
+ * "this Lane failed" (was ≥3 hand-rolled shapes with `_error` / `-error`
+ * suffixes the health digest's `%error%` matcher only half-caught).
+ */
+export async function recordLaneError<L extends LaneId>(
+  lane: L,
+  error: unknown,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  const row = LANES[lane];
+  await logCost({
+    feature: `${row.feature}_error`,
+    provider: row.provider,
+    operation: row.operation,
+    units: 0,
+    estimatedCostUsd: 0,
+    metadata: {
+      ...metadata,
+      lane,
+      error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+    },
   });
 }
 

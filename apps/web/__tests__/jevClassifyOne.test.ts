@@ -28,7 +28,6 @@ import {
   PRECLASSIFY_ERROR_FEATURE,
   classifyOneWithJev,
   classifyPrimaryWithJev,
-  isPreclassifyBraked,
 } from "@/lib/clone-watch/jev-classify-one";
 import { riskQuestionId } from "@/lib/clone-watch/jev-preclassify";
 import { RISK_INDICATOR_VALUES } from "@/lib/clone-watch/preclassify-vocabulary";
@@ -287,39 +286,5 @@ describe("classifyPrimaryWithJev (ADR-0026 — Jev IS the pre-classifier)", () =
   });
 });
 
-describe("isPreclassifyBraked", () => {
-  const client = (result: { data: unknown; error: unknown }) => {
-    const chain: Record<string, unknown> = {
-      then: (resolve: (r: unknown) => unknown) =>
-        Promise.resolve(result).then(resolve),
-    };
-    for (const m of ["select", "eq", "maybeSingle"]) chain[m] = () => chain;
-    return { from: () => chain } as unknown as Parameters<
-      typeof isPreclassifyBraked
-    >[0];
-  };
-
-  it("is engaged when paused_until is in the future, clear when absent or past", async () => {
-    const future = new Date(Date.now() + 3_600_000).toISOString();
-    const past = new Date(Date.now() - 3_600_000).toISOString();
-    await expect(
-      isPreclassifyBraked(
-        client({ data: { paused_until: future }, error: null }),
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      isPreclassifyBraked(
-        client({ data: { paused_until: past }, error: null }),
-      ),
-    ).resolves.toBe(false);
-    await expect(
-      isPreclassifyBraked(client({ data: null, error: null })),
-    ).resolves.toBe(false);
-  });
-
-  it("an unreadable brake counts as engaged (the paid call is what it protects)", async () => {
-    await expect(
-      isPreclassifyBraked(client({ data: null, error: { message: "db" } })),
-    ).resolves.toBe(true);
-  });
-});
+// isPreclassifyBraked delegates to the fail-closed brakeState policy; the
+// three outcomes are pinned in packages/scam-engine/src/__tests__/brake-state.test.ts.

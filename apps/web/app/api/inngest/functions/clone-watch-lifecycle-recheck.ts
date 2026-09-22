@@ -1,4 +1,4 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
@@ -6,7 +6,7 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
@@ -206,7 +206,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         return { skipped: true, reason: "URLSCAN_API_KEY not set" };
       }
       const braked = await step.run("check-brake", () =>
-        isFeatureBraked(BRAKE),
+        isFeatureBrakedOrUnknown(BRAKE),
       );
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
@@ -401,7 +401,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             },
           },
         );
-        logCost({
+        await logCostAsync({
           feature: "shopfront_clone_urlscan",
           provider: "urlscan",
           operation: "recheck_submit",

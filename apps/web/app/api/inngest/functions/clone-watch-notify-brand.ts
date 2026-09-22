@@ -7,7 +7,7 @@ import {
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
@@ -310,7 +310,7 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       });
 
       await step.run("log-cost", async () => {
-        logCost({
+        await logCostAsync({
           feature: "shopfront_clone_notify_brand",
           provider: "queue",
           operation: "enqueue",

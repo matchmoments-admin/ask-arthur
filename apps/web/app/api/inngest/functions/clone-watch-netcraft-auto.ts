@@ -1,11 +1,13 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
+import {
+  recordLaneError,
+  recordLaneOutcome,
+} from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
@@ -336,8 +338,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             { p_min_confidence: MIN_CONFIDENCE, p_daily_cap: DAILY_CAP },
           );
           if (error) {
+            // A failed worklist read is NOT "no candidates": record it as a
+            // Lane error so the digest shows a failure, not a quiet day.
             logger.error("netcraft-auto: candidate fetch failed", {
               error: error.message,
+            });
+            await recordLaneError("shopfront-clone-netcraft-auto/auto", error.message, {
+              stage: "load_candidates",
             });
             return [] as NetcraftAutoCandidate[];
           }
@@ -346,6 +353,18 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
 
         if (candidates.length === 0) {
           // Either the daily cap is exhausted or there are no pending candidates.
+          // Quiet runs still write the Outcome Row (ADR-0025): "nothing to
+          // report" and "never ran" must not look alike (this sub-lane wrote
+          // nothing on ~50% of days before 2026-09-23).
+          if (!isTest) {
+            await step.run("log-quiet", () =>
+              recordLaneOutcome("shopfront-clone-netcraft-auto/auto", 0, {
+                reason: "no_candidates_or_cap_reached",
+                candidates: 0,
+                marked: 0,
+              }),
+            );
+          }
           return {
             ok: true,
             test: isTest,
@@ -391,13 +410,15 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // error (which pages the Axiom fleet watch). Left unmarked → retried
           // next run.
           await step.run("log-submit-failure", async () => {
-            logCost({
-              feature: "shopfront-clone-netcraft-auto-error",
-              provider: "netcraft",
-              operation: "bulk_submit",
-              units: result.urlCount,
-              unitCostUsd: 0,
-              metadata: { status: result.status, error: result.errText },
+            await recordLaneError(
+              "shopfront-clone-netcraft-auto/auto",
+              result.errText ?? `HTTP ${result.status}`,
+              { stage: "bulk_submit", status: result.status, url_count: result.urlCount },
+            );
+            await recordLaneOutcome("shopfront-clone-netcraft-auto/auto", 0, {
+              reason: "bulk_submit_failed",
+              candidates: candidates.length,
+              marked: 0,
             });
           });
           logger.warn(
@@ -445,17 +466,10 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         });
 
         await step.run("log-cost", async () => {
-          logCost({
-            feature: "shopfront_clone_netcraft_auto",
-            provider: "netcraft",
-            operation: "bulk_submit",
-            units: marked,
-            unitCostUsd: 0, // keyless intake
-            metadata: {
-              candidates: candidates.length,
-              marked,
-              netcraft_uuid: result.uuid,
-            },
+          await recordLaneOutcome("shopfront-clone-netcraft-auto/auto", marked, {
+            candidates: candidates.length,
+            marked,
+            netcraft_uuid: result.uuid,
           });
         });
 
@@ -529,7 +543,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         const braked = isTest
           ? false
           : await step.run("resubmit-check-brake", () =>
-              isFeatureBraked(RESUBMIT_BRAKE),
+              isFeatureBrakedOrUnknown(RESUBMIT_BRAKE),
             );
         if (braked) {
           return {
@@ -569,7 +583,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // test too); the quiet row follows the same rule.
           if (!isTest) {
             await step.run("resubmit-log-quiet", () =>
-              recordLaneOutcome("shopfront-clone-netcraft-resubmit", 0, {
+              recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
                 reason: "none_pending_or_cap",
                 candidates: 0,
                 marked: 0,
@@ -666,7 +680,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // the lane's silent-zero shape, so an all-dead day pages ONLY when
           // the dead-row deferral itself failed — which IS the v252 starvation.
           await step.run("resubmit-log-quiet", () =>
-            recordLaneOutcome("shopfront-clone-netcraft-resubmit", 0, {
+            recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
               reason: "all_dead",
               candidates: pending.length,
               marked: 0,
@@ -724,14 +738,11 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         // watch). Unmarked rows are retried next run.
         if (!result.ok || !result.uuid) {
           await step.run("resubmit-log-failure", async () => {
-            logCost({
-              feature: "shopfront-clone-netcraft-resubmit-error",
-              provider: "netcraft",
-              operation: "resubmit_bulk",
-              units: result.urlCount,
-              unitCostUsd: 0,
-              metadata: { status: result.status, error: result.errText },
-            });
+            await recordLaneError(
+              "shopfront-clone-netcraft-auto/resubmit",
+              result.errText ?? `HTTP ${result.status}`,
+              { stage: "bulk_submit", status: result.status, url_count: result.urlCount },
+            );
           });
           logger.warn(
             "netcraft-resubmit: bulk submit failed (retry next run)",
@@ -740,10 +751,10 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               urlCount: result.urlCount,
             },
           );
-          // Outcome Row beside the `-error` row above: one transient Netcraft
+          // Outcome Row beside the error row above: one transient Netcraft
           // non-2xx is one digest line, not a "lane not running" label.
           await step.run("resubmit-log-quiet", () =>
-            recordLaneOutcome("shopfront-clone-netcraft-resubmit", 0, {
+            recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
               reason: "bulk_submit_failed",
               candidates: pending.length,
               marked: 0,
@@ -777,19 +788,16 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             // them again. Emit the uuid and the ids as a $0 diagnostic before
             // rethrowing, or the only record of what Netcraft holds dies with
             // the exception.
-            logCost({
-              feature: "shopfront-clone-netcraft-resubmit-error",
-              provider: "netcraft",
-              operation: "resubmit_persist",
-              units: live.length,
-              unitCostUsd: 0,
-              metadata: {
-                error: error.message,
+            await recordLaneError(
+              "shopfront-clone-netcraft-auto/resubmit",
+              error.message,
+              {
+                stage: "persist",
                 netcraft_uuid: result.uuid,
                 alert_ids: live.map((c) => c.id),
                 unmarked: true,
               },
-            });
+            );
             throw new Error(
               `record_clone_alert_netcraft_resubmit failed (${live.length}): ${error.message}`,
             );
@@ -798,7 +806,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         });
 
         await step.run("resubmit-log-cost", () =>
-          recordLaneOutcome("shopfront-clone-netcraft-resubmit", marked, {
+          recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", marked, {
             candidates: pending.length,
             live: live.length,
             dead,

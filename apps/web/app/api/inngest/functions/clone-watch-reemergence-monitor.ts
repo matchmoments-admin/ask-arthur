@@ -5,8 +5,8 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Clone-Watch — takedown re-emergence monitor (Wave 1).
@@ -83,6 +83,13 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
       });
 
       if (cases.length === 0) {
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("shopfront-clone-reemergence-monitor", 0, {
+            reason: "nothing_due",
+            checked: 0,
+            reemerged: 0,
+          }),
+        );
         return { ok: true, checked: 0, reemerged: 0 };
       }
 
@@ -117,16 +124,12 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
         if (didReemerge) reemerged++;
       }
 
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "clone_enforcement",
-          provider: "internal",
-          operation: "reemergence_batch",
-          units: checked,
-          unitCostUsd: 0,
-          metadata: { checked, reemerged },
-        });
-      });
+      await step.run("log-cost", () =>
+        recordLaneOutcome("shopfront-clone-reemergence-monitor", checked, {
+          checked,
+          reemerged,
+        }),
+      );
 
       logger.info("clone-watch re-emergence monitor: complete", {
         checked,

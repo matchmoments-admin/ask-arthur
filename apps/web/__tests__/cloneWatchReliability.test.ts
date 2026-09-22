@@ -16,7 +16,7 @@ vi.mock("@askarthur/supabase/server", () => ({ createServiceClient: () => ({ rpc
 vi.mock("@askarthur/supabase/paginate", () => ({ fetchAllRows: mocks.pages }));
 // `logCost` here is what `recordLaneOutcome` (lane-outcome.ts) writes through — the
 // lane Outcome Rows the assertions below read.
-vi.mock("@askarthur/scam-engine/cost-log", () => ({ isFeatureBraked: async () => false, logCost: mocks.log }));
+vi.mock("@askarthur/scam-engine/cost-log", () => ({ isFeatureBraked: async () => false, isFeatureBrakedOrUnknown: async () => false, logCost: mocks.log }));
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: new Proxy({}, { get: () => true }) }));
 vi.mock("@askarthur/scam-engine/urlscan", () => ({ retrieveURLScanDetailed: vi.fn() }));
 vi.mock("@/lib/clone-watch/urlscan-submit-one", () => ({ submitCloneCandidate: mocks.submit }));

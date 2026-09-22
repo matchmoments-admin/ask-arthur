@@ -201,7 +201,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // back to Haiku (+ the Jev shadow tail) with no other change.
       if (featureFlags.cloneWatchJevPrimary) {
         const out = await step.run("classify-jev", async () => {
-          if (await isPreclassifyBraked(sb)) return { braked: true as const };
+          if (await isPreclassifyBraked()) return { braked: true as const };
           return classifyPrimaryWithJev({
             sb,
             alertId: data.alertId,
@@ -248,7 +248,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // fire-and-forget): a cancelled run kills deferred promises, which is
       // exactly when the error row matters most.
       const callOutcome = await step.run("classify-haiku", async () => {
-        if (await isPreclassifyBraked(sb)) return { braked: true as const };
+        if (await isPreclassifyBraked()) return { braked: true as const };
 
         try {
           const call = await callClaudeJson({

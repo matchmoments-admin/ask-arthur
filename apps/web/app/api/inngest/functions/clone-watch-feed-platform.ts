@@ -46,7 +46,9 @@ import {
 // Bounded per run; the backlog is 149 today and ~5–20/week thereafter.
 const FEED_BATCH_LIMIT = 50;
 // In-step: ~4 RPC round-trips per row (feed + cost log), well under 60 s for
-// 50 rows. Floor = 2 boundaries × 30 s + 60 s + 60 s = 180 s = 3 m.
+// 50 rows. Floor = 3 counted boundaries × 30 s + 60 s + 60 s = 210 s → 4 m
+// (the quiet-path Outcome Row step is exclusive with the batch at runtime, but
+// the budget guard counts step.run sites textually).
 const FEED_WALL_CLOCK_MS = 60_000;
 
 interface WorklistRow {
@@ -67,9 +69,9 @@ export const cloneWatchFeedPlatform = inngest.createFunction(
     // drains the whole worklist, so concurrent runs would only contend on the
     // same rows' FOR UPDATE locks.
     concurrency: { limit: 1 },
-    // 3m: 2 boundaries + the 60 s in-step wall clock + slack (ADR-0019;
+    // 4m: 3 boundaries + the 60 s in-step wall clock + slack (ADR-0019;
     // inngestFinishBudgets.test.ts).
-    timeouts: { finish: "3m" },
+    timeouts: { finish: "4m" },
   },
   [
     { event: CLONE_WATCH_WEAPONISED_EVENT },
@@ -101,6 +103,15 @@ export const cloneWatchFeedPlatform = inngest.createFunction(
       });
 
       if (worklist.length === 0) {
+        // Quiet runs write their Outcome Row too (ADR-0025) — a burst of
+        // weaponised events that finds an already-drained worklist is visible
+        // as pool=0 rows, not as missing runs.
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("shopfront-clone-feed-platform", 0, {
+            pool: 0,
+            written: 0,
+          }),
+        );
         return { ok: true, pool: 0, written: 0, notWritten: 0, failed: 0 };
       }
 

@@ -245,12 +245,18 @@ describe("shopfront-clone-feed-platform consumer", () => {
     );
   });
 
-  it("an empty worklist returns after the one worklist RPC", async () => {
+  it("an empty worklist returns after the one worklist RPC and a quiet Outcome Row", async () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     const r = await invoke(cloneWatchFeedPlatform);
     expect(r).toMatchObject({ ok: true, pool: 0, written: 0 });
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
-    expect(mocks.log).not.toHaveBeenCalled();
+    // ADR-0025: quiet runs write their row too (pool=0, not a missing run).
+    expect(mocks.log).toHaveBeenCalledTimes(1);
+    expect(mocks.log.mock.calls[0][0]).toMatchObject({
+      feature: "clone_watch_feed_entity",
+      units: 0,
+      metadata: { pool: 0, written: 0 },
+    });
   });
 
   it("a row that throws is counted failed and the batch continues", async () => {

@@ -11,12 +11,14 @@ import CloneWatchBrandAlert, {
   type CloneWatchCandidate,
 } from "@/emails/CloneWatchBrandAlert";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logCostAsync, PRICING } from "@/lib/cost-telemetry";
 import { resolveEmailCopy } from "@/lib/email/resolve-copy";
 import {
   urlscanEvidenceFromJsonb,
   type UrlscanEvidenceForEmail,
 } from "@/lib/clone-watch/urlscan-evidence";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Daily batch builder for clone-watch brand notifications.
@@ -135,22 +137,10 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
     // Cost brake — if the daily-spend brake is engaged, skip the whole run.
-    const brakeEngaged = await step.run("check-brake", async () => {
-      const { data, error } = await sb
-        .from("feature_brakes")
-        .select("paused_until")
-        .eq("feature", "shopfront_clone_outreach")
-        .maybeSingle();
-      if (error) {
-        logger.warn("clone-watch prepare: brake lookup failed", {
-          error: error.message,
-        });
-        return true; // conservative
-      }
-      return Boolean(
-        data?.paused_until && new Date(data.paused_until).getTime() > Date.now(),
-      );
-    });
+    const brakeEngaged = await step.run("check-brake", () =>
+      // Fail-closed: an unreadable brake counts as engaged (outbound send).
+      isFeatureBrakedOrUnknown("shopfront_clone_outreach"),
+    );
     if (brakeEngaged) {
       await step.run("notify-brake-engaged", async () => {
         await sendAdminTelegramMessage(
@@ -183,6 +173,13 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     });
 
     if (rows.length === 0) {
+      await step.run("log-outcome-quiet", () =>
+        recordLaneOutcome("shopfront-clone-notify-brand-prepare", 0, {
+          reason: "no_unbatched_rows",
+          batches_prepared: 0,
+          groups_failed: 0,
+        }),
+      );
       return { ok: true, batches_prepared: 0, reason: "no_unbatched_rows" };
     }
 
@@ -386,7 +383,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
             // idempotencyKey already prevents a duplicate SEND, but a bare
             // logCost here would re-insert a telemetry row on every replay.
             await step.run(`log-cost-${batchId}`, async () => {
-              logCost({
+              await logCostAsync({
                 feature: "shopfront_clone_notify_brand",
                 provider: "resend",
                 operation: "auto_send",
@@ -433,25 +430,21 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
           }),
         );
       });
-      await step.run("log-cost-summary", async () => {
-        logCost({
-          feature: "shopfront_clone_notify_brand_prepare",
-          provider: "telegram",
-          operation: "summary_notification",
-          units: 0,
-          unitCostUsd: 0,
-          metadata: {
-            batches_prepared: batchesPrepared,
-            pending_for_approval: pendingNew,
-            auto_sent: autoSent,
-            groups_failed: groupsFailed,
-            groups_skipped_cooldown: groupsSkippedCooldown,
-      // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
-      groups_deferred_for_cap: groupsDeferredForCap,
-          },
-        });
-      });
     }
+
+    // Outcome Row on every run (ADR-0025) — previously written only when a
+    // batch or failure occurred, so "nothing to prepare" read as "never ran".
+    await step.run("log-outcome", () =>
+      recordLaneOutcome("shopfront-clone-notify-brand-prepare", batchesPrepared, {
+        batches_prepared: batchesPrepared,
+        groups_failed: groupsFailed,
+        pending_for_approval: pendingNew,
+        auto_sent: autoSent,
+        groups_skipped_cooldown: groupsSkippedCooldown,
+        // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
+        groups_deferred_for_cap: groupsDeferredForCap,
+      }),
+    );
 
     logger.info("clone-watch notify-brand prepare: done", {
       batches: batchesPrepared,

@@ -6,7 +6,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { readStringEnv } from "@askarthur/utils/env";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
-import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logCostAsync, PRICING } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   applyCohortRules,
@@ -358,7 +358,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
         return result.data?.id ?? null;
       });
 
-      logCost({
+      await logCostAsync({
         feature: "brand_stewardship",
         provider: "resend",
         operation: "internal_digest",
@@ -392,7 +392,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
               .filter(Boolean)
               .join("\n"),
           );
-          logCost({
+          await logCostAsync({
             feature: "brand_stewardship",
             provider: "telegram",
             operation: "admin_clone_summary",
