@@ -235,11 +235,17 @@ describe("netcraft auto-lane cron ordering (v284)", () => {
     const submitHour = fixedHour(cronsOf("clone-watch-urlscan-submit.ts")[0]);
 
     const retrieveCron = cronsOf("clone-watch-urlscan-retrieve.ts")[0];
-    const step = Number(/^\*\/(\d+)$/.exec(retrieveCron.trim().split(/\s+/)[1])?.[1]);
-    expect(step, `expected a */N hour step in "${retrieveCron}"`).toBeGreaterThan(0);
+    const hourField = retrieveCron.trim().split(/\s+/)[1];
+    // Both shapes: "*/N" and an explicit list "3,9,12,15,21" (2026-09-23).
+    const stepN = Number(/^\*\/(\d+)$/.exec(hourField)?.[1]);
+    const retrieveHours = Number.isFinite(stepN) && stepN > 0
+      ? Array.from({ length: Math.ceil(24 / stepN) }, (_, i) => i * stepN)
+      : hourField.split(",").map(Number);
+    expect(retrieveHours.every(Number.isInteger), `unparsable hours in "${retrieveCron}"`).toBe(true);
 
-    // First retrieve pass strictly after the day's scans were submitted.
-    const firstVerdictHour = (Math.floor(submitHour / step) + 1) * step;
+    // First retrieve pass in a strictly LATER hour than the submit — a pass
+    // in the same hour may run before the batch's scans complete.
+    const firstVerdictHour = Math.min(...retrieveHours.filter((h) => h > submitHour));
 
     const autoHours = cronsOf("clone-watch-netcraft-auto.ts").map(fixedHour);
     expect(autoHours.length).toBeGreaterThan(0);

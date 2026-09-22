@@ -1,11 +1,10 @@
-import { Resolver } from "node:dns/promises";
-
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
+import { isDomainGone } from "@/lib/clone-watch/liveness";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
@@ -24,7 +23,6 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 const BATCH_LIMIT = 50;
 const CADENCE_HOURS = 24;
-const DNS_TIMEOUT_MS = 4000;
 
 interface ReemergenceRow {
   case_id: number;
@@ -33,18 +31,13 @@ interface ReemergenceRow {
   channel: string;
 }
 
-/** True if the domain resolves (A or NS records); false if it doesn't; null on
- *  an inconclusive error (timeout/servfail) so we don't false-flag a re-emergence. */
+/** Resolves = true, gone = false, resolver proved nothing = null — via the
+ *  ONE DNS check (liveness.ts). The local copy this replaced caught every
+ *  lookup error per-call, so a resolver TIMEOUT read as "not resolving" and
+ *  its own `null` branch was unreachable. */
 async function domainResolves(domain: string): Promise<boolean | null> {
-  const r = new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });
-  try {
-    const a = await r.resolve4(domain).catch(() => [] as string[]);
-    if (a.length > 0) return true;
-    const ns = await r.resolveNs(domain).catch(() => [] as string[]);
-    return ns.length > 0;
-  } catch {
-    return null; // inconclusive — skip this round rather than risk a false reopen
-  }
+  const gone = await isDomainGone(domain);
+  return gone === null ? null : !gone;
 }
 
 // inngest-finish-budget: 52 boundaries — 2 static + 1 per-case recheck step
@@ -99,6 +92,9 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
       for (const c of cases) {
         const didReemerge = await step.run(`recheck-${c.case_id}`, async () => {
           const resolves = await domainResolves(c.candidate_domain);
+          // Inconclusive: leave the case unstamped so the next cadence retries,
+          // rather than recording a "checked, not re-emerged" we cannot prove.
+          if (resolves === null) return false;
           const reemergedNow = resolves === true;
           const { error } = await sb.rpc("mark_takedown_reemergence_checked", {
             p_case_id: c.case_id,

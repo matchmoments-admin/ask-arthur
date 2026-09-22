@@ -638,6 +638,19 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 > `declined` — post-v284 "decline rate" is structurally unmeasurable for the
 > weaponised cohort; the success signal to watch is takedown conversions.
 
+> **v317 + PR 4 of the deepening plan (2026-09-23) — spend scans on live names only.**
+> `submitCloneCandidate` (urlscan-submit AND lifecycle-recheck) DNS-prechecks the domain via
+> `isDomainGone` (liveness.ts): a PROVED-gone name (no A, no NS) skips urlscan and Safe
+> Browsing/VirusTotal and is stamped `status 400, error dns_nxdomain_precheck` — the same 400
+> the v277 dead-domain cadence keys on. Inconclusive resolver answers still scan. v317: a
+> recheck-pool row rechecked ≥ 8 times backs off to weekly (514 of 2,087 at apply time).
+> urlscan-retrieve now uses `budgetedStep` (was the #1142 spanningBudget constructor bug) and
+> runs `10 3,9,12,15,21 * * *` (5/day, dropping the three ticks that always found nothing).
+> feed-platform is debounced 2 min. The re-emergence monitor uses the shared DNS check and
+> no longer records a resolver timeout as "did not re-emerge". Deferred: preclassify
+> `batchEvents` (see the PR — it would land on the lane whose first at-volume Jev run is
+> being verified).
+
 > **v316 + PR 3 of the deepening plan (2026-09-23) — one Netcraft Module, batched reconcile.**
 > Every report goes through `apps/web/lib/clone-watch/netcraft-report.ts` (endpoint, reporter
 > email, body builders, the POST — one timeout, never throws — and `recordAutoSubmission`, which

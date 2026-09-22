@@ -9,6 +9,7 @@
 import { submitURLScanWithDetails } from "@askarthur/scam-engine/urlscan";
 import { checkURLReputation } from "@askarthur/scam-engine";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { isDomainGone } from "@/lib/clone-watch/liveness";
 import {
   serialiseSubmitEvidence,
   serialiseSubmitFailure,
@@ -44,11 +45,50 @@ export interface SubmitOutcome {
  * submit-failed-but-reputation-malicious corner, where urlscan is unavailable
  * yet SB/VT already gave a decisive verdict.
  */
+/** Injectable DNS check (tests); defaults to the liveness Module's resolver. */
+export interface SubmitDeps {
+  isDomainGone?: (hostname: string) => Promise<boolean | null>;
+}
+
+/** Recorded instead of a urlscan call when DNS proves the name is gone. Status
+ *  400 on purpose: it is exactly what urlscan returns for a no-DNS domain, so
+ *  the v277 dead-domain cadence (`urlscan_evidence->>'status' = '400'`) treats
+ *  both identically; `error` distinguishes who decided. */
+export const DNS_PRECHECK_ERROR = "dns_nxdomain_precheck";
+
 export async function submitCloneCandidate(
   candidate: CloneCandidate,
+  deps: SubmitDeps = {},
 ): Promise<SubmitOutcome> {
   const sb = createServiceClient();
   if (!sb) return { kind: "no_client", reputationMalicious: false };
+
+  // DNS precheck (2026-09-23). ~47% of daily submits and ~23% of rechecks were
+  // urlscan "400 DNS Error - Could not resolve domain" — each also paying a
+  // Safe Browsing/VirusTotal lookup and holding a concurrency slot. Only a
+  // PROVED-gone name (no A and no NS) skips; an inconclusive resolver answer
+  // falls through to the scan exactly as before.
+  const gone = await (deps.isDomainGone ?? isDomainGone)(candidate.candidate_domain);
+  if (gone === true) {
+    const nowIso = new Date().toISOString();
+    const { error } = await sb.rpc("record_clone_alert_urlscan_submit", {
+      p_alert_id: candidate.id,
+      p_urlscan_uuid: null,
+      p_evidence: serialiseSubmitFailure(
+        DNS_PRECHECK_ERROR,
+        400,
+        { isMalicious: false, sources: [] },
+        nowIso,
+        "DNS precheck: no A and no NS record — not submitted to urlscan",
+      ),
+    });
+    if (error) throw new Error(`record dns precheck failed: ${error.message}`);
+    return {
+      kind: "submit_failed",
+      reputationMalicious: false,
+      error: DNS_PRECHECK_ERROR,
+    };
+  }
 
   const repResults = await checkURLReputation([candidate.candidate_url]);
   const reputation: ReputationVerdict = {
