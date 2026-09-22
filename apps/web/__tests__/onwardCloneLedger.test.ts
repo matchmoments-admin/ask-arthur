@@ -37,6 +37,7 @@ vi.mock("@askarthur/supabase/server", () => ({
 }));
 vi.mock("@askarthur/scam-engine/cost-log", () => ({
   isFeatureBraked: async () => false,
+  isFeatureBrakedOrUnknown: async () => false,
   logCost: mocks.logCost,
 }));
 vi.mock("@askarthur/utils/feature-flags", () => ({

@@ -1,4 +1,4 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import {
   CLONE_WATCH_WEAPONISED_EVENT,
@@ -8,7 +8,7 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import {
   selectChannels,
@@ -67,7 +67,7 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
       if (!featureFlags.cloneEnforcement) {
         return { skipped: true, reason: "FF_CLONE_ENFORCEMENT disabled" };
       }
-      const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
+      const braked = await step.run("check-brake", () => isFeatureBrakedOrUnknown(BRAKE));
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
       }
@@ -129,7 +129,7 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
       });
 
       await step.run("log-cost", async () => {
-        logCost({
+        await logCostAsync({
           feature: "clone_enforcement",
           provider: "internal",
           operation: "plan_open_cases",

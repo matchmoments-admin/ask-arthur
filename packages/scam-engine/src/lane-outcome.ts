@@ -121,6 +121,12 @@ export const LANES = {
     provider: "telegram",
     operation: "weekly_digest_send",
   },
+  "shopfront-clone-enforcement-execute": {
+    feature: "clone_enforcement",
+    provider: "internal",
+    operation: "execute_batch",
+    brake: "clone_enforcement",
+  },
   "shopfront-clone-fp-cluster-digest": {
     feature: "shopfront_clone_fp_cluster_digest",
     provider: "telegram",
@@ -219,6 +225,11 @@ export interface LaneOutcome {
   };
   "shopfront-clone-weekly-digest": {
     candidates_total: number;
+  };
+  "shopfront-clone-enforcement-execute": {
+    reason?: "nothing_pending";
+    candidates: number;
+    enqueued: number;
   };
   "shopfront-clone-fp-cluster-digest": {
     reason?: "no_fps_in_window" | "no_clusters_above_threshold";

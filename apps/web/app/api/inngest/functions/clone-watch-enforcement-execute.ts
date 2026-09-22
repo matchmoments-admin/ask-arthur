@@ -1,10 +1,9 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { enabledUrlBlocklistDestinations } from "@/lib/onward/destinations";
 import {
@@ -12,6 +11,7 @@ import {
   onwardEventsFor,
   type UrlReportRequest,
 } from "@/lib/onward/url-blocklist-report";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Clone-Watch enforcement — EXECUTE step: a PRODUCER into the onward ledger.
@@ -92,7 +92,7 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
       if (destinations.length === 0) {
         return { skipped: true, reason: "no_enabled_destinations" };
       }
-      const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
+      const braked = await step.run("check-brake", () => isFeatureBrakedOrUnknown(BRAKE));
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
       }
@@ -124,6 +124,13 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
       });
 
       if (pending.length === 0) {
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("shopfront-clone-enforcement-execute", 0, {
+            reason: "nothing_pending",
+            candidates: 0,
+            enqueued: 0,
+          }),
+        );
         return { ok: true, enqueued: 0, reason: "nothing_pending" };
       }
 
@@ -165,23 +172,16 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
         });
       }
 
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "clone_enforcement",
-          provider: "internal",
-          operation: "execute_batch",
-          units: fresh.length,
-          unitCostUsd: 0,
-          metadata: {
-            enqueued: fresh.length,
-            candidates: pending.length,
-            destinations: destinations.map((d) => d.destination),
-            // Rows the dedup dropped: this alert's URL was already reported to
-            // that destination (a race with another producer since the read).
-            deduped: pending.length * destinations.length - fresh.length,
-          },
-        });
-      });
+      await step.run("log-cost", () =>
+        recordLaneOutcome("shopfront-clone-enforcement-execute", fresh.length, {
+          enqueued: fresh.length,
+          candidates: pending.length,
+          destinations: destinations.map((d) => d.destination),
+          // Rows the dedup dropped: this alert's URL was already reported to
+          // that destination (a race with another producer since the read).
+          deduped: pending.length * destinations.length - fresh.length,
+        }),
+      );
 
       logger.info("clone-watch enforcement execute: enqueued", {
         enqueued: fresh.length,

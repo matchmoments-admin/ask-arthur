@@ -232,6 +232,16 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     shape: "(absence only)",
     silentZero: () => false,
   },
+  "shopfront-clone-enforcement-execute": {
+    expectEvery: 4 * 3_600_000, // every 3h at :15
+    enabled: () =>
+      featureFlags.cloneEnforcement && featureFlags.cloneEnforceAutoBlocklist,
+    consecutive: 1,
+    // A fully-deduped batch legitimately enqueues 0, so there is no honest
+    // silent-zero shape here; the watch is absence (the lane stopped running).
+    shape: "(absence only)",
+    silentZero: () => false,
+  },
   "shopfront-clone-fp-cluster-digest": {
     expectEvery: 8 * 24 * H, // Sundays 09:30
     enabled: () => featureFlags.shopfrontCloneWatch,
