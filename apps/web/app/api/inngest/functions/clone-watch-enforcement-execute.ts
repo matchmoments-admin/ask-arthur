@@ -62,8 +62,9 @@ function dailyCap(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DAILY_CAP;
 }
 
-// inngest-finish-budget: 7 boundaries — check-brake, check-cap, load-pending,
-// enqueue, fire-events, record-queued, log-cost. The per-item send loop (29
+// inngest-finish-budget: 8 boundaries — check-brake, check-cap, load-pending,
+// log-outcome-quiet (exclusive with the rest), enqueue, fire-events,
+// record-queued, log-cost. The per-item send loop (29
 // boundaries) moved to the onward workers, one run per ledger row.
 export const cloneWatchEnforcementExecute = inngest.createFunction(
   {
