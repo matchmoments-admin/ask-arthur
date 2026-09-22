@@ -87,3 +87,34 @@ describe("clone lifecycle spec", () => {
     }
   });
 });
+
+// The no-downgrade rule lives in two languages: apply_netcraft_reconcile's CASE
+// guard (SQL, the enforcement) and NO_DOWNGRADE_STATES (TS, used by the
+// reconciler's classifier). Pin them equal against the NEWEST migration that
+// defines the function, so neither can drift alone.
+describe("NO_DOWNGRADE_STATES ↔ apply_netcraft_reconcile (SQL parity)", () => {
+  it("matches the state list in the newest apply_netcraft_reconcile definition", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { NO_DOWNGRADE_STATES } = await import("@/lib/clone-watch/lifecycle");
+    const dir = join(process.cwd(), "../../supabase");
+    const v = (f: string) => Number(/^migration-v(\d+)-/.exec(f)?.[1] ?? -1);
+    const files = readdirSync(dir)
+      .filter((f) => /^migration-v\d+-.*\.sql$/.test(f))
+      .sort((a, b) => v(b) - v(a));
+    let body: string | null = null;
+    for (const f of files) {
+      const src = readFileSync(join(dir, f), "utf8");
+      const i = src.search(/FUNCTION\s+public\.apply_netcraft_reconcile\s*\(/i);
+      if (i !== -1) {
+        body = src.slice(i);
+        break;
+      }
+    }
+    expect(body).not.toBeNull();
+    const m = /WHEN\s+sca\.lifecycle_state\s+IN\s*\(([^)]*)\)/i.exec(body!);
+    expect(m).not.toBeNull();
+    const sqlStates = m![1].split(",").map((s) => s.trim().replace(/'/g, "")).sort();
+    expect(sqlStates).toEqual([...NO_DOWNGRADE_STATES].sort());
+  });
+});

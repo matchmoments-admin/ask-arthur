@@ -1,4 +1,5 @@
 import { canonicalRegistrar } from "./registrar-canonical";
+import { readAttribution } from "@/lib/clone-watch/attribution";
 
 /**
  * Roll a cohort of clone alerts up by their shared INFRASTRUCTURE fingerprint
@@ -43,7 +44,8 @@ export interface CampaignSummary {
 export interface CampaignInput {
   campaign_key?: string | null;
   weaponised_at?: string | null;
-  attribution?: { whois?: { registrar?: string | null } | null } | null;
+  /** attribution jsonb — read via readAttribution. */
+  attribution?: unknown;
 }
 
 const TOP_CAP = 5;
@@ -67,7 +69,7 @@ export function summariseCampaigns(
     }
     g.count += 1;
     if (r.weaponised_at) g.weaponised += 1;
-    const reg = canonicalRegistrar(r.attribution?.whois?.registrar ?? null);
+    const reg = canonicalRegistrar(readAttribution(r.attribution).registrar);
     if (reg) g.registrars.set(reg, (g.registrars.get(reg) ?? 0) + 1);
   }
 

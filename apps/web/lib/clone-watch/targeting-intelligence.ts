@@ -39,6 +39,7 @@ import {
 import { tldOf } from "@/lib/clone-watch/duration-kpis";
 import { summariseCampaigns } from "@/lib/clone-watch/campaign-summary";
 import { asnLabel, canonicalAsn, isFrontingAsn } from "@/lib/clone-watch/asn-canonical";
+import { readAttribution } from "@/lib/clone-watch/attribution";
 
 /** A distribution that always states what it was computed over. */
 export interface Mix {
@@ -164,11 +165,12 @@ export function hostingConcentration(rows: CloneAlertRow[]): HostingSummary {
   let asnUnknown = 0;
 
   for (const r of unique) {
+    const hosting = readAttribution(r.attribution).hosting;
     const asn =
-      canonicalAsn(r.attribution?.hosting?.asn) ??
+      canonicalAsn(hosting.asn) ??
       canonicalAsn(r.urlscan_evidence?.server?.asn);
     const country =
-      r.attribution?.hosting?.country ?? r.urlscan_evidence?.server?.country ?? null;
+      hosting.country ?? r.urlscan_evidence?.server?.country ?? null;
 
     if (!asn && !country) {
       unattributed++;

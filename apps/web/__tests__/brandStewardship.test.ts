@@ -235,8 +235,9 @@ describe("aggregateClonesByDomain", () => {
     ]);
     const m = agg.get("anz.com.au")!;
     expect(m.detected).toBe(2);
-    // coerced to a string bucket, not crashed
-    expect(Object.keys(m.byRegistrar)).toContain("GoDaddy.com, LLC,Reseller");
+    // not crashed; a multi-record registrar reads as its first record
+    // (readAttribution — was String(array) "GoDaddy.com, LLC,Reseller")
+    expect(Object.keys(m.byRegistrar)).toContain("GoDaddy.com, LLC");
     expect(Object.keys(m.byAsn)).toContain("13335");
   });
 

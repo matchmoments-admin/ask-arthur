@@ -18,6 +18,8 @@
  *                     (Added in PR 1.5; not planned here.)
  */
 
+import { abuseChannels, readAttribution } from "@/lib/clone-watch/attribution";
+
 export type EnforcementChannel =
   | "apwg"
   | "openphish"
@@ -43,32 +45,9 @@ export interface ChannelPlan {
 export interface EnforcementAlert {
   candidateUrl: string;
   candidateDomain: string;
-  /**
-   * shopfront_clone_alerts.attribution jsonb, as enrichCloneAttribution WRITES
-   * it: registrar + abuse contact live under `whois` (camelCase). The flat
-   * `registrar_abuse_email` shape this type used to declare was never written
-   * by anything — prod 2026-09-22: 0 rows in that shape, 2,455 in `whois` — so
-   * the registrar-abuse channel could never be offered. The flat keys stay as
-   * a read fallback only.
-   */
-  attribution?: {
-    whois?: {
-      registrar?: string | null;
-      registrarAbuseEmail?: string | null;
-    } | null;
-    registrar?: string | null;
-    registrar_abuse_email?: string | null;
-    /** The enricher writes ip/country/asn only; provider/abuse_email are not
-     *  produced by anything today, so hosting abuse is offered only when a
-     *  future enrichment adds them. */
-    hosting?: {
-      ip?: string | null;
-      country?: string | null;
-      asn?: string | null;
-      provider?: string | null;
-      abuse_email?: string | null;
-    } | null;
-  } | null;
+  /** shopfront_clone_alerts.attribution jsonb, read through the ONE reader
+   *  (lib/clone-watch/attribution.ts) — never destructured here. */
+  attribution?: unknown;
 }
 
 /**
@@ -102,28 +81,29 @@ export function selectChannels(alert: EnforcementAlert): ChannelPlan[] {
     },
   ];
 
-  const whois = alert.attribution?.whois;
-  const registrarEmail =
-    whois?.registrarAbuseEmail ?? alert.attribution?.registrar_abuse_email;
-  const registrarName =
-    whois?.registrar ?? alert.attribution?.registrar ?? "unknown registrar";
-  if (registrarEmail) {
-    plans.push({
-      channel: "registrar_abuse",
-      autonomy: "human_required",
-      actsOnParked: false, // registrars increasingly decline parked-only lookalikes
-      note: `Registrar abuse → ${registrarEmail} (${registrarName}). Frame as evidenced phishing/DNS-abuse, NOT trademark.`,
-    });
-  }
-
-  const hostEmail = alert.attribution?.hosting?.abuse_email;
-  if (hostEmail) {
-    plans.push({
-      channel: "hosting_abuse",
-      autonomy: "human_required",
-      actsOnParked: false,
-      note: `Hosting abuse → ${hostEmail} (${alert.attribution?.hosting?.provider ?? "unknown host"}).`,
-    });
+  // Registrar / host levers come from the attribution dossier. Both stay
+  // human_required (itch.io invariant); an abuse report with no evidenced
+  // recipient is noise, so a channel is added only when attribution gives one.
+  for (const ch of abuseChannels(readAttribution(alert.attribution))) {
+    if (ch.kind === "registrar") {
+      plans.push({
+        channel: "registrar_abuse",
+        autonomy: "human_required",
+        actsOnParked: false, // registrars increasingly decline parked-only lookalikes
+        deepLink: ch.email ? undefined : (ch.url ?? undefined),
+        note: ch.email
+          ? `Registrar abuse → ${ch.email} (${ch.label}). Frame as evidenced phishing/DNS-abuse, NOT trademark.`
+          : `Registrar abuse form (${ch.label}) — no abuse email on record. Frame as evidenced phishing/DNS-abuse, NOT trademark.`,
+      });
+    } else {
+      plans.push({
+        channel: "hosting_abuse",
+        autonomy: "human_required",
+        actsOnParked: false,
+        deepLink: ch.url ?? undefined,
+        note: `Hosting abuse form (${ch.label}) — report the exact phishing URL.`,
+      });
+    }
   }
 
   return plans;

@@ -8,6 +8,10 @@ import { logger } from "@askarthur/utils/logger";
 import { requireAdmin } from "@/lib/adminAuth";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { sendOnward, stripUrlPii } from "@/lib/onward/url-blocklist-report";
+import {
+  readAttribution,
+  type AttributionView,
+} from "@/lib/clone-watch/attribution";
 
 /**
  * Admin approve + send for a HUMAN-GATED enforcement channel (registrar / host
@@ -27,19 +31,16 @@ const BodySchema = z.object({
 
 const DEFAULT_DAILY_CAP = 50;
 
+// Emailable intake per human-gated channel, read through the ONE attribution
+// reader. Hosting abuse is form-only today (no host abuse email is captured),
+// so it resolves null → channel_not_emailable-equivalent 422 below.
 const INTAKE_FROM_ATTRIBUTION: Record<
   string,
-  (attr: Attribution) => string | null | undefined
+  (attr: AttributionView) => string | null
 > = {
-  registrar_abuse: (a) => a?.registrar_abuse_email,
-  hosting_abuse: (a) => a?.hosting?.abuse_email,
+  registrar_abuse: (a) => a.registrarAbuseEmail,
+  hosting_abuse: () => null,
 };
-
-interface Attribution {
-  registrar?: string | null;
-  registrar_abuse_email?: string | null;
-  hosting?: { provider?: string | null; abuse_email?: string | null } | null;
-}
 
 export async function POST(req: Request) {
   await requireAdmin();
@@ -89,7 +90,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "alert_not_found" }, { status: 404 });
   }
 
-  const intake = resolveIntake(alert.attribution as Attribution);
+  const intake = resolveIntake(readAttribution(alert.attribution));
   if (!intake) {
     return NextResponse.json({ error: "no_abuse_recipient" }, { status: 422 });
   }

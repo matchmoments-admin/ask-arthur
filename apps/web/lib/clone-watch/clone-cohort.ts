@@ -54,20 +54,9 @@ export interface CloneAlertRow {
     /** Submission uuid — the public result page is derived from it. */
     uuid?: string;
   } | null;
-  attribution: {
-    whois?: {
-      registrar?: string;
-      registrarAbuseEmail?: string;
-      createdDate?: string;
-      nameServers?: string[];
-      registrantCountry?: string;
-      /** EPP status codes (RDAP), e.g. "client hold". */
-      statuses?: string[];
-    };
-    hosting?: { ip?: string; asn?: string; country?: string };
-    ip_rep?: { abuseConfidenceScore?: number };
-    au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
-  } | null;
+  /** attribution jsonb — read ONLY through lib/clone-watch/attribution.ts
+   *  (`readAttribution`). Typed unknown so a hand-rolled reader can't compile. */
+  attribution: unknown;
   /**
    * Coarse INFRASTRUCTURE fingerprint (v235): registrar + nameserver roots +
    * ASN + cert issuer. Clones sharing a key share a stack — NOT necessarily an

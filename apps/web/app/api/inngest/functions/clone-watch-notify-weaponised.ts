@@ -20,6 +20,7 @@ import {
   type DirectoryRow,
 } from "./clone-watch-notify-brand";
 import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
+import { readAttribution } from "@/lib/clone-watch/attribution";
 
 /**
  * F1 — weaponisation early-warning brand alert.
@@ -387,31 +388,22 @@ export const cloneWatchNotifyWeaponised = inngest.createFunction(
 
 // ── Pure helpers (exported for unit testing) ─────────────────────────────
 
-/** Attribution jsonb tolerant reader — the enricher (v177+) writes
- *  {whois: {registrar, registrarAbuseEmail}, hosting: {ip, country, asn}};
- *  an older annotation used flat registrar/registrar_abuse_email keys.
- *  Accept both; absent enrichment (attribution NULL — the enricher only
- *  runs on confirmed alerts) yields no rows in the email. */
-function readAttribution(raw: unknown): {
+/** Email props from the ONE attribution reader (lib/clone-watch/attribution.ts).
+ *  Absent enrichment (attribution NULL) yields no rows in the email. */
+function attributionProps(raw: unknown): {
   registrar?: string;
   registrarAbuseEmail?: string;
   hostingIp?: string;
   hostingCountry?: string;
   hostingAsn?: string;
 } {
-  if (!raw || typeof raw !== "object") return {};
-  const obj = raw as Record<string, unknown>;
-  const whois = (obj.whois ?? {}) as Record<string, unknown>;
-  const hosting = (obj.hosting ?? {}) as Record<string, unknown>;
-  const str = (v: unknown): string | undefined =>
-    typeof v === "string" && v.length > 0 ? v : undefined;
+  const v = readAttribution(raw);
   return {
-    registrar: str(whois.registrar) ?? str(obj.registrar),
-    registrarAbuseEmail:
-      str(whois.registrarAbuseEmail) ?? str(obj.registrar_abuse_email),
-    hostingIp: str(hosting.ip),
-    hostingCountry: str(hosting.country),
-    hostingAsn: str(hosting.asn),
+    registrar: v.registrar ?? undefined,
+    registrarAbuseEmail: v.registrarAbuseEmail ?? undefined,
+    hostingIp: v.hosting.ip ?? undefined,
+    hostingCountry: v.hosting.country ?? undefined,
+    hostingAsn: v.hosting.asn ?? undefined,
   };
 }
 
@@ -433,7 +425,7 @@ export function buildWeaponisedAlertProps(
     urlscanScreenshotUrl?: string;
   },
 ): WeaponisedCloneAlertProps {
-  const attribution = readAttribution(alert.attribution);
+  const attribution = attributionProps(alert.attribution);
   return {
     brandName: opts.brandName,
     legitimateDomain: alert.inferred_target_domain ?? opts.brandName,

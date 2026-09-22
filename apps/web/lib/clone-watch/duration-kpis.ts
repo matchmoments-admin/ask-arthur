@@ -3,6 +3,7 @@ import {
   type CloneAlertRow,
 } from "@/lib/clone-watch/clone-cohort";
 import { canonicalRegistrar } from "@/lib/clone-watch/registrar-canonical";
+import { readAttribution } from "@/lib/clone-watch/attribution";
 
 /**
  * The vendor-gap clock — pure duration computations over a month cohort of
@@ -254,7 +255,7 @@ export function registrarWeaponisation(
     if (weaponisedAt == null) continue;
     const firstSeenAt = ts(row.first_seen_at);
     const name =
-      canonicalRegistrar(row.attribution?.whois?.registrar) ?? UNKNOWN_REGISTRAR;
+      canonicalRegistrar(readAttribution(row.attribution).registrar) ?? UNKNOWN_REGISTRAR;
     const list = days.get(name) ?? [];
     // first_seen_at missing or inverted → count the weaponisation, skip the
     // duration sample (NaN days would poison the median).

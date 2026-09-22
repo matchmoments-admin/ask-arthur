@@ -82,6 +82,17 @@ export const TERMINAL_ALERT_STATE: Record<
   dormant: "expired",
 };
 
+/**
+ * States a Netcraft reconcile pass must never walk BACK from (v249). Only a
+ * `malicious` verdict moves these rows, and only forward, to `taken_down`.
+ * Mirrors the CASE guard in `apply_netcraft_reconcile` (v249);
+ * `cloneWatchLifecycle.test.ts` pins the two lists equal.
+ */
+export const NO_DOWNGRADE_STATES: ReadonlySet<string> = new Set([
+  "weaponised",
+  ...TERMINAL_STATES,
+]);
+
 export function isTerminal(state: string): boolean {
   return (TERMINAL_STATES as readonly string[]).includes(state);
 }

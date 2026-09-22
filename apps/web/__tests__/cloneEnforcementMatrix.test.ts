@@ -36,18 +36,20 @@ describe("selectChannels — clone enforcement matrix", () => {
     expect(gsb?.deepLink).toContain(encodeURIComponent(base.candidateUrl));
   });
 
-  it("adds registrar/hosting abuse ONLY when attribution gives a recipient", () => {
+  it("adds registrar + hosting abuse when the real dossier evidences them", () => {
     const withAttr = selectChannels({
       ...base,
       attribution: {
-        registrar: "NameCheap",
-        registrar_abuse_email: "abuse@namecheap.com",
-        hosting: { provider: "Cloudflare", abuse_email: "abuse@cloudflare.com" },
+        whois: { registrar: "NameCheap, Inc.", registrarAbuseEmail: "abuse@namecheap.com" },
+        hosting: { ip: "104.21.34.215", asn: "AS13335", country: "US" },
       },
     });
     const channels = withAttr.map((p) => p.channel);
     expect(channels).toContain("registrar_abuse");
     expect(channels).toContain("hosting_abuse");
+    expect(withAttr.find((p) => p.channel === "hosting_abuse")?.deepLink).toBe(
+      "https://abuse.cloudflare.com/",
+    );
     // both are human-gated (never auto — itch.io)
     expect(
       withAttr
@@ -56,10 +58,18 @@ describe("selectChannels — clone enforcement matrix", () => {
     ).toBe(true);
   });
 
-  it("omits registrar/hosting when no abuse recipient is known (no noise reports)", () => {
+  it("known registrar without an abuse email → the registrar's abuse form", () => {
+    const plan = selectChannels({
+      ...base,
+      attribution: { whois: { registrar: "GoDaddy.com, LLC", registrarAbuseEmail: null } },
+    }).find((p) => p.channel === "registrar_abuse");
+    expect(plan?.deepLink).toBe("https://supportcenter.godaddy.com/AbuseReport");
+  });
+
+  it("omits registrar/hosting when nothing evidences a recipient (no noise reports)", () => {
     const plans = selectChannels({
       ...base,
-      attribution: { registrar: "NameCheap", registrar_abuse_email: null },
+      attribution: { whois: null, hosting: { ip: "1.2.3.4", asn: "AS9999", country: "RU" } },
     });
     expect(plans.find((p) => p.channel === "registrar_abuse")).toBeUndefined();
     expect(plans.find((p) => p.channel === "hosting_abuse")).toBeUndefined();
