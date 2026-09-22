@@ -61,6 +61,8 @@ export interface CloneAlertRow {
       createdDate?: string;
       nameServers?: string[];
       registrantCountry?: string;
+      /** EPP status codes (RDAP), e.g. "client hold". */
+      statuses?: string[];
     };
     hosting?: { ip?: string; asn?: string; country?: string };
     ip_rep?: { abuseConfidenceScore?: number };

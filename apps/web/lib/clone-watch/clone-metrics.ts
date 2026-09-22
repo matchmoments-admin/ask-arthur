@@ -15,6 +15,7 @@
  * fold those rows INTO.
  */
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
+import { PARKED_HOST_PATTERNS } from "@/lib/clone-watch/urlscan-classify";
 import { urlscanEvidenceFromJsonb } from "@/lib/clone-watch/urlscan-evidence";
 
 // Per-brand detail rows stored in metrics.clones.domains. Sized so the public
@@ -47,6 +48,67 @@ export interface CloneDetail {
    *  the ONE formula in lib/clone-watch/weaponisation-risk.ts (null when the
    *  caller didn't compute risk, e.g. the LinkedIn report card path). */
   risk_score: number | null;
+  /** What the lookalike's INFRASTRUCTURE says it is today — the squatting
+   *  view a brand needs alongside the phishing verdict. See squatStatus().
+   *  Optional: ledger rows persisted before v314 simply lack the key. */
+  squat_status?: SquatStatus;
+}
+
+/**
+ * held        — registry/registrar suspended it (EPP client/server hold)
+ * parked      — on a domain-parking / aftermarket nameserver, or urlscan landed
+ *               on a for-sale page
+ * live        — resolves and serves something (urlscan saw a server)
+ * unknown     — none of the above is evidenced (e.g. not yet scanned)
+ */
+export type SquatStatus = "held" | "parked" | "live" | "unknown";
+
+// Parking / aftermarket NAMESERVER roots, from the prod nameserver census
+// (2026-09-22: afternic 402, dns-parking 192, sedoparking 28, abovedomains 28,
+// aftermarket.pl 24, namebrightdns 26 …). Distinct from PARKED_HOST_PATTERNS,
+// which matches the urlscan landing HOST, not the NS record — both are used.
+const PARKING_NS_ROOTS = [
+  "afternic.com",
+  "dns-parking.com",
+  "sedoparking.com",
+  "parkingcrew.net",
+  "bodis.com",
+  "abovedomains.com",
+  "above.com",
+  "aftermarket.pl",
+  "namebrightdns.com",
+  "dan.com",
+  "undeveloped.com",
+] as const;
+
+function hostMatches(host: string, roots: readonly string[]): boolean {
+  const h = host.trim().toLowerCase().replace(/\.$/, "");
+  return roots.some((r) => h === r || h.endsWith("." + r));
+}
+
+/** Pure. Precedence: held > parked > live > unknown. */
+export function squatStatus(row: {
+  attribution?: CloneAlertRow["attribution"];
+  urlscan_classification?: string | null;
+  urlscan_evidence?: CloneAlertRow["urlscan_evidence"];
+}): SquatStatus {
+  const whois = row.attribution?.whois;
+  const statuses = (whois?.statuses ?? []).map((s) =>
+    String(s).toLowerCase().replace(/[^a-z]/g, ""),
+  );
+  if (statuses.some((s) => s === "clienthold" || s === "serverhold")) {
+    return "held";
+  }
+  const ns = whois?.nameServers ?? [];
+  if (
+    row.urlscan_classification === "parked_for_sale" ||
+    ns.some((n) => hostMatches(String(n), PARKING_NS_ROOTS)) ||
+    ns.some((n) => hostMatches(String(n), PARKED_HOST_PATTERNS))
+  ) {
+    return "parked";
+  }
+  if (row.urlscan_evidence?.server?.ip) return "live";
+  return "unknown";
 }
 
 export interface CloneBrandMetrics {
@@ -124,6 +186,7 @@ export function toCloneDetail(
       urlscanEvidenceFromJsonb(row.urlscan_evidence)?.resultUrl ?? null,
     still_live_as_of: stillLiveAsOf,
     risk_score: riskScore,
+    squat_status: squatStatus(row),
   };
 }
 

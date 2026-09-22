@@ -594,3 +594,109 @@ describe("autobrakeShouldTrip — a ratio needs a denominator", () => {
     ).toBe(false);
   });
 });
+
+// v314 — the reconciler used to read Netcraft's per-URL verdict and throw it
+// away. These pin the verdict it now persists and Netcraft's OWN clock for the
+// takedown. Fixture shapes are the live payload of submission
+// MESG9FtSBP2HCgPIFHjlGF6R0ltoKAOd (2026-09-22): one URL malicious with an
+// EMPTY per-URL log, one `no threats` "Already reported and rejected.".
+describe("classifyByUrlState — v314 Netcraft verdicts + vendor clock", () => {
+  const SUB = {
+    log: [{ date: 1789045437, from_state: "processing", to_state: "malicious" }],
+    submittedAt: new Date(1789045426 * 1000).toISOString(),
+  };
+  const maliciousDirect: NetcraftUrlEntry = {
+    hostname: "apple-pay-casino.nl",
+    url: "https://apple-pay-casino.nl/",
+    url_state: "malicious",
+    url_classification_reason: null,
+    classification_log: [],
+  };
+  const rejected: NetcraftUrlEntry = {
+    hostname: "threesbrewingdirect.shop",
+    url: "https://threesbrewingdirect.shop/",
+    url_state: "no threats",
+    url_classification_reason: "Already reported and rejected.",
+    classification_log: [{ date: 1789045437, from_state: "rejected", to_state: "no threats" }],
+  };
+
+  it("dates a directly-classified malicious URL from the submission log", () => {
+    const r = classifyByUrlState(
+      [{ id: 1, candidate_domain: "apple-pay-casino.nl" }],
+      [maliciousDirect],
+      SUB,
+    );
+    expect(r.verdicts).toEqual([
+      {
+        id: 1,
+        url_state: "malicious",
+        reason: null,
+        malicious_at: new Date(1789045437 * 1000).toISOString(),
+        netcraft_submitted_at: SUB.submittedAt,
+      },
+    ]);
+  });
+
+  it("records a no-threats verdict + reason on a weaponised row it does not move", () => {
+    const r = classifyByUrlState(
+      [{ id: 2, candidate_domain: "threesbrewingdirect.shop", lifecycle_state: "weaponised" }],
+      [rejected],
+      SUB,
+    );
+    expect(r.other).toEqual([2]); // v249 no-downgrade still holds
+    expect(r.verdicts).toEqual([
+      {
+        id: 2,
+        url_state: "no threats",
+        reason: "Already reported and rejected.",
+        malicious_at: null,
+        netcraft_submitted_at: SUB.submittedAt,
+      },
+    ]);
+  });
+
+  it("prefers the URL's own →malicious log entry over the submission's", () => {
+    const later = 1789100000;
+    const r = classifyByUrlState(
+      [{ id: 3, candidate_domain: "a.com" }],
+      [
+        {
+          ...urlEntry("a.com", "malicious"),
+          classification_log: [
+            { date: 1789045437, from_state: "processing", to_state: "no threats" },
+            { date: later, from_state: "no threats", to_state: "malicious" },
+          ],
+        },
+      ],
+      SUB,
+    );
+    expect(r.verdicts[0]?.malicious_at).toBe(new Date(later * 1000).toISOString());
+  });
+
+  it("refuses to guess when the URL's own log never records →malicious", () => {
+    const r = classifyByUrlState(
+      [{ id: 4, candidate_domain: "a.com" }],
+      [
+        {
+          ...urlEntry("a.com", "malicious"),
+          classification_log: [{ date: 1, from_state: "processing", to_state: "suspicious" }],
+        },
+      ],
+      SUB,
+    );
+    expect(r.verdicts[0]?.malicious_at).toBeNull();
+  });
+
+  it("the verdict for a multi-entry host is the highest-precedence state", () => {
+    const r = classifyByUrlState(
+      [{ id: 5, candidate_domain: "a.com" }],
+      [urlEntry("a.com", "no threats"), urlEntry("a.com", "malicious")],
+    );
+    expect(r.verdicts[0]?.url_state).toBe("malicious");
+  });
+
+  it("an unmatched alert gets no verdict (nothing to persist)", () => {
+    const r = classifyByUrlState([{ id: 6, candidate_domain: "gone.com" }], [maliciousDirect]);
+    expect(r.verdicts).toEqual([]);
+  });
+});
