@@ -9,6 +9,7 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
+import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 
 /**
  * Clone-Watch — lifecycle re-check loop (Wave 0 PR-B).
@@ -73,11 +74,8 @@ interface RecheckRow {
   last_rechecked_at: string | null;
   // v222 risk-score inputs (all nullable — enrichment/classification partial).
   signals: unknown;
-  attribution: {
-    whois?: { createdDate?: string };
-    ip_rep?: { abuseConfidenceScore?: number };
-    au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
-  } | null;
+  /** attribution jsonb — read via attributionRiskInputs, never destructured. */
+  attribution: unknown;
   clf_is_clone: boolean | null;
   clf_confidence: number | null;
   clf_attack_intent: string | null;
@@ -131,11 +129,7 @@ export function selectTopRiskCandidates(
       confidence: r.clf_confidence,
       attackIntent: r.clf_attack_intent,
       brandCategory: r.brand_category,
-      whoisCreatedDate: r.attribution?.whois?.createdDate ?? null,
-      ipAbuseConfidenceScore:
-        r.attribution?.ip_rep?.abuseConfidenceScore ?? null,
-      auAbnStatus: r.attribution?.au_registrant?.abnStatus ?? null,
-      auNameMatches: r.attribution?.au_registrant?.nameMatchesAbn ?? null,
+      ...attributionRiskInputs(r.attribution),
       nowMs,
     }).score,
   }));

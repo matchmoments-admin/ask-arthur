@@ -260,6 +260,7 @@ export {
   type CloneBrandMetrics,
   type CloneDetail,
 } from "@/lib/clone-watch/clone-metrics";
+import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 
 export const reportBrandStewardship = inngest.createFunction(
   {
@@ -458,12 +459,7 @@ export const reportBrandStewardship = inngest.createFunction(
             brandCategory: row.inferred_target_domain
               ? (categories.get(row.inferred_target_domain) ?? null)
               : null,
-            whoisCreatedDate: row.attribution?.whois?.createdDate ?? null,
-            ipAbuseConfidenceScore:
-              row.attribution?.ip_rep?.abuseConfidenceScore ?? null,
-            auAbnStatus: row.attribution?.au_registrant?.abnStatus ?? null,
-            auNameMatches:
-              row.attribution?.au_registrant?.nameMatchesAbn ?? null,
+            ...attributionRiskInputs(row.attribution),
             nowMs,
           }).score;
         }

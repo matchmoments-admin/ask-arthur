@@ -3,6 +3,7 @@ import type {
   BrandCloneSample,
   CloneSampleRow,
 } from "@/emails/BrandOutreachPilot";
+import { readAttribution } from "@/lib/clone-watch/attribution";
 
 /**
  * Live clone-detection sample for the brand-outreach pilot email.
@@ -46,10 +47,8 @@ export interface RawCloneAlert {
     uuid?: string;
   } | null;
   urlscan_uuid: string | null;
-  attribution: {
-    whois?: { registrar?: string | null };
-    hosting?: { ip?: string; asn?: string; country?: string };
-  } | null;
+  /** attribution jsonb — read via readAttribution. */
+  attribution: unknown;
   submitted_to: Record<string, unknown> | null;
   lifecycle_state: string | null;
   first_seen_at: string | null;
@@ -58,7 +57,7 @@ export interface RawCloneAlert {
 /** Compact "IP · ASN · CC" hosting line, or null when nothing was captured. */
 function hostingLine(raw: RawCloneAlert): string | null {
   const server = raw.urlscan_evidence?.server ?? {};
-  const attr = raw.attribution?.hosting ?? {};
+  const attr = readAttribution(raw.attribution).hosting;
   const parts = [
     server.ip ?? attr.ip,
     server.asn ?? attr.asn,
@@ -90,7 +89,7 @@ export function shapeCloneAlert(raw: RawCloneAlert): CloneSampleRow {
     classification: raw.urlscan_classification ?? null,
     detectedAt: raw.first_seen_at ?? null,
     reportedToNetcraft: isReportedToNetcraft(raw),
-    registrar: raw.attribution?.whois?.registrar ?? null,
+    registrar: readAttribution(raw.attribution).registrar,
     host: hostingLine(raw),
     resultUrl: uuid ? `https://urlscan.io/result/${uuid}/` : null,
   };

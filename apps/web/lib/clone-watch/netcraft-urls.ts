@@ -1,5 +1,7 @@
 import { domainToASCII } from "node:url";
 
+import { NO_DOWNGRADE_STATES } from "@/lib/clone-watch/lifecycle";
+
 /**
  * Netcraft Report API v3 — per-URL reader + false-negative predicate.
  *
@@ -310,12 +312,7 @@ export interface ReconcileAlert {
   lifecycle_state?: string | null;
 }
 
-/** States a reconcile pass must never walk BACK from. `weaponised` entered the
- *  worklist in v249 so the escalation→takedown outcome can be witnessed; a
- *  Netcraft `no threats` on such a row is the false negative we already filed
- *  an issue about, not evidence to demote it to `declined`. Only `malicious`
- *  moves these rows, and only forward, to `taken_down`. */
-const NO_DOWNGRADE_STATES = new Set(["weaponised", "taken_down", "dormant"]);
+// NO_DOWNGRADE_STATES: the Lifecycle Module owns it (lifecycle.ts, v249 guard).
 
 export interface ReconcileClassification {
   /** Netcraft actioned (malicious) → lifecycle taken_down (+ stamp takedown_at). */

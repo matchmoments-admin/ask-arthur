@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -39,6 +39,41 @@ describe("preclassify thresholds", () => {
       expect(src).not.toMatch(/const (MIN|STRICT)_CONFIDENCE\s*=\s*0?\.\d/);
       expect(src).not.toMatch(/p_min_confidence:\s*0?\.\d/);
       expect(src).not.toMatch(/\.gte\("confidence",\s*0?\.\d/);
+    });
+  }
+
+  // v315 — the SQL side. A worklist RPC whose p_min_confidence DEFAULT
+  // disagrees with the TS gate is a silent starvation trap for any caller that
+  // omits the arg. Scan the NEWEST migration that (re)defines each function.
+  const MIGRATIONS = join(process.cwd(), "../../supabase");
+  const GATED_RPCS = [
+    "list_clone_alerts_pending_urlscan_submit",
+    "mark_stale_clone_alerts_dormant",
+    "list_clone_alerts_pending_netcraft_auto",
+  ];
+  const version = (f: string) => Number(/^migration-v(\d+)-/.exec(f)?.[1] ?? -1);
+  const files = readdirSync(MIGRATIONS)
+    .filter((f) => /^migration-v\d+-.*\.sql$/.test(f))
+    .sort((a, b) => version(b) - version(a));
+
+  for (const fn of GATED_RPCS) {
+    it(`${fn}'s newest SQL definition defaults p_min_confidence to WORKLIST_MIN_CONFIDENCE`, () => {
+      const re = new RegExp(
+        `FUNCTION\\s+public\\.${fn}\\s*\\(([^)]*)\\)`,
+        "i",
+      );
+      let args: string | null = null;
+      for (const f of files) {
+        const m = re.exec(readFileSync(join(MIGRATIONS, f), "utf8"));
+        if (m) {
+          args = m[1];
+          break;
+        }
+      }
+      expect(args, `no migration defines ${fn}`).not.toBeNull();
+      const d = /p_min_confidence\s+real\s+DEFAULT\s+([0-9.]+)/i.exec(args!);
+      expect(d, `${fn} has no p_min_confidence default`).not.toBeNull();
+      expect(Number(d![1])).toBe(WORKLIST_MIN_CONFIDENCE);
     });
   }
 });

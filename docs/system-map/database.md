@@ -28,6 +28,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `scam_clusters` — Entity co-occurrence clusters. v22.
 - `cluster_members` — Cluster membership.
 - `scam_ips`, `scam_crypto_wallets`, `scam_urls` — Entity feeds (via `bulk_upsert_*` RPCs). (`scam_contacts` was dropped at v41; the phone/email subset is now served by `scam_entities` + the `report_scam_entity` RPC.)
+- `project_clone_to_platform_entity(p_alert_id, p_scam_url_id DEFAULT NULL) → boolean` + trigger `clone_alert_platform_projection` (AFTER UPDATE OF attribution, lifecycle_state on `shopfront_clone_alerts`, WHEN the alert carries `submitted_to.platform_entity`) — **v315**. Keeps a fed clone's Platform Entity current: `attribution.whois` → `scam_urls.whois_*` (COALESCE) and taken_down/dormant/expired (sole source `clone_watch`) → `confidence_level` medium. Backfill 2026-09-23: 138/164 fed rows gained registrar data, 25 downgraded. v315 also moved the `p_min_confidence` DEFAULT of `list_clone_alerts_pending_urlscan_submit`, `mark_stale_clone_alerts_dormant`, `list_clone_alerts_pending_netcraft_auto` 0.7 → 0.4 (ADR-0026; pinned by `preclassifyThresholds.test.ts`).
 
 ### Feeds / Intel
 

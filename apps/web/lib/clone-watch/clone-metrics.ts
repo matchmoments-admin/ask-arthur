@@ -17,6 +17,7 @@
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 import { PARKED_HOST_PATTERNS } from "@/lib/clone-watch/urlscan-classify";
 import { urlscanEvidenceFromJsonb } from "@/lib/clone-watch/urlscan-evidence";
+import { readAttribution } from "@/lib/clone-watch/attribution";
 
 // Per-brand detail rows stored in metrics.clones.domains. Sized so the public
 // share page (/clone-report/[token]) is effectively the FULL list for all
@@ -88,22 +89,22 @@ function hostMatches(host: string, roots: readonly string[]): boolean {
 
 /** Pure. Precedence: held > parked > live > unknown. */
 export function squatStatus(row: {
-  attribution?: CloneAlertRow["attribution"];
+  attribution?: unknown;
   urlscan_classification?: string | null;
   urlscan_evidence?: CloneAlertRow["urlscan_evidence"];
 }): SquatStatus {
-  const whois = row.attribution?.whois;
-  const statuses = (whois?.statuses ?? []).map((s) =>
-    String(s).toLowerCase().replace(/[^a-z]/g, ""),
+  const attr = readAttribution(row.attribution);
+  const statuses = attr.statuses.map((s) =>
+    s.toLowerCase().replace(/[^a-z]/g, ""),
   );
   if (statuses.some((s) => s === "clienthold" || s === "serverhold")) {
     return "held";
   }
-  const ns = whois?.nameServers ?? [];
+  const ns = attr.nameServers;
   if (
     row.urlscan_classification === "parked_for_sale" ||
-    ns.some((n) => hostMatches(String(n), PARKING_NS_ROOTS)) ||
-    ns.some((n) => hostMatches(String(n), PARKED_HOST_PATTERNS))
+    ns.some((n) => hostMatches(n, PARKING_NS_ROOTS)) ||
+    ns.some((n) => hostMatches(n, PARKED_HOST_PATTERNS))
   ) {
     return "parked";
   }
@@ -162,8 +163,8 @@ export function toCloneDetail(
   // Fall back to the attribution dossier's hosting block when the live urlscan
   // render didn't capture server info (e.g. a clone enriched before its scan
   // completed). Belt-and-suspenders so a clone shows whatever hosting we have.
-  const attrHosting = row.attribution?.hosting ?? {};
-  const whois = row.attribution?.whois ?? {};
+  const attr = readAttribution(row.attribution);
+  const attrHosting = attr.hosting;
   const stillLiveAsOf =
     row.lifecycle_state === "weaponised"
       ? (row.weaponised_at ?? null)
@@ -174,8 +175,8 @@ export function toCloneDetail(
     ip: server.ip ?? attrHosting.ip ?? null,
     asn: server.asn ?? attrHosting.asn ?? null,
     country: server.country ?? attrHosting.country ?? null,
-    registrar: whois.registrar ?? null,
-    abuse_email: whois.registrarAbuseEmail ?? null,
+    registrar: attr.registrar,
+    abuse_email: attr.registrarAbuseEmail,
     lifecycle_state: row.lifecycle_state ?? null,
     first_seen_at: row.first_seen_at ?? null,
     // ONE decoder for the urlscan_evidence jsonb shape (uuid → result page,
