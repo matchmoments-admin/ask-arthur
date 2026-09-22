@@ -763,6 +763,18 @@ export const featureFlags = {
    *  changes user-facing output → canary separately. Default OFF. */
   analyzeCloneCitation: readBoolEnv("FF_ANALYZE_CLONE_CITATION"),
 
+  /** First-party URL Reputation in the analyze VERDICT (clone-watch deepening
+   *  PR 5). When ON, every analyze surface (web /api/analyze + runAnalysisCore
+   *  for extension and bots) looks the submitted URLs up in our own
+   *  `scam_urls` threat rows — active, high/confirmed, from a machine-verified
+   *  first-party source (today `clone_watch`, i.e. Weaponised clones via the
+   *  v309 Platform Entity bridge) — in parallel with GSB/VirusTotal, and feeds
+   *  hits into mergeVerdict's urlResults: a hit escalates to HIGH_RISK exactly
+   *  like a GSB hit. Fail-open, 1.5 s bound, one indexed query. Changes
+   *  user-facing verdicts → canary separately. Default OFF. Server-side only.
+   *  See packages/scam-engine/src/first-party-url-reputation.ts. */
+  analyzeFirstPartyUrls: readBoolEnv("FF_ANALYZE_FIRST_PARTY_URLS"),
+
   /** Brand Register — the "brand 360" rollup (Phase 3 of the brand-convergence-
    *  seam plan). Gates BOTH the nightly brand-register-refresh Inngest fn (when
    *  OFF the cron no-ops) AND the /admin/brand-register page. One row per

@@ -25,15 +25,26 @@ POST /api/analyze
   │      └─ Cache hit → return cached verdict + X-Request-Id + increment_check_stats
   ├─ 6.  Geolocation (synchronous via x-vercel-ip-* headers)
   ├─ 7.  URL extraction
-  │      ├─ Google Safe Browsing API check
   │      └─ Redirect-chain resolution (flag: redirectResolve)
   ├─ 8.  Parallel processing
   │      ├─ analyzeWithClaude  (Anthropic timeout: 30s vision / 15s text)
-  │      └─ URL reputation checks
+  │      └─ checkAnalyzeUrlReputation (scam-engine/first-party-url-reputation.ts —
+  │         the one URL-reputation call for web AND runAnalysisCore/extension/bots)
+  │            ├─ Google Safe Browsing + VirusTotal (Redis-cached, 1h bad / 24h clean)
+  │            └─ First-party URL Reputation (flag: analyzeFirstPartyUrls — default OFF)
+  │                 one IN query on scam_urls_normalized_url_key: exact URL + host-root
+  │                 keys (± www, http/https, ancestors to the registrable domain);
+  │                 is_active ∧ confidence high/confirmed ∧ feed_sources ∋ clone_watch.
+  │                 Uncached, fail-open, 1.5 s bound; merged per URL into urlResults.
   ├─ 9.  mergeVerdict (@askarthur/core-analysis)
-  │      ├─ Escalate → HIGH_RISK if any URL flagged
+  │      ├─ Escalate → HIGH_RISK if any URL flagged (GSB, VT or first-party — same weight)
   │      ├─ Floor → SUSPICIOUS if injection detected
   │      └─ Tiered escalation on deepfake signals
+  ├─ 9-clone. Clone citation (flag: analyzeCloneCitation — default OFF; web route only) —
+  │      red-flag only, never a verdict weight (ADR-0024 precedent). Cites an operator-
+  │      confirmed (tp_confirmed/tp_actioned) lookalike via url_hash, but SKIPS any URL
+  │      the first-party source already flagged in step 8 — a Weaponised clone gets
+  │      one red flag (the "URL flagged by Ask Arthur Clone Watch …" line), not two.
   ├─ 9a. Shop Signal post-processor (flag: shopSignal — default OFF, awaits 2026-05-20 flip)
   │      ├─ detectCommerceSignal(text, urls) → URL TLD / path / platform hint OR text commerce verbs
   │      ├─ buildShopSignal(merged.redFlags, referrerSource) → { isCommerce, commerceFlags[], generatedAt, referrerSource? }

@@ -18,6 +18,7 @@
     "./pipeline": "./src/pipeline.ts",
     "./sanitize": "./src/sanitize.ts",
     "./safebrowsing": "./src/safebrowsing.ts",
+    "./first-party-url-reputation": "./src/first-party-url-reputation.ts",
     "./ssrf-dispatcher": "./src/ssrf-dispatcher.ts",
     "./whois": "./src/whois.ts",
     "./rdap": "./src/rdap.ts",
