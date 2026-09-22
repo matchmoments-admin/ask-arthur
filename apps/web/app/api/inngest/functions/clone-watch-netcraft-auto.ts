@@ -11,14 +11,22 @@ import { logger } from "@askarthur/utils/logger";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
+import {
+  buildNetcraftBulkBody,
+  buildNetcraftResubmitBody,
+  netcraftReporterEmail,
+  postNetcraftBulk,
+  recordAutoSubmission,
+  type NetcraftAutoCandidate,
+  type NetcraftResubmitCandidate,
+} from "@/lib/clone-watch/netcraft-report";
 
 /**
  * Clone-Watch — Netcraft AUTO-report producer (PR3).
  *
- * Today a clone only reaches Netcraft when a human manually triages it (the
- * admin triage route emits CLONE_WATCH_TRIAGED_EVENT → the per-candidate
- * submit-netcraft worker). That leaves the high-confidence branded tail
- * unreported. This cron sweeps clones the pre-classifier (Jev since
+ * The ONE lane that reports clones to Netcraft (the per-candidate manual
+ * submit-netcraft lane was removed 2026-09-23; the HOW of reporting lives in
+ * lib/clone-watch/netcraft-report.ts). This cron sweeps clones the pre-classifier (Jev since
  * ADR-0026; Haiku before) judged a likely
  * clone (is_clone AND confidence >= threshold) that target a real brand,
  * aren't FP-denylisted, and haven't been submitted.
@@ -80,12 +88,6 @@ import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-threshold
  * quiet day and does not by itself indicate a starved lane.
  */
 
-const NETCRAFT_REPORT_ENDPOINT =
-  "https://report.netcraft.com/api/v3/report/urls";
-// Validation-only endpoint: checks the payload, creates no report, sends no
-// email. Used by test mode so we never abuse the live intake while validating.
-const NETCRAFT_TEST_ENDPOINT =
-  "https://report.netcraft.com/api/v3/test/report/urls";
 const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
 // ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
 // with its evidence in lib/clone-watch/preclassify-thresholds.ts.
@@ -114,155 +116,12 @@ function resubmitCap(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : RESUBMIT_DEFAULT_CAP;
 }
 
-/** Row shape returned by list_clone_alerts_pending_netcraft_resubmit. */
-export interface NetcraftResubmitCandidate {
-  id: number;
-  candidate_url: string;
-  candidate_domain: string;
-  inferred_target_domain: string | null;
-  urlscan_uuid: string | null;
-  weaponised_at: string | null;
-  /** 24h submission allowance left, identical on every row (v252). */
-  budget_remaining?: number | null;
-}
 
-/**
- * Pure builder for the RE-submission body. Distinct reason text from the
- * auto-report lane: this batch is not "please classify these lookalikes", it is
- * "we watched these turn into live phishing and you have no open record of
- * them" — which is the whole justification for re-approaching Netcraft on a URL
- * they may have seen before. Cites the urlscan evidence so a human reviewer can
- * verify rather than take our word.
- */
-export function buildNetcraftResubmitBody(
-  candidates: NetcraftResubmitCandidate[],
-  reporterEmail: string,
-): NetcraftBulkBody {
-  const seen = new Set<string>();
-  const urls: Array<{ url: string; country: string }> = [];
-  for (const c of candidates) {
-    if (!c.candidate_url || seen.has(c.candidate_url)) continue;
-    seen.add(c.candidate_url);
-    urls.push({ url: c.candidate_url, country: "AU" });
-  }
-  const evidence = candidates
-    .filter((c) => c.urlscan_uuid)
-    .slice(0, 10)
-    .map(
-      (c) =>
-        `${c.candidate_domain} (impersonating ${c.inferred_target_domain ?? "an Australian brand"}): https://urlscan.io/result/${c.urlscan_uuid}/`,
-    );
-  return {
-    email: reporterEmail,
-    reason:
-      "Confirmed phishing on Australian-brand lookalike domains, detected by " +
-      "Ask Arthur clone-watch (askarthur.au). Each of these was monitored from " +
-      "registration and has since been observed serving suspected " +
-      "credential-harvest or payment-fraud content by our own urlscan.io scan. " +
-      "They are being reported fresh because no current Netcraft submission " +
-      "covers them. Scan evidence:\n" +
-      (evidence.length ? evidence.join("\n") : "(scan references unavailable)"),
-    urls,
-  };
-}
 
-/** Row shape returned by list_clone_alerts_pending_netcraft_auto. */
-export interface NetcraftAutoCandidate {
-  id: number;
-  candidate_url: string;
-  candidate_domain: string;
-  inferred_target_domain: string;
-  severity_tier: string | null;
-  signals: unknown;
-}
 
-export interface NetcraftBulkBody {
-  email: string;
-  reason: string;
-  urls: Array<{ url: string; country: string }>;
-}
 
-export interface NetcraftBulkResult {
-  ok: boolean;
-  status: number;
-  uuid: string | null;
-  state: string | null;
-  errText: string | null;
-  raw: Record<string, unknown>;
-  urlCount: number;
-}
 
-/**
- * The one place either lane talks to Netcraft's bulk intake.
- *
- * `test: true` targets the validation-only endpoint — it checks the payload,
- * creates NO report and sends NO confirmation email. Both lanes route through
- * here so "which endpoint does test mode hit" is a single decision with a
- * single test, rather than a duplicated ternary per lane. Never throws: the
- * callers soft-fail a non-2xx into a $0 diagnostic, because an Inngest fn error
- * pages the Axiom fleet watch.
- */
-export async function postNetcraftBulk(
-  body: NetcraftBulkBody,
-  opts: { test: boolean },
-): Promise<NetcraftBulkResult> {
-  const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
-  const res = await fetch(
-    opts.test ? NETCRAFT_TEST_ENDPOINT : NETCRAFT_REPORT_ENDPOINT,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
-  const text = await res.text();
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    parsed = { raw: text };
-  }
-  return {
-    ok: res.ok,
-    status: res.status,
-    uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
-    state: typeof parsed.state === "string" ? parsed.state : null,
-    errText: res.ok ? null : text.slice(0, 200),
-    raw: parsed,
-    urlCount: body.urls.length,
-  };
-}
 
-/**
- * Pure builder for the bulk Netcraft report body. One batch-level reason (the
- * bulk endpoint takes a single reason for all urls); each url is AU. Dedupes
- * urls so the same candidate_url isn't sent twice in one batch.
- */
-export function buildNetcraftBulkBody(
-  candidates: NetcraftAutoCandidate[],
-  reporterEmail: string,
-): NetcraftBulkBody {
-  const seen = new Set<string>();
-  const urls: Array<{ url: string; country: string }> = [];
-  for (const c of candidates) {
-    if (!c.candidate_url || seen.has(c.candidate_url)) continue;
-    seen.add(c.candidate_url);
-    urls.push({ url: c.candidate_url, country: "AU" });
-  }
-  return {
-    email: reporterEmail,
-    reason:
-      "Possible clones / lookalike-typosquat domains of Australian brands, " +
-      "detected via Ask Arthur clone-watch's daily NRD lexical sweep " +
-      "(askarthur.au brand watchlist; high-confidence preclassifier matches). " +
-      "Submitted in good faith for Netcraft classification.",
-    urls,
-  };
-}
 
 export const cloneWatchNetcraftAuto = inngest.createFunction(
   {
@@ -380,7 +239,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           postNetcraftBulk(
             buildNetcraftBulkBody(
               candidates,
-              process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
+              netcraftReporterEmail(),
             ),
             { test: isTest },
           ),
@@ -438,32 +297,15 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
 
         // Mark every alert in the batch submitted (atomic per-alert JSONB merge,
         // same RPC the per-candidate worker uses) with the batch uuid.
-        const marked = await step.run("persist-submissions", async () => {
-          const submittedAt = new Date().toISOString();
-          let n = 0;
-          for (const c of candidates) {
-            const { error } = await sb.rpc("merge_clone_alert_submission", {
-              p_alert_id: c.id,
-              p_key: "netcraft",
-              p_value: {
-                uuid: result.uuid,
-                state: result.state,
-                submitted_at: submittedAt,
-                via: "auto_bulk",
-              },
-              p_set_triage_status: "tp_actioned",
-            });
-            if (error) {
-              logger.error("netcraft-auto: mark-submitted failed", {
-                alertId: c.id,
-                error: error.message,
-              });
-            } else {
-              n++;
-            }
-          }
-          return n;
-        });
+        // Ledger + lifecycle through the Netcraft report Module (one
+        // recording path for every lane that submits).
+        const marked = await step.run("persist-submissions", () =>
+          recordAutoSubmission(
+            sb,
+            candidates.map((c) => c.id),
+            result,
+          ),
+        );
 
         await step.run("log-cost", async () => {
           await recordLaneOutcome("shopfront-clone-netcraft-auto/auto", marked, {
@@ -703,7 +545,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           postNetcraftBulk(
             buildNetcraftResubmitBody(
               batch,
-              process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
+              netcraftReporterEmail(),
             ),
             { test: isTest },
           ),

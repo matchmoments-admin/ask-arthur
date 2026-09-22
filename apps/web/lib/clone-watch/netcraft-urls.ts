@@ -579,3 +579,87 @@ async function fetchNetcraftSubmissionUrlsInner(
 }
 
 export { NETCRAFT_API_BASE, DEFAULT_TIMEOUT_MS };
+
+/** One uuid's fetch, reduced to what the planner needs (small step output). */
+export interface ReconcileFetch {
+  uuid: string;
+  alerts: ReconcileAlert[];
+  ok: boolean;
+  status: number;
+  isArchived: boolean;
+  urls: NetcraftUrlEntry[];
+  submission: NetcraftSubmissionContext;
+}
+
+export interface ReconcilePlan {
+  verdicts: NetcraftUrlVerdict[];
+  takenDown: number[];
+  declined: number[];
+  /** Matched-but-unmoved AND archived alerts: stamp reconciled_at only. */
+  other: number[];
+  archived: number;
+  errors: number;
+  /** Netcraft graded a site we watched go live as `no threats` — the vendor gap. */
+  weaponisedNoThreats: number;
+  /** uuids whose fetch failed transiently — left unstamped, retried next run. */
+  failedUuids: string[];
+}
+
+/**
+ * Pure: fold every uuid's fetch into ONE set of writes. The reconciler used to
+ * run two Inngest steps per uuid (fetch, apply) — ~54 steps/day and a 13.6 min
+ * worst case against a 15 min finish. Now: one fetch step, then this plan, then
+ * one apply step. Transient failures stay unstamped so the cadence retries them.
+ */
+export function planReconcile(fetches: ReconcileFetch[]): ReconcilePlan {
+  const plan: ReconcilePlan = {
+    verdicts: [],
+    takenDown: [],
+    declined: [],
+    other: [],
+    archived: 0,
+    errors: 0,
+    weaponisedNoThreats: 0,
+    failedUuids: [],
+  };
+  for (const f of fetches) {
+    if (f.isArchived) {
+      plan.archived++;
+      plan.other.push(...f.alerts.map((a) => a.id));
+      continue;
+    }
+    if (!f.ok) {
+      plan.errors++;
+      plan.failedUuids.push(f.uuid);
+      continue;
+    }
+    const cls = classifyByUrlState(f.alerts, f.urls, f.submission);
+    plan.verdicts.push(...cls.verdicts);
+    plan.takenDown.push(...cls.takenDown);
+    plan.declined.push(...cls.declined);
+    plan.other.push(...cls.other);
+    const lifecycle = new Map(f.alerts.map((a) => [a.id, a.lifecycle_state]));
+    plan.weaponisedNoThreats += cls.verdicts.filter(
+      (v) =>
+        v.url_state === NETCRAFT_URL_STATE.NO_THREATS &&
+        lifecycle.get(v.id) === "weaponised",
+    ).length;
+  }
+  return plan;
+}
+
+/** Keep only the per-URL fields the planner reads — step outputs are persisted
+ *  by Inngest, and the raw /urls payload carries screenshots, tags, sources. */
+export function slimUrls(urls: NetcraftUrlEntry[]): NetcraftUrlEntry[] {
+  return urls.map((u) => ({
+    url: u.url,
+    hostname: u.hostname,
+    url_state: u.url_state,
+    url_classification_reason: u.url_classification_reason ?? null,
+    classification_log: (u.classification_log ?? []).map((l) => ({
+      date: l.date,
+      from_state: l.from_state,
+      to_state: l.to_state,
+    })),
+  }));
+}

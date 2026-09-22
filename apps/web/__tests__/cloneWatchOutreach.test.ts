@@ -2,9 +2,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
 import {
-  buildSubmissionReason,
-  NETCRAFT_REPORT_ENDPOINT_URL,
-} from "@/app/api/inngest/functions/clone-watch-submit-netcraft";
+  DEFAULT_NETCRAFT_REPORTER,
+  NETCRAFT_REPORT_ENDPOINT,
+  netcraftReporterEmail,
+} from "@/lib/clone-watch/netcraft-report";
 import { decideNotificationAction } from "@/app/api/inngest/functions/clone-watch-notify-brand";
 import {
   buildLinkedInDraft,
@@ -41,38 +42,24 @@ import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
 // (createServiceClient, Resend, sendAdminTelegramMessage) is not tested
 // here — those are exercised by the live e2e flow once a row is triaged.
 
-describe("clone-watch-submit-netcraft", () => {
-  describe("buildSubmissionReason", () => {
-    it("includes the brand, signal type, and 2-decimal score", () => {
-      const reason = buildSubmissionReason({
-        brand: "kmart.com.au",
-        candidateDomain: "qkmart.com",
-        signalType: "levenshtein",
-        score: 0.8333333,
-      });
-      expect(reason).toContain("kmart.com.au");
-      expect(reason).toContain("levenshtein");
-      expect(reason).toContain("0.83");
-      expect(reason).toContain("Ask Arthur clone-watch");
-    });
-
-    it("formats score consistently regardless of input precision", () => {
-      const reason = buildSubmissionReason({
-        brand: "Bonds",
-        candidateDomain: "bons.bid",
-        signalType: "levenshtein",
-        score: 0.8,
-      });
-      expect(reason).toContain("0.80");
-    });
+describe("Netcraft report Module", () => {
+  it("points at v3 of the Netcraft Report API", () => {
+    expect(NETCRAFT_REPORT_ENDPOINT).toBe(
+      "https://report.netcraft.com/api/v3/report/urls",
+    );
   });
 
-  describe("NETCRAFT_REPORT_ENDPOINT_URL", () => {
-    it("points at v3 of the Netcraft Report API", () => {
-      expect(NETCRAFT_REPORT_ENDPOINT_URL).toBe(
-        "https://report.netcraft.com/api/v3/report/urls",
-      );
-    });
+  it("credits reports to NETCRAFT_REPORTER_EMAIL, else the one default", () => {
+    const saved = process.env.NETCRAFT_REPORTER_EMAIL;
+    try {
+      delete process.env.NETCRAFT_REPORTER_EMAIL;
+      expect(netcraftReporterEmail()).toBe(DEFAULT_NETCRAFT_REPORTER);
+      process.env.NETCRAFT_REPORTER_EMAIL = "  reports@askarthur.au \n";
+      expect(netcraftReporterEmail()).toBe("reports@askarthur.au");
+    } finally {
+      if (saved === undefined) delete process.env.NETCRAFT_REPORTER_EMAIL;
+      else process.env.NETCRAFT_REPORTER_EMAIL = saved;
+    }
   });
 });
 

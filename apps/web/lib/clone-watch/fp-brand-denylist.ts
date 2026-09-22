@@ -10,7 +10,7 @@
  * equivalent literal list (SQL can't import this).
  *
  * Consumers:
- *  - clone-watch-submit-netcraft.ts (never report these to Netcraft)
+ *  - the netcraft-auto worklist (never report these to Netcraft)
  *  - report-brand-stewardship.ts (never surface these in the brand digest /
  *    LinkedIn worklist)
  */
