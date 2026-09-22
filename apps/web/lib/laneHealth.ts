@@ -242,6 +242,22 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     shape: "(absence only)",
     silentZero: () => false,
   },
+  "clone-watch-report-summary": {
+    // Monthly (1st, 11:00). Absence is THE signal for a monthly Lane: the
+    // 2026-09-01 stewardship run was finish-cancelled with no retry and no
+    // row, and nothing noticed that August's brand reports never existed.
+    expectEvery: 32 * 24 * H,
+    consecutive: 1,
+    shape: "clones found but no store rows written",
+    silentZero: (o) => n(o, "total") > 0 && n(o, "brand_rows") === 0,
+  },
+  "report-brand-stewardship": {
+    expectEvery: 32 * 24 * H, // monthly, after the store is written
+    enabled: () => featureFlags.brandStewardshipReport,
+    consecutive: 1,
+    shape: "every report row failed to write",
+    silentZero: (o) => n(o, "failed") > 0 && n(o, "prepared") === 0,
+  },
   "shopfront-clone-fp-cluster-digest": {
     expectEvery: 8 * 24 * H, // Sundays 09:30
     enabled: () => featureFlags.shopfrontCloneWatch,

@@ -22,6 +22,7 @@ import {
   type MonthlyStoreWrittenData,
   type StoreWriteStatus,
 } from "@/lib/clone-watch/monthly-brand-store";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 const MANUAL_TRIGGER_EVENT = "clone-watch/report-summary.manual-trigger.v1";
 
@@ -279,6 +280,23 @@ export const cloneWatchReportSummary = inngest.createFunction(
           data,
         });
       }
+
+      // One Outcome Row per run (ADR-0025), frozen/no-clone runs included.
+      await step.run("log-outcome", () =>
+        recordLaneOutcome(
+          "clone-watch-report-summary",
+          "brandRows" in result ? (result.brandRows ?? 0) : 0,
+          {
+            ...("skipped" in result
+              ? { reason: result.skipped as "frozen" | "no_clones" }
+              : {}),
+            total: "total" in result ? (result.total ?? 0) : 0,
+            brand_rows: "brandRows" in result ? (result.brandRows ?? 0) : 0,
+            store_status: result.storeStatus,
+            emitted,
+          },
+        ),
+      );
 
       if ("skipped" in result) {
         return {

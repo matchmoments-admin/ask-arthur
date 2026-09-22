@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import {
@@ -25,6 +26,7 @@ import {
   readMonthlyBrandStore,
   type LedgerStoreRow,
 } from "@/lib/clone-watch/monthly-brand-store";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Monthly Brand Stewardship Report — aggregation + ledger (WS2-cap).
@@ -319,7 +321,6 @@ export {
   type CloneBrandMetrics,
   type CloneDetail,
 } from "@/lib/clone-watch/clone-metrics";
-import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 
 /**
  * The trigger set, exported so a test can pin the ordering contract: the
@@ -640,6 +641,14 @@ export const reportBrandStewardship = inngest.createFunction(
         cloneLedger.size === 0 &&
         redditAgg.size === 0
       ) {
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("report-brand-stewardship", 0, {
+            reason: "no_activity",
+            prepared: 0,
+            failed: 0,
+            clone_brands: 0,
+          }),
+        );
         return { ok: true, period: periodMonth, brands: 0 };
       }
 
@@ -923,6 +932,15 @@ export const reportBrandStewardship = inngest.createFunction(
         lines.push(``, `Review + send at askarthur.au/admin/brand-stewardship`);
         await sendAdminTelegramMessage(lines.join("\n"));
       });
+
+      await step.run("log-outcome", () =>
+        recordLaneOutcome("report-brand-stewardship", prepared.prepared, {
+          prepared: prepared.prepared,
+          failed: prepared.failed,
+          clone_brands: cloneLedger.size,
+          period: periodMonth,
+        }),
+      );
 
       logger.info("brand-stewardship: complete", {
         period: periodMonth,
