@@ -22,6 +22,66 @@ export type OnwardDestinationEnum =
   | "openphish"
   | "apwg";
 
+/**
+ * Every label of the `public.onward_destination` pg enum — what a ledger row
+ * can carry. Wider than {@link OnwardDestinationEnum} (the user-routable set):
+ * `netcraft` (v318) records a clone-watch Netcraft submission and has no
+ * `report.onward.netcraft` worker, so it must never be offered to a user.
+ */
+export type OnwardLedgerDestination = OnwardDestinationEnum | "netcraft";
+
+// ── URL-blocklist intakes — the ONE home for these addresses ─────────────
+// Neutral phishing blocklists that accept unsolicited URL reports by email.
+// Referenced by the onward workers, the user-click key validation
+// (lib/onward/submit.ts) and both proactive producers (report-onward-auto-report
+// and shopfront-clone-enforcement-execute). A guard test fails if the literal
+// appears anywhere else in apps/web. Values carried unchanged from the v165
+// workers (#533); ADR-0018 pre-flip item 3 (deliverability) still applies.
+export const OPENPHISH_INTAKE_EMAIL = "report@openphish.com";
+export const APWG_INTAKE_EMAIL = "reportphishing@apwg.org";
+// The destination_key a Netcraft ledger row carries (the report API host).
+export const NETCRAFT_DESTINATION_KEY = "report.netcraft.com";
+
+export interface UrlBlocklistDestination {
+  destination: "openphish" | "apwg";
+  /** The onward_report_log.destination_key — the intake address. */
+  destinationKey: string;
+  /** Human label for the subject line + body. */
+  intakeName: string;
+}
+
+export const URL_BLOCKLIST_DESTINATIONS: Record<
+  UrlBlocklistDestination["destination"],
+  UrlBlocklistDestination
+> = {
+  openphish: {
+    destination: "openphish",
+    destinationKey: OPENPHISH_INTAKE_EMAIL,
+    intakeName: "OpenPhish",
+  },
+  apwg: {
+    destination: "apwg",
+    destinationKey: APWG_INTAKE_EMAIL,
+    intakeName: "APWG",
+  },
+};
+
+/**
+ * The URL-blocklist destinations whose worker flag is ON. A producer enqueues
+ * only these, so a dark destination never accrues queued rows — and turning a
+ * destination's flag off (the ADR-0018 reversal lever) stops it for EVERY
+ * producer at once, scam-report and clone alike.
+ */
+export function enabledUrlBlocklistDestinations(flags: {
+  onwardOpenphish: boolean;
+  onwardApwg: boolean;
+}): UrlBlocklistDestination[] {
+  const out: UrlBlocklistDestination[] = [];
+  if (flags.onwardOpenphish) out.push(URL_BLOCKLIST_DESTINATIONS.openphish);
+  if (flags.onwardApwg) out.push(URL_BLOCKLIST_DESTINATIONS.apwg);
+  return out;
+}
+
 export interface DestinationOption {
   destination: OnwardDestinationEnum;
   destination_key: string;

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  enabledUrlBlocklistDestinations,
-  extractScammerUrls,
-} from "@/app/api/inngest/functions/onward-auto-report";
+import { extractScammerUrls } from "@/app/api/inngest/functions/onward-auto-report";
+import { enabledUrlBlocklistDestinations } from "@/lib/onward/destinations";
 
 describe("enabledUrlBlocklistDestinations", () => {
   it("returns nothing when both destination flags are OFF", () => {

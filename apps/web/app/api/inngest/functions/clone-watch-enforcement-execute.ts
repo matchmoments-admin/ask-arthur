@@ -1,46 +1,57 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
-import { sendOnward, stripUrlPii } from "@/lib/onward/url-blocklist-report";
+import { enabledUrlBlocklistDestinations } from "@/lib/onward/destinations";
+import {
+  enqueueUrlBlocklistReports,
+  onwardEventsFor,
+  type UrlReportRequest,
+} from "@/lib/onward/url-blocklist-report";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
- * Clone-Watch enforcement — EXECUTE step (Wave 1 outbound, founder-approved).
+ * Clone-Watch enforcement — EXECUTE step: a PRODUCER into the onward ledger.
  *
- * The ONLY machine-send path. Sends weaponised lookalikes to the reversible,
- * re-verified ecosystem blocklists APWG + OpenPhish (email), then advances the
- * case to 'submitted' and emits the reported-takedown telemetry. Every
- * domain-level lever (registrar/host/UDRP) stays human-gated — this fn never
- * touches a non-'auto' case (the RPC only returns auto APWG/OpenPhish cases).
+ * Reports weaponised lookalikes to the reversible, re-verified ecosystem
+ * blocklists (APWG + OpenPhish) through the SAME path every onward report
+ * takes (ADR-0018 amendment 2026-09-23, v318): it enqueues
+ * onward_report_log rows with source='clone_alert' via
+ * enqueue_onward_url_reports, then fires report.onward.<destination> — and the
+ * existing onward-openphish / onward-apwg workers send. This fn sends nothing
+ * itself, redeclares no intake address, and opens no case in
+ * shopfront_takedown_attempts (that table is the human-gated case workflow
+ * only). What one ledger buys: per-URL dedup across scam-report and clone
+ * sources, clone sends visible on /admin/onward-reports, and clone sends
+ * counted in brand stewardship.
  *
  * SAFETY (itch.io + reporter-reputation):
  *  - Gated FF_CLONE_ENFORCEMENT + FF_CLONE_ENFORCE_AUTO_BLOCKLIST + the
- *    feature_brakes.clone_enforcement kill-switch.
- *  - Bounded by a SHARED daily cap (CLONE_SUBMISSION_DAILY_CAP) counted across
- *    both this path and the Netcraft submit path, so a ~20% FP rate can't flood
- *    the ecosystem feeds and burn our standing.
- *  - Honours ONWARD_CANARY_RECIPIENT (via sendOnward): the first real sends go
- *    to our own inbox until the format + acceptance are confirmed.
- *  - Only acts on lifecycle_state='weaponised' (our scanner confirmed the phish).
+ *    feature_brakes.clone_enforcement kill-switch, AND per destination by the
+ *    worker flag (FF_ONWARD_OPENPHISH / FF_ONWARD_APWG) — only enabled
+ *    destinations are enqueued, so turning an intake's flag off stops it for
+ *    every producer at once.
+ *  - Bounded by the SHARED daily cap (CLONE_SUBMISSION_DAILY_CAP) counted
+ *    across this path, the human admin send and Netcraft submit
+ *    (count_todays_takedown_submissions). Each enqueued row records
+ *    `enforcement.queued`, which that counter reads (v318).
+ *  - Worklist = list_clone_alerts_pending_onward (v318): lifecycle_state
+ *    'weaponised' within the last 14 days, not yet reported to a destination
+ *    by alert OR by URL — the same predicate the insert conflicts on, so a
+ *    URL already reported from a scam report cannot re-present forever.
+ *  - The worker re-verifies 'weaponised' at send time, strips query/fragment
+ *    (F8) and honours ONWARD_CANARY_RECIPIENT.
  */
 
 const BRAKE = "clone_enforcement";
 const SEND_BATCH_LIMIT = 25;
 const DEFAULT_DAILY_CAP = 50;
 
-const INTAKE: Record<string, string> = {
-  apwg: "reportphishing@apwg.org",
-  openphish: "report@openphish.com",
-};
-
-interface PendingSendRow {
-  case_id: number;
+interface PendingAlertRow {
   clone_alert_id: number;
-  channel: string;
   candidate_url: string;
   candidate_domain: string;
   target_brand_normalized: string | null;
@@ -51,37 +62,19 @@ function dailyCap(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DAILY_CAP;
 }
 
-function reportText(row: PendingSendRow): string {
-  const brand = row.target_brand_normalized ?? "an Australian brand";
-  // Strip query/fragment PII before it reaches a third-party blocklist — a
-  // captured clone URL can carry victim identifiers in params (?email=…). Same
-  // guard the sibling onward path applies (F8).
-  const safeUrl = stripUrlPii(row.candidate_url);
-  return [
-    `Suspected phishing / brand-impersonation URL reported by Ask Arthur (askarthur.au):`,
-    ``,
-    `URL: ${safeUrl}`,
-    `Impersonated brand: ${brand}`,
-    ``,
-    `This domain was detected as a lookalike of ${brand} and independently`,
-    `classified as likely phishing by our automated scan. Please verify and`,
-    `action per your process. Reply to this email to dispute.`,
-  ].join("\n");
-}
-
-// inngest-finish-budget: 29 boundaries — 4 static + 1 per-item send step x
-// SEND_BATCH_LIMIT (25). Batching the sends would cut this to ~5; see #1074.
+// inngest-finish-budget: 8 boundaries — check-brake, check-cap, load-pending,
+// log-outcome-quiet (exclusive with the rest), enqueue, fire-events,
+// record-queued, log-cost. The per-item send loop (29
+// boundaries) moved to the onward workers, one run per ledger row.
 export const cloneWatchEnforcementExecute = inngest.createFunction(
   {
     id: "shopfront-clone-enforcement-execute",
-    name: "Clone-Watch: enforcement execute (auto blocklist send)",
+    name: "Clone-Watch: enforcement execute (enqueue onward blocklist reports)",
     retries: 2,
     concurrency: { limit: 1 },
-    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
-    // concurrency slots (~30–60s each under contention); the old budget
-    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
-    // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "16m" },
+    // Finite per ADR-0019; floor guarded by inngestFinishBudgets.test.ts.
+    // 7 boundaries × 30s + 60s slack = 4.5m; 6m leaves queue headroom.
+    timeouts: { finish: "6m" },
   },
   [
     { cron: "15 */3 * * *" },
@@ -96,10 +89,11 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
       if (!featureFlags.cloneEnforceAutoBlocklist) {
         return { skipped: true, reason: "FF_CLONE_ENFORCE_AUTO_BLOCKLIST disabled" };
       }
-      if (!process.env.RESEND_API_KEY) {
-        return { skipped: true, reason: "RESEND_API_KEY not set" };
+      const destinations = enabledUrlBlocklistDestinations(featureFlags);
+      if (destinations.length === 0) {
+        return { skipped: true, reason: "no_enabled_destinations" };
       }
-      const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
+      const braked = await step.run("check-brake", () => isFeatureBrakedOrUnknown(BRAKE));
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
       }
@@ -107,127 +101,95 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      // Shared daily cap — remaining budget across ALL takedown-submission paths.
-      const budget = await step.run("check-cap", async () => {
+      // Shared daily cap. One alert becomes one send PER destination, so the
+      // remaining budget buys floor(remaining / destinations) alerts.
+      const alertBudget = await step.run("check-cap", async () => {
         const { data } = await sb.rpc("count_todays_takedown_submissions");
         const used = typeof data === "number" ? data : 0;
-        return Math.max(0, dailyCap() - used);
+        const remaining = Math.max(0, dailyCap() - used);
+        return Math.floor(remaining / destinations.length);
       });
-      if (budget === 0) {
+      if (alertBudget === 0) {
         return { skipped: true, reason: "daily_submission_cap_reached" };
       }
 
-      const pending = await step.run("load-pending-send", async () => {
-        const { data } = await sb.rpc("list_enforcement_cases_pending_send", {
-          p_limit: Math.min(SEND_BATCH_LIMIT, budget),
+      const pending = await step.run("load-pending", async () => {
+        const { data, error } = await sb.rpc("list_clone_alerts_pending_onward", {
+          p_destinations: destinations.map((d) => d.destination),
+          p_limit: Math.min(SEND_BATCH_LIMIT, alertBudget),
         });
-        return (data as PendingSendRow[] | null) ?? [];
+        if (error) {
+          throw new Error(`list_clone_alerts_pending_onward: ${error.message}`);
+        }
+        return (data as PendingAlertRow[] | null) ?? [];
       });
 
       if (pending.length === 0) {
-        return { ok: true, sent: 0, reason: "nothing_pending" };
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("shopfront-clone-enforcement-execute", 0, {
+            reason: "nothing_pending",
+            candidates: 0,
+            enqueued: 0,
+          }),
+        );
+        return { ok: true, enqueued: 0, reason: "nothing_pending" };
       }
 
-      let sent = 0;
-      let errors = 0;
-
-      for (const row of pending) {
-        const intake = INTAKE[row.channel];
-        if (!intake) continue; // defensive — RPC only returns apwg/openphish
-
-        const advanceCase = async (status: string, externalRef: string | null) => {
-          const { error } = await sb.rpc("merge_takedown_case", {
-            p_alert_id: row.clone_alert_id,
-            p_channel: row.channel,
-            p_autonomy: "auto",
-            p_acts_on_parked: false,
-            p_status: status,
-            p_evidence: { intake },
-            p_external_ref: externalRef,
-            p_next_action_at: null,
-          });
-          if (error) throw new Error(`merge_takedown_case(${status}): ${error.message}`);
-        };
-
-        // CLAIM-then-SEND idempotency — this is an IRREVERSIBLE outbound email to
-        // a third-party blocklist, so a duplicate send is a real harm. The order
-        // matters: (1) re-read the case and SKIP if it isn't 'queued' (a prior
-        // partial run already claimed/sent it → replay-safe); (2) claim it
-        // (queued→submitted) BEFORE sending, so a later re-select can never
-        // re-send a report that already went out; (3) send; (4) on send failure,
-        // revert to 'queued' for a clean retry — nothing was delivered, so the
-        // retry is not a duplicate. This closes the "merge fails after send →
-        // re-sent every 3h forever" loop the review caught.
-        const outcome = await step.run(`send-${row.case_id}`, async () => {
-          const { data: caseRow } = await sb
-            .from("shopfront_takedown_attempts")
-            .select("case_status")
-            .eq("id", row.case_id)
-            .maybeSingle();
-          if (!caseRow || caseRow.case_status !== "queued") {
-            return { kind: "skipped" as const };
-          }
-
-          // Claim before sending. If this throws, nothing was sent yet — safe to retry.
-          await advanceCase("submitted", null);
-
-          const ref = `clone-${row.case_id}`;
-          let result: { id: string } | null;
-          try {
-            result = await sendOnward(intake, ref, reportText(row));
-          } catch (err) {
-            // Send failed AFTER claim → revert so it retries cleanly (no dup —
-            // nothing was delivered). Best-effort; if the revert itself fails the
-            // case stays 'submitted' (visible in the admin tab as external_ref-less).
-            try {
-              await advanceCase("queued", null);
-            } catch {
-              /* leave submitted; surfaced in admin tab for manual retry */
-            }
-            logger.warn("clone-watch enforcement execute: send failed", {
-              caseId: row.case_id,
-              channel: row.channel,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            return { kind: "error" as const };
-          }
-
-          // Record the provider message id as the durable "sent" marker.
-          await advanceCase("submitted", result?.id ?? null);
-          logEnforcementEvent("reported", {
-            alertId: row.clone_alert_id,
-            caseId: row.case_id,
-            domain: row.candidate_domain,
-            brand: row.target_brand_normalized,
-            channel: row.channel,
-            autonomy: "auto",
-            runId,
-            extra: { intake, provider_message_id: result?.id ?? null },
-          });
-          return { kind: "sent" as const };
-        });
-        if (outcome.kind === "sent") sent++;
-        else if (outcome.kind === "error") errors++;
-      }
-
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "clone_enforcement",
-          provider: "resend",
-          operation: "execute_batch",
-          units: sent,
-          unitCostUsd: 0,
-          metadata: { sent, errors, candidates: pending.length },
-        });
+      const fresh = await step.run("enqueue", () => {
+        const rows: UrlReportRequest[] = pending.flatMap((a) =>
+          destinations.map((d) => ({
+            source: "clone_alert" as const,
+            clone_alert_id: a.clone_alert_id,
+            destination: d.destination,
+            destination_key: d.destinationKey,
+            url: a.candidate_url,
+          })),
+        );
+        return enqueueUrlBlocklistReports(sb, rows);
       });
 
-      logger.info("clone-watch enforcement execute: complete", {
-        sent,
-        errors,
+      if (fresh.length > 0) {
+        await step.run("fire-events", async () => {
+          await inngest.send(onwardEventsFor(fresh));
+        });
+
+        // One `enforcement.queued` per enqueued row — the durable audit trail
+        // and what the shared daily cap counts. Inside a step so a replay does
+        // not double-count against the cap.
+        await step.run("record-queued", async () => {
+          const byId = new Map(pending.map((a) => [a.clone_alert_id, a]));
+          for (const row of fresh) {
+            const alert = row.clone_alert_id != null ? byId.get(row.clone_alert_id) : undefined;
+            logEnforcementEvent("queued", {
+              alertId: row.clone_alert_id ?? 0,
+              domain: alert?.candidate_domain ?? "",
+              brand: alert?.target_brand_normalized ?? null,
+              channel: row.destination,
+              autonomy: "auto",
+              runId,
+              extra: { onward_log_id: row.id, url_key: row.url_key },
+            });
+          }
+        });
+      }
+
+      await step.run("log-cost", () =>
+        recordLaneOutcome("shopfront-clone-enforcement-execute", fresh.length, {
+          enqueued: fresh.length,
+          candidates: pending.length,
+          destinations: destinations.map((d) => d.destination),
+          // Rows the dedup dropped: this alert's URL was already reported to
+          // that destination (a race with another producer since the read).
+          deduped: pending.length * destinations.length - fresh.length,
+        }),
+      );
+
+      logger.info("clone-watch enforcement execute: enqueued", {
+        enqueued: fresh.length,
         candidates: pending.length,
       });
 
-      return { ok: true, sent, errors, candidates: pending.length };
+      return { ok: true, enqueued: fresh.length, candidates: pending.length };
     },
   ),
 );

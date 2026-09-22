@@ -1,6 +1,7 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { APWG_INTAKE_EMAIL, OPENPHISH_INTAKE_EMAIL } from "@/lib/onward/destinations";
 
 // Shared onward-report submit core — the single source of truth for turning a
 // resolved (destination, destination_key) list into logged `onward_report_log`
@@ -10,8 +11,10 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 // than the bots forking a parallel reporter. The route keeps the HTTP concerns
 // (rate-limit, zod parse, status mapping); everything below is transport-free.
 
-/** Canonical onward destinations. `z.enum(ONWARD_DEST_VALUES)` in the route
- *  validates the wire shape against this same list (no drift). */
+/** Canonical USER-ROUTABLE onward destinations. `z.enum(ONWARD_DEST_VALUES)`
+ *  in the route validates the wire shape against this same list (no drift).
+ *  Deliberately excludes `netcraft` (a v318 ledger-only label with no
+ *  report.onward.netcraft worker) — see OnwardLedgerDestination. */
 export const ONWARD_DEST_VALUES = [
   "scamwatch",
   "reportcyber",
@@ -55,8 +58,8 @@ export const FIXED_DESTINATION_KEYS: Record<
   acma_email_spam: "report@submit.spam.acma.gov.au",
   idcare: "idcare.org",
   ask_arthur_feed: "askarthur.au",
-  openphish: "report@openphish.com",
-  apwg: "reportphishing@apwg.org",
+  openphish: OPENPHISH_INTAKE_EMAIL,
+  apwg: APWG_INTAKE_EMAIL,
 };
 
 export interface OnwardResultRow {

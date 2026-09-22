@@ -49,17 +49,42 @@ import { priorMonthStart } from "@/lib/clone-watch/month-window";
 
 const ONWARD_LOG_FETCH_LIMIT = 5000;
 
+/** One onward_report_log row. Since v318 a row reports EITHER a scam report or
+ *  a clone-watch lookalike (source='clone_alert'); both count as "reported". */
 interface OnwardLogRow {
-  scam_report_id: number;
+  scam_report_id: number | null;
+  clone_alert_id?: number | null;
   destination: string;
   status: string;
 }
 
 export interface BrandMetrics {
+  /** Distinct subjects reported — scam reports + clone alerts. */
   detected: number;
   reportedByDestination: Record<string, number>;
   reportsSent: number;
   scamReportIds: number[];
+  /** Clone alerts reported through the onward ledger (v318). */
+  cloneAlertIds: number[];
+}
+
+/**
+ * The brand string a clone-sourced onward row aggregates under. The known_brands
+ * name for the alert's inferred target domain when there is one — then
+ * matchKnownBrand's direct pass matches it exactly — else the alert's
+ * normalised brand (matched via the alias layer, like a scam report's
+ * free-text impersonated_brand).
+ */
+export function cloneBrandLabel(
+  alert: {
+    inferred_target_domain: string | null;
+    target_brand_normalized: string | null;
+  },
+  brandNameByDomain: Map<string, string>,
+): string | null {
+  const domain = alert.inferred_target_domain?.trim().toLowerCase();
+  const named = domain ? brandNameByDomain.get(domain) : undefined;
+  return named ?? alert.target_brand_normalized?.trim() ?? null;
 }
 
 interface KnownBrandContact {
@@ -83,19 +108,31 @@ export function deriveBrandKey(brand: string): string {
 /**
  * Aggregate SENT onward reports by impersonated brand. Only status='sent'
  * rows count as "reported" — we never claim a report we didn't actually make.
+ * Both ledger subjects count (v318): a scam report resolves its brand through
+ * `brandByReportId`, a clone alert through `brandByCloneAlertId`. A row whose
+ * subject has no resolved brand (including a clone row whose alert the FP purge
+ * removed) is not attributed to any brand.
  */
 export function aggregateOnwardByBrand(
   rows: OnwardLogRow[],
   brandByReportId: Map<number, string>,
+  brandByCloneAlertId: Map<number, string> = new Map(),
 ): Map<string, BrandMetrics> {
   const out = new Map<string, BrandMetrics>();
-  // Track distinct scam_report_ids per brand so `detected` isn't inflated by
-  // multiple destinations reporting the same scam.
-  const seenIds = new Map<string, Set<number>>();
+  // Track distinct subjects per brand so `detected` isn't inflated by multiple
+  // destinations reporting the same scam / lookalike.
+  const seenIds = new Map<string, Set<string>>();
 
   for (const row of rows) {
     if (row.status !== "sent") continue;
-    const brand = brandByReportId.get(row.scam_report_id);
+    const cloneId = row.clone_alert_id ?? null;
+    const reportId = row.scam_report_id;
+    const brand =
+      cloneId != null
+        ? brandByCloneAlertId.get(cloneId)
+        : reportId != null
+          ? brandByReportId.get(reportId)
+          : undefined;
     if (!brand) continue;
 
     let m = out.get(brand);
@@ -105,6 +142,7 @@ export function aggregateOnwardByBrand(
         reportedByDestination: {},
         reportsSent: 0,
         scamReportIds: [],
+        cloneAlertIds: [],
       };
       out.set(brand, m);
       seenIds.set(brand, new Set());
@@ -114,9 +152,11 @@ export function aggregateOnwardByBrand(
       (m.reportedByDestination[row.destination] ?? 0) + 1;
 
     const ids = seenIds.get(brand)!;
-    if (!ids.has(row.scam_report_id)) {
-      ids.add(row.scam_report_id);
-      m.scamReportIds.push(row.scam_report_id);
+    const subjectKey = cloneId != null ? `clone:${cloneId}` : `report:${reportId}`;
+    if (!ids.has(subjectKey)) {
+      ids.add(subjectKey);
+      if (cloneId != null) m.cloneAlertIds.push(cloneId);
+      else m.scamReportIds.push(reportId as number);
     }
   }
 
@@ -314,11 +354,14 @@ export const reportBrandStewardship = inngest.createFunction(
           (from, to) =>
             sb
               .from("onward_report_log")
-              .select("scam_report_id, destination, status")
+              // Both ledger subjects (v318): scam-report rows AND clone-watch
+              // enforcement rows. A clone row whose alert was purged has
+              // neither id and is excluded — there is no brand to credit.
+              .select("scam_report_id, clone_alert_id, destination, status")
               .eq("status", "sent")
               .gte("sent_at", period.startIso)
               .lt("sent_at", period.endIso)
-              .not("scam_report_id", "is", null)
+              .or("scam_report_id.not.is.null,clone_alert_id.not.is.null")
               .order("id", { ascending: true })
               .range(from, to) as unknown as PromiseLike<{
               data: OnwardLogRow[] | null;
@@ -351,7 +394,13 @@ export const reportBrandStewardship = inngest.createFunction(
       const brandByReportId = await step.run("resolve-brands", async () => {
         const sb = createServiceClient();
         if (!sb) return {} as Record<string, string>;
-        const ids = [...new Set(logRows.map((r) => r.scam_report_id))];
+        const ids = [
+          ...new Set(
+            logRows
+              .map((r) => r.scam_report_id)
+              .filter((id): id is number => id != null),
+          ),
+        ];
         const map: Record<string, string> = {};
         for (let i = 0; i < ids.length; i += 500) {
           const chunk = ids.slice(i, i + 500);
@@ -368,10 +417,66 @@ export const reportBrandStewardship = inngest.createFunction(
         return map;
       });
 
-      const brandMap = new Map<number, string>(
-        Object.entries(brandByReportId).map(([k, v]) => [Number(k), v]),
+      // Clone-sourced onward rows (v318) resolve to a brand via the alert's
+      // inferred target domain → known_brands.brand_name (cloneBrandLabel).
+      const brandByCloneId = await step.run("resolve-clone-brands", async () => {
+        const ids = [
+          ...new Set(
+            logRows
+              .map((r) => r.clone_alert_id)
+              .filter((id): id is number => id != null),
+          ),
+        ];
+        const map: Record<string, string> = {};
+        if (ids.length === 0) return map;
+        const sb = createServiceClient();
+        if (!sb) throw new Error("brand-stewardship: clone brand data unavailable");
+        const alerts: Array<{
+          id: number;
+          inferred_target_domain: string | null;
+          target_brand_normalized: string | null;
+        }> = [];
+        for (let i = 0; i < ids.length; i += 500) {
+          const { data, error } = await sb
+            .from("shopfront_clone_alerts")
+            .select("id, inferred_target_domain, target_brand_normalized")
+            .in("id", ids.slice(i, i + 500));
+          if (error) throw new Error(`clone brand resolution failed: ${error.message}`);
+          alerts.push(...((data ?? []) as typeof alerts));
+        }
+        const domains = [
+          ...new Set(
+            alerts
+              .map((a) => a.inferred_target_domain?.trim().toLowerCase())
+              .filter((d): d is string => !!d),
+          ),
+        ];
+        const nameByDomain = new Map<string, string>();
+        if (domains.length > 0) {
+          const { data, error } = await sb
+            .from("known_brands")
+            .select("brand_domain, brand_name")
+            .in("brand_domain", domains);
+          if (error) throw new Error(`clone brand names failed: ${error.message}`);
+          for (const b of (data ?? []) as Array<{ brand_domain: string; brand_name: string }>) {
+            const d = b.brand_domain.trim().toLowerCase();
+            if (!nameByDomain.has(d)) nameByDomain.set(d, b.brand_name);
+          }
+        }
+        for (const a of alerts) {
+          const label = cloneBrandLabel(a, nameByDomain);
+          if (label) map[String(a.id)] = label;
+        }
+        return map;
+      });
+
+      const toIdMap = (rec: Record<string, string>) =>
+        new Map<number, string>(Object.entries(rec).map(([k, v]) => [Number(k), v]));
+      const aggregated = aggregateOnwardByBrand(
+        logRows,
+        toIdMap(brandByReportId),
+        toIdMap(brandByCloneId),
       );
-      const aggregated = aggregateOnwardByBrand(logRows, brandMap);
 
       // Clone-watch lookalike detections for the period — the lookalike-domain +
       // hosting/registrar source. Keyed by the impersonated brand's domain.
@@ -648,6 +753,9 @@ export const reportBrandStewardship = inngest.createFunction(
             detected: e.onward?.detected ?? 0,
             reported_by_destination: e.onward?.reportedByDestination ?? {},
             reports_sent: e.onward?.reportsSent ?? 0,
+            // Evidence for clone-sourced sends (v318); scam-report evidence
+            // stays in evidence_scam_report_ids.
+            reported_clone_alert_ids: e.onward?.cloneAlertIds ?? [],
           };
           if (e.clones) {
             metrics.clones = {

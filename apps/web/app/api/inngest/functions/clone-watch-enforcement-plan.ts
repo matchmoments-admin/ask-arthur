@@ -1,4 +1,4 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import {
   CLONE_WATCH_WEAPONISED_EVENT,
@@ -8,10 +8,11 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import {
   selectChannels,
+  type ChannelPlan,
   type EnforcementAlert,
 } from "@/lib/clone-watch/enforcement/matrix";
 
@@ -23,14 +24,23 @@ import {
  * channel in shopfront_takedown_attempts — the audit-ready record SPF buyers pay
  * for. This step opens cases only; it performs NO outbound reporting. Every
  * domain-level send stays human-gated behind the /admin enforcement tab and the
- * per-channel flags — the itch.io false-takedown invariant. The reversible auto
- * channels (APWG/OpenPhish) are opened as 'queued'/'auto' and actioned by the
- * separate flag-gated execute step (PR 1.3).
+ * per-channel flags — the itch.io false-takedown invariant.
+ *
+ * Cases are opened for the HUMAN-GATED levers only (v318, ADR-0018 amendment
+ * 2026-09-23). The reversible auto channels (APWG/OpenPhish) open no case: the
+ * separate flag-gated execute step reports them straight onto the onward
+ * ledger (onward_report_log, source='clone_alert'), which is their record. An
+ * auto case here would sit 'queued' forever with nothing to advance it.
  *
  * Gated by FF_CLONE_ENFORCEMENT + feature_brakes.clone_enforcement. A$0.
  */
 
 const BRAKE = "clone_enforcement";
+
+/** The channel plans that open a case — every non-auto lever. */
+export function casePlans(plans: ChannelPlan[]): ChannelPlan[] {
+  return plans.filter((p) => p.autonomy !== "auto");
+}
 
 interface AlertRow {
   candidate_url: string;
@@ -57,7 +67,7 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
       if (!featureFlags.cloneEnforcement) {
         return { skipped: true, reason: "FF_CLONE_ENFORCEMENT disabled" };
       }
-      const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
+      const braked = await step.run("check-brake", () => isFeatureBrakedOrUnknown(BRAKE));
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
       }
@@ -79,11 +89,13 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
         return { skipped: true, reason: "alert_not_found", alertId: data.alertId };
       }
 
-      const plans = selectChannels({
-        candidateUrl: alert.candidate_url,
-        candidateDomain: alert.candidate_domain,
-        attribution: alert.attribution,
-      });
+      const plans = casePlans(
+        selectChannels({
+          candidateUrl: alert.candidate_url,
+          candidateDomain: alert.candidate_domain,
+          attribution: alert.attribution,
+        }),
+      );
 
       // Open (or merge) one case per channel. merge_takedown_case dedupes to the
       // single open case per (alert, channel), so a re-emitted weaponised event
@@ -117,7 +129,7 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
       });
 
       await step.run("log-cost", async () => {
-        logCost({
+        await logCostAsync({
           feature: "clone_enforcement",
           provider: "internal",
           operation: "plan_open_cases",
@@ -142,10 +154,9 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
         extra: {
           via: data.via,
           opened,
+          // Every case channel is human-gated since v318 (casePlans); the auto
+          // blocklist sends are on the onward ledger instead.
           channels: plans.map((p) => p.channel),
-          human_channels: plans
-            .filter((p) => p.autonomy !== "auto")
-            .map((p) => p.channel),
         },
       });
 

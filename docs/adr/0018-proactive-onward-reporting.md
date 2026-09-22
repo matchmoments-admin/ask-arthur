@@ -90,3 +90,65 @@ automated submissions, turn its destination flag OFF.
 - v166 — brand_stewardship_reports ledger
 - #371 — lawyer-vetted brand-outreach language pack (gates the stewardship email)
 - local-ultrareview 2026-05-29 — findings F6, F8, F9 captured above
+
+## Amendment 2026-09-23 — clone takedowns report through the onward ledger (v318)
+
+**Context.** Clone-watch enforcement kept a second reporting ledger.
+`shopfront-clone-enforcement-execute` redeclared the APWG/OpenPhish intake
+addresses (as did four other files), emailed them inline, and recorded the send
+only in `shopfront_takedown_attempts` + `cost_telemetry`. So the same URL could
+reach a blocklist twice — once from a HIGH_RISK scam report, once from clone
+enforcement — which is exactly pre-flip item 1 (F9) across ledgers;
+`/admin/onward-reports` never showed a clone send; and `report-brand-stewardship`
+counted only `onward_report_log`, leaving clone sends out of a brand's
+"reported" total. Prod on 2026-09-23: `onward_report_log` 0 rows,
+`shopfront_takedown_attempts` 0 rows, `FF_CLONE_ENFORCEMENT` off — the cheapest
+moment to converge.
+
+**Decision.** One ledger, two sources.
+
+- `onward_report_log` gains `source` (`scam_report` | `clone_alert`),
+  `clone_alert_id` (FK, ON DELETE SET NULL) and `url_key`. A CHECK ties each
+  source to its subject; it is keyed on `source`, not "one of the two ids",
+  because the v152 FP purge deletes clone alerts and the proof that we reported
+  a later-FP URL must survive (it is the evidence the reversal trigger needs).
+- **Per-URL dedup (closes F9 for the proactive paths):** unique
+  `(destination, destination_key, url_key)`, `url_key = onward_url_key(url)`
+  (host+path, lower-cased, no query). Both proactive producers enqueue through
+  `enqueue_onward_url_reports`, whose `ON CONFLICT DO NOTHING` absorbs both
+  unique indexes and returns only inserted rows. The canonicaliser is SQL-only,
+  and the clone worklist (`list_clone_alerts_pending_onward`) excludes by the
+  same predicate, so a URL already reported from a scam report cannot
+  re-present at the head of the clone worklist forever.
+- `shopfront-clone-enforcement-execute` becomes a **producer**: it enqueues
+  `source='clone_alert'` rows and fires `report.onward.<destination>`; the
+  existing `report-onward-openphish` / `-apwg` workers send, re-verifying
+  `lifecycle_state='weaponised'` at send time, stripping query/fragment (F8) and
+  honouring `ONWARD_CANARY_RECIPIENT`. A destination is used only when its worker
+  flag is on, so the reversal lever below ("turn its destination flag OFF") now
+  stops it for both sources.
+- Intake addresses live only in `apps/web/lib/onward/destinations.ts`
+  (guarded by `__tests__/onwardCloneLedger.test.ts`).
+- `netcraft` is added to `onward_destination` as a ledger-only label (no
+  worker, never user-routable). Making the Netcraft submit lane a producer is a
+  follow-up, sequenced after PR 3 of the clone-watch deepening plan.
+- `shopfront_takedown_attempts` is kept as the HUMAN-GATED case workflow
+  (GSB / SmartScreen deep-links, registrar / hosting abuse with four-eyes). Auto
+  channels no longer open cases there. The admin registrar/hosting send still
+  records its send in the case table — moving it onto the ledger is a follow-up.
+- The onward workers move from `rateLimit` to `throttle` (60/h per intake): with
+  two producers, a discarded over-limit event would strand a `queued` row.
+- The shared daily cap counts a new `enforcement.queued` event (execute records
+  one per enqueued row) alongside `enforcement.reported` (the human send).
+
+**Consequences.** Stewardship "reported" includes clone sends (brand resolved via
+the alert's target domain → `known_brands.brand_name`); the admin page shows a
+source column. Pre-flip items 3 (deliverability) and 4 (legal copy) are
+unchanged. Rows reported under a `scam_report` source use the report's PRIMARY
+(first) scammer URL as the dedup key; the email still lists every URL. User-click
+rows carry no `url_key` — a human decision is not deduped against the proactive
+paths.
+
+**Reversal.** Code: revert the PR (the workers accept pre-v318 events unchanged).
+Schema: v318 is additive except `DROP FUNCTION list_enforcement_cases_pending_send`
+(re-apply v205 to restore).
