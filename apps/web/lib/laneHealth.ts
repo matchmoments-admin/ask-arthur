@@ -194,17 +194,10 @@ export const ABSENCE_WATCHES: ReadonlyArray<{
     operation: "classify",
     expectEvery: 26 * H,
   },
-  // Jev shadow lane (v311): the tail of the same fn's `persist` step. Fail-soft
-  // by design, so silence here is the ONLY signal that the vendor, the key,
-  // or the persist path went dark — the fn keeps returning ok:true.
-  // Activated together with FF_CLONE_WATCH_JEV_SHADOW (never before it, or
-  // this pages daily on a lane that is off).
-  {
-    lane: "shopfront-clone-haiku-preclassify:jev-shadow",
-    feature: "shopfront_clone_preclassify_jev",
-    operation: "classify",
-    expectEvery: 26 * H,
-  },
+  // ADR-0026: the Jev shadow tail has no watch of its own any more — in
+  // primary mode Jev writes the pre-classifier's own `classify` rows above
+  // (provider `typesafe`), so that watch covers it; in rollback mode the
+  // shadow's silence is accepted as unattended (documented).
 ];
 
 /** The `feature` values the digest must fetch to evaluate everything above. */

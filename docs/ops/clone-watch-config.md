@@ -1282,9 +1282,45 @@ dark: the route is live behind `FF_BRAND_EXPOSURE` (ON in prod) but returns
 4. No new webhook events needed — the existing `/api/stripe/webhook` endpoint +
    `STRIPE_WEBHOOK_SECRET` already receive `customer.subscription.*`.
 
-## 8c. Jev shadow lane (v311, 2026-09-21)
+## 8c. Jev pre-classifier — primary since 2026-09-22 (ADR-0026; shadow lane v311)
 
-**What.** A second classifier run beside the Haiku pre-classifier on the
+**Now (ADR-0026).** TypeSafe Jev IS the pre-classifier. With
+`FF_CLONE_WATCH_JEV_PRIMARY=true` the fn runs one `classify-jev` step
+(`lib/clone-watch/jev-classify-one.ts::classifyPrimaryWithJev`): one vendor
+call → the v157 `clone_watch_classifications` row every gate reads
+(`confidence` = **P(clone)**, `model_id` = `jev-1.13.0`, `reason` synthesized)
+→ the v311 raw-probability row → one cost row `shopfront_clone_preclassify` /
+`typesafe`. No Claude call. Vendor or gate-row failure logs
+`shopfront_clone_preclassify_error` and THROWS (Inngest retries; the daily
+selector re-fans tomorrow) — the Haiku path's recovery semantics, unchanged.
+
+**Thresholds — one home:** `apps/web/lib/clone-watch/preclassify-thresholds.ts`
+(`IS_CLONE_MIN_P` 0.4 · `WORKLIST_MIN_CONFIDENCE` 0.4 — urlscan-submit, dormant
+sweep, netcraft-auto · `AUTO_CONFIRM_MIN_CONFIDENCE` 0.8 — auto-triage ·
+`RISK_INDICATOR_MIN_P` 0.5). `preclassifyThresholds.test.ts` fails if a
+consumer grows a local literal. The evidence for each number is in the module
+header. **Retune** = edit the module, re-run the gate simulation below, PR.
+
+**Rollback:** set `FF_CLONE_WATCH_JEV_PRIMARY=false` on Vercel prod (PR with
+`[build]`). The Haiku path + Jev shadow tail resume exactly as before; rows Jev
+already wrote keep `model_id='jev-…'`; the gates at 0.4 / 0.8 then read Haiku's
+confidence (≤ 5 historical Haiku rows sit in [0.4, 0.7)). The shadow tail has no
+absence watch of its own in rollback mode (accepted, unattended).
+
+**Gate simulation** (re-run before any retune):
+
+```sql
+with shared as (
+  select (a.weaponised_at is not null) w, (a.triage_status='fp') fp, j.is_clone_p p
+  from shopfront_clone_alerts a join clone_watch_jev_classifications j on j.alert_id=a.id)
+select t as min_p, count(*) filter (where p>=t) n,
+       count(*) filter (where p>=t and w) weaponised, count(*) filter (where p>=t and fp) fp
+from shared, unnest(array[0.3,0.4,0.5,0.6,0.7,0.8]) t group by t order by t;
+```
+
+---
+
+**How we got here — the shadow lane (v311, 2026-09-21).** A second classifier run beside the Haiku pre-classifier on the
 identical input, persisted, and **read by nothing in the product path**. It
 exists to be measured. Vocabulary: a _shadow lane_ (`CONTEXT.md`).
 

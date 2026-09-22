@@ -277,14 +277,15 @@ This isn't a configuration step but a recurring operational task. Per
 
 ---
 
-## 4. Jev shadow lane — DONE 2026-09-22 (v311)
+## 4. Jev shadow lane → swap — DONE 2026-09-22 (v311–v313, ADR-0026)
 
 Key obtained from console.typesafe.ai (the jevai.org community key is a
 different product and 401s), backfill run (3,501 rows ≈ $0.17), calibration
 curve posted on PR #1172, `TYPESAFE_API_KEY` + `FF_CLONE_WATCH_JEV_SHADOW`
 set on Vercel prod, absence watch shipped with the live step. Runbook +
-decision rule: `docs/ops/clone-watch-config.md` § 8c. Next decision — the
-classifier swap (Jev primary, gates retuned) — is its own PR + ADR.
+decision rule: `docs/ops/clone-watch-config.md` § 8c. The swap shipped the same day: `FF_CLONE_WATCH_JEV_PRIMARY=true` on prod,
+gates at 0.4 / 0.8 (`lib/clone-watch/preclassify-thresholds.ts`), ADR-0026.
+Rollback = flag OFF.
 
 ---
 

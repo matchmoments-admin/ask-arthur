@@ -16,7 +16,7 @@
  * just batched. Rows are stamped `source = 'backfill'` so cohorts never blur.
  *
  * ONE write path: each row goes through `classifyOneWithJev`
- * (lib/clone-watch/jev-shadow-one.ts) — the same function the live step
+ * (lib/clone-watch/jev-classify-one.ts) — the same function the live step
  * calls — so rubric, RPC args and cost rows cannot drift between the two.
  *
  *   pnpm --filter @askarthur/web exec tsx scripts/backfill-jev-classifications.ts [--apply] [--limit N]
@@ -43,7 +43,7 @@ import {
 import {
   classifyOneWithJev,
   type JevShadowOutcome,
-} from "../lib/clone-watch/jev-shadow-one";
+} from "../lib/clone-watch/jev-classify-one";
 
 const PAGE_SIZE = 200;
 const CONCURRENCY = 5;

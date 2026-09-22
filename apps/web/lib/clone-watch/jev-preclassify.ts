@@ -33,6 +33,7 @@ import {
   type CloneTactic,
   type RiskIndicator,
 } from "./preclassify-vocabulary";
+import { IS_CLONE_MIN_P, RISK_INDICATOR_MIN_P } from "./preclassify-thresholds";
 
 export const JEV_PROMPT_VERSION = "jev-v1";
 
@@ -220,5 +221,75 @@ export function toJevRpcArgs(args: {
     p_source: args.source,
     p_input_tokens: args.inputTokens,
     p_latency_ms: args.latencyMs,
+  };
+}
+
+/**
+ * The v157 `clone_watch_classifications` row shape, produced from Jev's
+ * answers (ADR-0026). Every gate reads this table, so the swap is "same
+ * table, same shape, new producer": `confidence` now carries P(clone), the
+ * indicator set is the nouls at or above RISK_INDICATOR_MIN_P in vocabulary
+ * order, and `reason` (NOT NULL, read only by the admin pending queue) is a
+ * deterministic summary of the probabilities.
+ */
+export interface JevClassificationRow {
+  is_clone: boolean;
+  confidence: number;
+  clone_tactic: CloneTactic;
+  attack_intent: AttackIntent;
+  risk_indicators: RiskIndicator[];
+  reason: string;
+}
+
+export function toClassificationRow(
+  row: JevPreclassifyRow,
+): JevClassificationRow {
+  const risk_indicators = RISK_INDICATOR_VALUES.filter(
+    (ri) => row.risk_indicator_probs[ri] >= RISK_INDICATOR_MIN_P,
+  );
+  const tacticP = row.clone_tactic_probs[row.clone_tactic];
+  const intentP = row.attack_intent_probs[row.attack_intent];
+  const reason =
+    `jev p=${row.is_clone_p.toFixed(2)} · ${row.clone_tactic} (${fmtP(tacticP)}) · ` +
+    `${row.attack_intent} (${fmtP(intentP)})` +
+    (risk_indicators.length > 0 ? ` · ${risk_indicators.join(", ")}` : "");
+  return {
+    is_clone: row.is_clone_p >= IS_CLONE_MIN_P,
+    confidence: row.is_clone_p,
+    clone_tactic: row.clone_tactic,
+    attack_intent: row.attack_intent,
+    risk_indicators,
+    reason,
+  };
+}
+
+function fmtP(p: number | undefined): string {
+  return p === undefined ? "?" : p.toFixed(2);
+}
+
+/** RPC argument object for `record_clone_watch_classification` (v157) from a Jev result. */
+export function toClassificationRpcArgs(args: {
+  alertId: number;
+  brand: string;
+  candidateDomain: string;
+  classification: JevClassificationRow;
+  modelId: string;
+  inputTokens: number;
+}): Record<string, unknown> {
+  const c = args.classification;
+  return {
+    p_alert_id: args.alertId,
+    p_brand: args.brand,
+    p_candidate_domain: args.candidateDomain,
+    p_is_clone: c.is_clone,
+    p_confidence: c.confidence,
+    p_clone_tactic: c.clone_tactic,
+    p_attack_intent: c.attack_intent,
+    p_risk_indicators: c.risk_indicators,
+    p_reason: c.reason,
+    p_model_id: args.modelId,
+    p_prompt_version: JEV_PROMPT_VERSION,
+    p_input_tokens: args.inputTokens,
+    p_output_tokens: 0,
   };
 }
