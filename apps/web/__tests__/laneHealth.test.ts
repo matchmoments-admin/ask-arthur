@@ -119,6 +119,12 @@ function healthyRows(): LaneCostRow[] {
       total_chunks: 1,
       failed_chunks: 0,
     }),
+    outcomeRow("shopfront-clone-auto-triage", 20, 3, {
+      parked: 2,
+      eligible: 3,
+      confirmed: 1,
+      offline: 2,
+    }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
     rawRow("shopfront_clone_preclassify", "classify", 5, { is_clone: true }),
   ];
@@ -291,6 +297,51 @@ describe("classifyLaneHealth", () => {
         kind: "silent_zero",
       }),
     ]);
+  });
+
+  it("auto-triage pages when every eligible row is neither confirmed nor offline (a mis-set confirm threshold)", () => {
+    const rows = without("run");
+    for (const hoursAgo of [20, 44]) {
+      rows.push(
+        outcomeRow("shopfront-clone-auto-triage", hoursAgo, 5, {
+          parked: 1,
+          eligible: 5,
+          confirmed: 0,
+          offline: 0,
+        }),
+      );
+    }
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-auto-triage",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
+  it("auto-triage is quiet when nothing was eligible (reason set), and when liveness explained the misses", () => {
+    const quiet = without("run");
+    quiet.push(
+      outcomeRow("shopfront-clone-auto-triage", 20, 0, {
+        reason: "no_eligible",
+        parked: 0,
+        eligible: 0,
+        confirmed: 0,
+        offline: 0,
+      }),
+    );
+    expect(classifyLaneHealth(quiet, { now: NOW })).toEqual([]);
+
+    const allOffline = without("run");
+    allOffline.push(
+      outcomeRow("shopfront-clone-auto-triage", 20, 4, {
+        parked: 0,
+        eligible: 4,
+        confirmed: 0,
+        offline: 4,
+      }),
+    );
+    expect(classifyLaneHealth(allOffline, { now: NOW })).toEqual([]);
   });
 
   it("the event-driven feed-platform lane is never 'absent', only silent_zero", () => {
