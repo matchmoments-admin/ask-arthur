@@ -13,7 +13,11 @@ const mocks = vi.hoisted(() => ({
   log: vi.fn(),
   callClaude: vi.fn(),
   askJev: vi.fn(),
-  flags: { shopfrontClonePreclassify: true, cloneWatchJevShadow: true },
+  flags: {
+    shopfrontClonePreclassify: true,
+    cloneWatchJevShadow: true,
+    cloneWatchJevPrimary: false,
+  },
 }));
 
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({
@@ -116,6 +120,7 @@ beforeEach(() => {
   steps.length = 0;
   mocks.flags.shopfrontClonePreclassify = true;
   mocks.flags.cloneWatchJevShadow = true;
+  mocks.flags.cloneWatchJevPrimary = false;
   // No brake row → not braked.
   mocks.from.mockReturnValue(query({ data: null, error: null }));
   mocks.rpc.mockResolvedValue({ data: null, error: null });
@@ -245,5 +250,75 @@ describe("jev-shadow step", () => {
       }),
     });
     expect(costRows("shopfront_clone_preclassify_jev")).toHaveLength(0);
+  });
+});
+
+describe("primary mode (ADR-0026, FF_CLONE_WATCH_JEV_PRIMARY)", () => {
+  it("ON: one `classify-jev` step, NO Claude call, both sibling rows, typesafe cost under the pre-classifier feature", async () => {
+    mocks.flags.cloneWatchJevPrimary = true;
+
+    const out = (await invoke()) as {
+      ok: boolean;
+      jev: string;
+      is_clone: boolean;
+      confidence: number;
+    };
+
+    expect(out.ok).toBe(true);
+    expect(out.jev).toBe("primary");
+    expect(out.is_clone).toBe(true);
+    expect(out.confidence).toBe(0.93);
+    expect(steps).toEqual(["classify-jev"]);
+    expect(mocks.callClaude).not.toHaveBeenCalled();
+    expect(mocks.askJev).toHaveBeenCalledTimes(1);
+    expect(rpcCalls("record_clone_watch_classification")).toHaveLength(1);
+    expect(rpcCalls("record_clone_watch_classification")[0]?.[1]).toMatchObject(
+      {
+        p_model_id: "jev-1.13.0",
+        p_confidence: 0.93,
+      },
+    );
+    expect(rpcCalls("record_clone_watch_jev_classification")).toHaveLength(1);
+    const cost = costRows("shopfront_clone_preclassify");
+    expect(cost).toHaveLength(1);
+    expect(cost[0]).toMatchObject({
+      provider: "typesafe",
+      operation: "classify",
+    });
+    expect(costRows("shopfront_clone_preclassify_jev")).toHaveLength(0);
+  });
+
+  it("ON + brake engaged: skips before any vendor call", async () => {
+    mocks.flags.cloneWatchJevPrimary = true;
+    mocks.from.mockReturnValue(
+      query({
+        data: { paused_until: new Date(Date.now() + 3_600_000).toISOString() },
+        error: null,
+      }),
+    );
+
+    const out = (await invoke()) as { skipped: boolean; reason: string };
+
+    expect(out).toEqual({ skipped: true, reason: "cost_brake_engaged" });
+    expect(mocks.askJev).not.toHaveBeenCalled();
+    expect(mocks.callClaude).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("ON + vendor failure: the fn THROWS (Inngest retries), Claude is still never called", async () => {
+    mocks.flags.cloneWatchJevPrimary = true;
+    mocks.askJev.mockResolvedValue({
+      ok: false,
+      reason: "http_error",
+      status: 529,
+      elapsedMs: 100,
+    });
+
+    await expect(invoke()).rejects.toThrow(/jev-primary/);
+    expect(mocks.callClaude).not.toHaveBeenCalled();
+    expect(costRows("shopfront_clone_preclassify_error")[0]).toMatchObject({
+      provider: "typesafe",
+      metadata: expect.objectContaining({ reason: "http_error", status: 529 }),
+    });
   });
 });

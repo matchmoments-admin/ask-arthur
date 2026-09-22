@@ -23,8 +23,13 @@ vi.mock("@/lib/cost-telemetry", async (importOriginal) => ({
 import {
   JEV_COST_FEATURE,
   JEV_ERROR_FEATURE,
+  JevPrimaryError,
+  PRECLASSIFY_COST_FEATURE,
+  PRECLASSIFY_ERROR_FEATURE,
   classifyOneWithJev,
-} from "@/lib/clone-watch/jev-shadow-one";
+  classifyPrimaryWithJev,
+  isPreclassifyBraked,
+} from "@/lib/clone-watch/jev-classify-one";
 import { riskQuestionId } from "@/lib/clone-watch/jev-preclassify";
 import { RISK_INDICATOR_VALUES } from "@/lib/clone-watch/preclassify-vocabulary";
 
@@ -180,5 +185,141 @@ describe("classifyOneWithJev", () => {
     expect(costRows(JEV_ERROR_FEATURE)[0]?.metadata).toMatchObject({
       reason: "persist_failed",
     });
+  });
+});
+
+describe("classifyPrimaryWithJev (ADR-0026 — Jev IS the pre-classifier)", () => {
+  const runPrimary = () =>
+    classifyPrimaryWithJev({
+      sb,
+      alertId: 42,
+      input: INPUT,
+      requestId: "p:42",
+    });
+
+  it("success: writes the v157 gate row FIRST, then the v311 raw row, then one cost row under the pre-classifier's own feature", async () => {
+    const out = await runPrimary();
+
+    expect(out).toMatchObject({
+      is_clone: true,
+      confidence: 0.93,
+      clone_tactic: "brandjack",
+      attack_intent: "credential_phishing",
+      model_id: "jev-1.13.0",
+      input_tokens: 150,
+      latency_ms: 180,
+    });
+    const names = mocks.rpc.mock.calls.map(([n]) => n as string);
+    expect(names).toEqual([
+      "record_clone_watch_classification",
+      "record_clone_watch_jev_classification",
+    ]);
+    expect(mocks.rpc.mock.calls[0]?.[1]).toMatchObject({
+      p_alert_id: 42,
+      p_is_clone: true,
+      p_confidence: 0.93,
+      p_model_id: "jev-1.13.0",
+      p_prompt_version: "jev-v1",
+      p_reason: expect.stringContaining("jev p=0.93"),
+    });
+    expect(mocks.rpc.mock.calls[1]?.[1]).toMatchObject({
+      p_alert_id: 42,
+      p_source: "live",
+    });
+
+    const rows = costRows(PRECLASSIFY_COST_FEATURE);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      provider: "typesafe",
+      operation: "classify",
+      units: 150,
+    });
+    expect(costRows(JEV_COST_FEATURE)).toHaveLength(0);
+    expect(costRows(PRECLASSIFY_ERROR_FEATURE)).toHaveLength(0);
+  });
+
+  it("vendor failure: logs the pre-classifier _error row (typesafe) and THROWS so Inngest retries", async () => {
+    mocks.askJev.mockResolvedValue({
+      ok: false,
+      reason: "timeout",
+      elapsedMs: 8000,
+    });
+
+    await expect(runPrimary()).rejects.toBeInstanceOf(JevPrimaryError);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    const err = costRows(PRECLASSIFY_ERROR_FEATURE);
+    expect(err).toHaveLength(1);
+    expect(err[0]).toMatchObject({
+      provider: "typesafe",
+      operation: "classify_error",
+      units: 0,
+      metadata: expect.objectContaining({ alert_id: 42, reason: "timeout" }),
+    });
+    expect(costRows(PRECLASSIFY_COST_FEATURE)).toHaveLength(0);
+  });
+
+  it("gate-row persist failure throws (the row every gate reads is the one that matters)", async () => {
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === "record_clone_watch_classification"
+        ? { data: null, error: { message: "boom" } }
+        : { data: null, error: null },
+    );
+
+    await expect(runPrimary()).rejects.toMatchObject({
+      reason: "persist_failed",
+    });
+    expect(mocks.rpc.mock.calls.map(([n]) => n)).toEqual([
+      "record_clone_watch_classification",
+    ]);
+    expect(costRows(PRECLASSIFY_COST_FEATURE)).toHaveLength(0);
+  });
+
+  it("raw-row persist failure is a warn, not a retry: gate row + cost row still land", async () => {
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === "record_clone_watch_jev_classification"
+        ? { data: null, error: { message: "boom" } }
+        : { data: null, error: null },
+    );
+
+    await expect(runPrimary()).resolves.toMatchObject({ is_clone: true });
+    expect(costRows(PRECLASSIFY_COST_FEATURE)).toHaveLength(1);
+    expect(costRows(PRECLASSIFY_ERROR_FEATURE)).toHaveLength(0);
+  });
+});
+
+describe("isPreclassifyBraked", () => {
+  const client = (result: { data: unknown; error: unknown }) => {
+    const chain: Record<string, unknown> = {
+      then: (resolve: (r: unknown) => unknown) =>
+        Promise.resolve(result).then(resolve),
+    };
+    for (const m of ["select", "eq", "maybeSingle"]) chain[m] = () => chain;
+    return { from: () => chain } as unknown as Parameters<
+      typeof isPreclassifyBraked
+    >[0];
+  };
+
+  it("is engaged when paused_until is in the future, clear when absent or past", async () => {
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    const past = new Date(Date.now() - 3_600_000).toISOString();
+    await expect(
+      isPreclassifyBraked(
+        client({ data: { paused_until: future }, error: null }),
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      isPreclassifyBraked(
+        client({ data: { paused_until: past }, error: null }),
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      isPreclassifyBraked(client({ data: null, error: null })),
+    ).resolves.toBe(false);
+  });
+
+  it("an unreadable brake counts as engaged (the paid call is what it protects)", async () => {
+    await expect(
+      isPreclassifyBraked(client({ data: null, error: { message: "db" } })),
+    ).resolves.toBe(true);
   });
 });

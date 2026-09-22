@@ -9,6 +9,7 @@ import {
   submitCloneCandidate,
   type CloneCandidate,
 } from "@/lib/clone-watch/urlscan-submit-one";
+import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 
 /**
  * Clone-Watch urlscan — Stage 1 of 2: SUBMIT.
@@ -20,7 +21,8 @@ import {
  * fire-and-store the UUID); `clone-watch-urlscan-retrieve` fetches the result
  * hours later when it's actually ready.
  *
- * Gating: only candidates the Haiku preclassifier judged a likely clone
+ * Gating: only candidates the pre-classifier (Jev since ADR-0026; Haiku
+ * before) judged a likely clone
  * (is_clone AND confidence >= threshold) — see list_clone_alerts_pending_
  * urlscan_submit. Most low-severity lexical matches are skipped.
  *
@@ -48,7 +50,9 @@ import {
  */
 
 const SUBMIT_BATCH_LIMIT = 75;
-const MIN_CONFIDENCE = 0.7;
+// ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
+// with its evidence in lib/clone-watch/preclassify-thresholds.ts.
+const MIN_CONFIDENCE = WORKLIST_MIN_CONFIDENCE;
 const MAX_FAILURE_STREAK = 3;
 // Rows that age past the worklist's 90-day horizon while still unscanned are
 // stamped `dormant` rather than silently vanishing (v285). Bounded per run.

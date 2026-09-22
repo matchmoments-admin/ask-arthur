@@ -11,7 +11,11 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCostAsync } from "@/lib/cost-telemetry";
 import { buildJevState } from "@/lib/clone-watch/jev-preclassify";
-import { classifyOneWithJev } from "@/lib/clone-watch/jev-shadow-one";
+import {
+  classifyOneWithJev,
+  classifyPrimaryWithJev,
+  isPreclassifyBraked,
+} from "@/lib/clone-watch/jev-classify-one";
 import {
   ATTACK_INTENT_VALUES,
   CLONE_TACTIC_VALUES,
@@ -52,8 +56,14 @@ import {
  *
  * Plan: docs/plans/clone-watch-outreach.md §15 Phase E follow-up.
  *
+ * ADR-0026 (2026-09-22): when FF_CLONE_WATCH_JEV_PRIMARY is ON the fn is
+ * ONE step, `classify-jev` — Jev produces the clone_watch_classifications
+ * row every gate reads (`confidence` = P(clone), thresholds in
+ * lib/clone-watch/preclassify-thresholds.ts). The Haiku path below is the
+ * rollback (flag OFF), unchanged.
+ *
  * Jev SHADOW LANE (v311, 2026-09-21). The tail of the `persist` step, when
- * FF_CLONE_WATCH_JEV_SHADOW is ON (body in lib/clone-watch/jev-shadow-one.ts,
+ * FF_CLONE_WATCH_JEV_SHADOW is ON (body in lib/clone-watch/jev-classify-one.ts,
  * shared with the backfill script): the same three input
  * fields go to TypeSafe Jev (a decision-only model returning calibrated
  * probabilities) and land in `clone_watch_jev_classifications`, read by
@@ -182,6 +192,42 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // so "identical input" is structural, not a claim (v311).
       const userMessage = JSON.stringify(buildJevState(data));
 
+      // ADR-0026 (2026-09-22): Jev IS the pre-classifier. One step, one
+      // vendor call, both sibling rows, one cost row — see
+      // lib/clone-watch/jev-classify-one.ts. Not fail-soft: a vendor or
+      // persist failure logs the `_error` row and throws, so Inngest retries
+      // and the daily selector re-fans tomorrow, exactly as the Haiku path
+      // below always behaved. Flip FF_CLONE_WATCH_JEV_PRIMARY off to roll
+      // back to Haiku (+ the Jev shadow tail) with no other change.
+      if (featureFlags.cloneWatchJevPrimary) {
+        const out = await step.run("classify-jev", async () => {
+          if (await isPreclassifyBraked(sb)) return { braked: true as const };
+          return classifyPrimaryWithJev({
+            sb,
+            alertId: data.alertId,
+            input: data,
+            requestId: `clone-watch-preclassify:${data.alertId}`,
+          });
+        });
+        if ("braked" in out) {
+          return { skipped: true, reason: "cost_brake_engaged" };
+        }
+        logger.info("clone-watch preclassify: done (jev primary)", {
+          alertId: data.alertId,
+          brand: data.brand,
+          ...out,
+        });
+        return {
+          ok: true,
+          alertId: data.alertId,
+          is_clone: out.is_clone,
+          confidence: out.confidence,
+          clone_tactic: out.clone_tactic,
+          attack_intent: out.attack_intent,
+          jev: "primary" as const,
+        };
+      }
+
       // Call Haiku with tool-use forced JSON output (matches the pattern
       // proven on Reddit Intel). Cache the system prompt (default) so
       // repeat calls within the cache TTL hit at ~10x lower cost.
@@ -202,23 +248,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // fire-and-forget): a cancelled run kills deferred promises, which is
       // exactly when the error row matters most.
       const callOutcome = await step.run("classify-haiku", async () => {
-        const { data: brakeRow, error: brakeError } = await sb
-          .from("feature_brakes")
-          .select("paused_until")
-          .eq("feature", "shopfront_clone_outreach")
-          .maybeSingle();
-        if (brakeError) {
-          logger.warn("clone-watch preclassify: brake lookup failed", {
-            error: brakeError.message,
-          });
-          return { braked: true as const }; // conservative
-        }
-        if (
-          brakeRow?.paused_until &&
-          new Date(brakeRow.paused_until).getTime() > Date.now()
-        ) {
-          return { braked: true as const };
-        }
+        if (await isPreclassifyBraked(sb)) return { braked: true as const };
 
         try {
           const call = await callClaudeJson({

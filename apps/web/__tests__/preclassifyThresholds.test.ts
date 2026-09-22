@@ -1,0 +1,44 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import {
+  AUTO_CONFIRM_MIN_CONFIDENCE,
+  IS_CLONE_MIN_P,
+  RISK_INDICATOR_MIN_P,
+  WORKLIST_MIN_CONFIDENCE,
+} from "@/lib/clone-watch/preclassify-thresholds";
+
+// ADR-0026: every number a gate compares `confidence` against lives in ONE
+// module. Before this, the producer and four consumers held their constants
+// in five files with nothing comparing them (memory: mutually unsatisfiable
+// constants). This guard fails if a consumer grows a local literal again.
+
+const FN_DIR = join(process.cwd(), "app/api/inngest/functions");
+const CONSUMERS = [
+  "clone-watch-urlscan-submit.ts",
+  "clone-watch-netcraft-auto.ts",
+  "clone-watch-auto-triage.ts",
+];
+
+describe("preclassify thresholds", () => {
+  it("are ordered: is_clone ≤ worklist < auto-confirm ≤ 1, indicator cut in (0, 1]", () => {
+    expect(IS_CLONE_MIN_P).toBeGreaterThan(0);
+    expect(IS_CLONE_MIN_P).toBeLessThanOrEqual(WORKLIST_MIN_CONFIDENCE);
+    expect(WORKLIST_MIN_CONFIDENCE).toBeLessThan(AUTO_CONFIRM_MIN_CONFIDENCE);
+    expect(AUTO_CONFIRM_MIN_CONFIDENCE).toBeLessThanOrEqual(1);
+    expect(RISK_INDICATOR_MIN_P).toBeGreaterThan(0);
+    expect(RISK_INDICATOR_MIN_P).toBeLessThanOrEqual(1);
+  });
+
+  for (const file of CONSUMERS) {
+    it(`${file} imports its threshold and carries no local confidence literal`, () => {
+      const src = readFileSync(join(FN_DIR, file), "utf8");
+      expect(src).toMatch(/from "@\/lib\/clone-watch\/preclassify-thresholds"/);
+      // A literal like `const MIN_CONFIDENCE = 0.7;` is the regression.
+      expect(src).not.toMatch(/const (MIN|STRICT)_CONFIDENCE\s*=\s*0?\.\d/);
+      expect(src).not.toMatch(/p_min_confidence:\s*0?\.\d/);
+      expect(src).not.toMatch(/\.gte\("confidence",\s*0?\.\d/);
+    });
+  }
+});

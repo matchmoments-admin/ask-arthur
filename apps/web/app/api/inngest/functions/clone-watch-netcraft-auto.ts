@@ -8,6 +8,7 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
+import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 
 /**
  * Clone-Watch — Netcraft AUTO-report producer (PR3).
@@ -15,7 +16,8 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  * Today a clone only reaches Netcraft when a human manually triages it (the
  * admin triage route emits CLONE_WATCH_TRIAGED_EVENT → the per-candidate
  * submit-netcraft worker). That leaves the high-confidence branded tail
- * unreported. This cron sweeps clones the Haiku preclassifier judged a likely
+ * unreported. This cron sweeps clones the pre-classifier (Jev since
+ * ADR-0026; Haiku before) judged a likely
  * clone (is_clone AND confidence >= threshold) that target a real brand,
  * aren't FP-denylisted, and haven't been submitted.
  *
@@ -76,12 +78,16 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  * quiet day and does not by itself indicate a starved lane.
  */
 
-const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
+const NETCRAFT_REPORT_ENDPOINT =
+  "https://report.netcraft.com/api/v3/report/urls";
 // Validation-only endpoint: checks the payload, creates no report, sends no
 // email. Used by test mode so we never abuse the live intake while validating.
-const NETCRAFT_TEST_ENDPOINT = "https://report.netcraft.com/api/v3/test/report/urls";
+const NETCRAFT_TEST_ENDPOINT =
+  "https://report.netcraft.com/api/v3/test/report/urls";
 const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
-const MIN_CONFIDENCE = 0.7;
+// ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
+// with its evidence in lib/clone-watch/preclassify-thresholds.ts.
+const MIN_CONFIDENCE = WORKLIST_MIN_CONFIDENCE;
 
 // ── Weaponised RE-submission lane (v250) ────────────────────────────────────
 const RESUBMIT_BRAKE = "clone_netcraft_resubmit";
@@ -99,7 +105,10 @@ const RESUBMIT_DEAD_RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
 const RESUBMIT_DEAD_MAX_ROUNDS = 5;
 
 function resubmitCap(): number {
-  const raw = Number.parseInt(process.env.NETCRAFT_RESUBMIT_DAILY_CAP ?? "", 10);
+  const raw = Number.parseInt(
+    process.env.NETCRAFT_RESUBMIT_DAILY_CAP ?? "",
+    10,
+  );
   return Number.isFinite(raw) && raw > 0 ? raw : RESUBMIT_DEFAULT_CAP;
 }
 
@@ -280,7 +289,8 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       // Test mode validates the payload against Netcraft's test endpoint only —
       // no report, no email, no persistence. Bypasses the FF gate so we can
       // prove the path works while the feature is still dark.
-      const isTest = (event?.data as { test?: unknown } | undefined)?.test === true;
+      const isTest =
+        (event?.data as { test?: unknown } | undefined)?.test === true;
 
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
@@ -301,137 +311,166 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       return { ...autoResult, resubmit: resubmitResult };
 
       async function runAutoLane() {
-      if (!isTest && !featureFlags.shopfrontCloneNetcraftAuto) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_NETCRAFT_AUTO disabled" };
-      }
-      if (
-        !isTest &&
-        (!featureFlags.shopfrontCloneSubmitNetcraft ||
-          !featureFlags.shopfrontCloneOutreach)
-      ) {
-        return { skipped: true, reason: "netcraft_submit_or_outreach_disabled" };
-      }
-
-      if (!sb) return { skipped: true, reason: "supabase_unavailable" };
-
-      const candidates = await step.run("load-candidates", async () => {
-        const { data, error } = await sb.rpc(
-          "list_clone_alerts_pending_netcraft_auto",
-          { p_min_confidence: MIN_CONFIDENCE, p_daily_cap: DAILY_CAP },
-        );
-        if (error) {
-          logger.error("netcraft-auto: candidate fetch failed", {
-            error: error.message,
-          });
-          return [] as NetcraftAutoCandidate[];
+        if (!isTest && !featureFlags.shopfrontCloneNetcraftAuto) {
+          return {
+            skipped: true,
+            reason: "FF_SHOPFRONT_CLONE_NETCRAFT_AUTO disabled",
+          };
         }
-        return (data as NetcraftAutoCandidate[] | null) ?? [];
-      });
+        if (
+          !isTest &&
+          (!featureFlags.shopfrontCloneSubmitNetcraft ||
+            !featureFlags.shopfrontCloneOutreach)
+        ) {
+          return {
+            skipped: true,
+            reason: "netcraft_submit_or_outreach_disabled",
+          };
+        }
 
-      if (candidates.length === 0) {
-        // Either the daily cap is exhausted or there are no pending candidates.
-        return { ok: true, test: isTest, candidates: 0, submitted: 0, reason: "no_candidates_or_cap_reached" };
-      }
+        if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      // ONE bulk request for the whole (≤50) batch — no per-request flood.
-      // Test mode hits the validation-only endpoint (no report, no email).
-      const result = await step.run("submit-netcraft-bulk", () =>
-        postNetcraftBulk(
-          buildNetcraftBulkBody(
-            candidates,
-            process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
-          ),
-          { test: isTest },
-        ),
-      );
-
-      // Test mode: report the validation outcome, persist NOTHING.
-      if (isTest) {
-        logger.info("netcraft-auto: TEST-endpoint validation", {
-          ok: result.ok,
-          status: result.status,
-          urlCount: result.urlCount,
-          response: result.raw,
-        });
-        return {
-          ok: result.ok,
-          test: true,
-          validated: result.ok,
-          status: result.status,
-          urlCount: result.urlCount,
-          response: result.raw,
-        };
-      }
-
-      if (!result.ok) {
-        // Soft-fail: $0 diagnostic so the daily digest surfaces it, but do NOT
-        // throw — a transient Netcraft non-2xx must not raise an Inngest fn
-        // error (which pages the Axiom fleet watch). Left unmarked → retried
-        // next run.
-        await step.run("log-submit-failure", async () => {
-          logCost({
-            feature: "shopfront-clone-netcraft-auto-error",
-            provider: "netcraft",
-            operation: "bulk_submit",
-            units: result.urlCount,
-            unitCostUsd: 0,
-            metadata: { status: result.status, error: result.errText },
-          });
-        });
-        logger.warn("netcraft-auto: bulk submit non-2xx (will retry next run)", {
-          status: result.status,
-          urlCount: result.urlCount,
-        });
-        return { ok: false, candidates: candidates.length, submitted: 0, status: result.status };
-      }
-
-      // Mark every alert in the batch submitted (atomic per-alert JSONB merge,
-      // same RPC the per-candidate worker uses) with the batch uuid.
-      const marked = await step.run("persist-submissions", async () => {
-        const submittedAt = new Date().toISOString();
-        let n = 0;
-        for (const c of candidates) {
-          const { error } = await sb.rpc("merge_clone_alert_submission", {
-            p_alert_id: c.id,
-            p_key: "netcraft",
-            p_value: {
-              uuid: result.uuid,
-              state: result.state,
-              submitted_at: submittedAt,
-              via: "auto_bulk",
-            },
-            p_set_triage_status: "tp_actioned",
-          });
+        const candidates = await step.run("load-candidates", async () => {
+          const { data, error } = await sb.rpc(
+            "list_clone_alerts_pending_netcraft_auto",
+            { p_min_confidence: MIN_CONFIDENCE, p_daily_cap: DAILY_CAP },
+          );
           if (error) {
-            logger.error("netcraft-auto: mark-submitted failed", {
-              alertId: c.id,
+            logger.error("netcraft-auto: candidate fetch failed", {
               error: error.message,
             });
-          } else {
-            n++;
+            return [] as NetcraftAutoCandidate[];
           }
-        }
-        return n;
-      });
-
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "shopfront_clone_netcraft_auto",
-          provider: "netcraft",
-          operation: "bulk_submit",
-          units: marked,
-          unitCostUsd: 0, // keyless intake
-          metadata: { candidates: candidates.length, marked, netcraft_uuid: result.uuid },
+          return (data as NetcraftAutoCandidate[] | null) ?? [];
         });
-      });
 
-      logger.info("netcraft-auto: bulk submission complete", {
-        candidates: candidates.length,
-        marked,
-        netcraftUuid: result.uuid,
-      });
+        if (candidates.length === 0) {
+          // Either the daily cap is exhausted or there are no pending candidates.
+          return {
+            ok: true,
+            test: isTest,
+            candidates: 0,
+            submitted: 0,
+            reason: "no_candidates_or_cap_reached",
+          };
+        }
 
-      return { ok: true, candidates: candidates.length, submitted: marked, netcraftUuid: result.uuid };
+        // ONE bulk request for the whole (≤50) batch — no per-request flood.
+        // Test mode hits the validation-only endpoint (no report, no email).
+        const result = await step.run("submit-netcraft-bulk", () =>
+          postNetcraftBulk(
+            buildNetcraftBulkBody(
+              candidates,
+              process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
+            ),
+            { test: isTest },
+          ),
+        );
+
+        // Test mode: report the validation outcome, persist NOTHING.
+        if (isTest) {
+          logger.info("netcraft-auto: TEST-endpoint validation", {
+            ok: result.ok,
+            status: result.status,
+            urlCount: result.urlCount,
+            response: result.raw,
+          });
+          return {
+            ok: result.ok,
+            test: true,
+            validated: result.ok,
+            status: result.status,
+            urlCount: result.urlCount,
+            response: result.raw,
+          };
+        }
+
+        if (!result.ok) {
+          // Soft-fail: $0 diagnostic so the daily digest surfaces it, but do NOT
+          // throw — a transient Netcraft non-2xx must not raise an Inngest fn
+          // error (which pages the Axiom fleet watch). Left unmarked → retried
+          // next run.
+          await step.run("log-submit-failure", async () => {
+            logCost({
+              feature: "shopfront-clone-netcraft-auto-error",
+              provider: "netcraft",
+              operation: "bulk_submit",
+              units: result.urlCount,
+              unitCostUsd: 0,
+              metadata: { status: result.status, error: result.errText },
+            });
+          });
+          logger.warn(
+            "netcraft-auto: bulk submit non-2xx (will retry next run)",
+            {
+              status: result.status,
+              urlCount: result.urlCount,
+            },
+          );
+          return {
+            ok: false,
+            candidates: candidates.length,
+            submitted: 0,
+            status: result.status,
+          };
+        }
+
+        // Mark every alert in the batch submitted (atomic per-alert JSONB merge,
+        // same RPC the per-candidate worker uses) with the batch uuid.
+        const marked = await step.run("persist-submissions", async () => {
+          const submittedAt = new Date().toISOString();
+          let n = 0;
+          for (const c of candidates) {
+            const { error } = await sb.rpc("merge_clone_alert_submission", {
+              p_alert_id: c.id,
+              p_key: "netcraft",
+              p_value: {
+                uuid: result.uuid,
+                state: result.state,
+                submitted_at: submittedAt,
+                via: "auto_bulk",
+              },
+              p_set_triage_status: "tp_actioned",
+            });
+            if (error) {
+              logger.error("netcraft-auto: mark-submitted failed", {
+                alertId: c.id,
+                error: error.message,
+              });
+            } else {
+              n++;
+            }
+          }
+          return n;
+        });
+
+        await step.run("log-cost", async () => {
+          logCost({
+            feature: "shopfront_clone_netcraft_auto",
+            provider: "netcraft",
+            operation: "bulk_submit",
+            units: marked,
+            unitCostUsd: 0, // keyless intake
+            metadata: {
+              candidates: candidates.length,
+              marked,
+              netcraft_uuid: result.uuid,
+            },
+          });
+        });
+
+        logger.info("netcraft-auto: bulk submission complete", {
+          candidates: candidates.length,
+          marked,
+          netcraftUuid: result.uuid,
+        });
+
+        return {
+          ok: true,
+          candidates: candidates.length,
+          submitted: marked,
+          netcraftUuid: result.uuid,
+        };
       }
 
       /**
@@ -466,14 +505,20 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         // `{ test: true }` validated the auto lane's payload and silently
         // covered none of this one, the only novel payload of the two.
         if (!isTest && !featureFlags.cloneNetcraftResubmit) {
-          return { skipped: true, reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled" };
+          return {
+            skipped: true,
+            reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled",
+          };
         }
         if (
           !isTest &&
           (!featureFlags.shopfrontCloneSubmitNetcraft ||
             !featureFlags.shopfrontCloneOutreach)
         ) {
-          return { skipped: true, reason: "netcraft_submit_or_outreach_disabled" };
+          return {
+            skipped: true,
+            reason: "netcraft_submit_or_outreach_disabled",
+          };
         }
         if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
@@ -487,7 +532,10 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               isFeatureBraked(RESUBMIT_BRAKE),
             );
         if (braked) {
-          return { skipped: true, reason: `feature_brakes.${RESUBMIT_BRAKE} engaged` };
+          return {
+            skipped: true,
+            reason: `feature_brakes.${RESUBMIT_BRAKE} engaged`,
+          };
         }
 
         const pending = await step.run("resubmit-load-candidates", async () => {
@@ -530,7 +578,12 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               }),
             );
           }
-          return { ok: true, candidates: 0, submitted: 0, reason: "none_pending_or_cap" };
+          return {
+            ok: true,
+            candidates: 0,
+            submitted: 0,
+            reason: "none_pending_or_cap",
+          };
         }
 
         // Liveness gate, same three-valued rule as the issue reporter (v248):
@@ -538,7 +591,9 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         // connect is not death — it is usually a phishing kit blocking our
         // egress — and treating it as such is what starved the reporter.
         const liveness = await step.run("resubmit-liveness", async () => {
-          const map = await probeLivenessDetailed(pending.map((c) => c.candidate_url));
+          const map = await probeLivenessDetailed(
+            pending.map((c) => c.candidate_url),
+          );
           return Object.fromEntries(map);
         });
         const liveAll = pending.filter(
@@ -600,10 +655,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         // SHAPE, and an all-dead batch on the day of the run must not silently
         // skip that. Fall through with the pending rows instead.
         if (live.length === 0 && !isTest) {
-          logger.info("netcraft-resubmit: all candidates proved dead, nothing to file", {
-            candidates: pending.length,
-            deferred,
-          });
+          logger.info(
+            "netcraft-resubmit: all candidates proved dead, nothing to file",
+            {
+              candidates: pending.length,
+              deferred,
+            },
+          );
           // Quiet-run Outcome Row: `candidates>0 ∧ marked=0 ∧ deferred=0` is
           // the lane's silent-zero shape, so an all-dead day pages ONLY when
           // the dead-row deferral itself failed — which IS the v252 starvation.
@@ -675,10 +733,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               metadata: { status: result.status, error: result.errText },
             });
           });
-          logger.warn("netcraft-resubmit: bulk submit failed (retry next run)", {
-            status: result.status,
-            urlCount: result.urlCount,
-          });
+          logger.warn(
+            "netcraft-resubmit: bulk submit failed (retry next run)",
+            {
+              status: result.status,
+              urlCount: result.urlCount,
+            },
+          );
           // Outcome Row beside the `-error` row above: one transient Netcraft
           // non-2xx is one digest line, not a "lane not running" label.
           await step.run("resubmit-log-quiet", () =>
@@ -738,23 +799,25 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
 
         await step.run("resubmit-log-cost", () =>
           recordLaneOutcome("shopfront-clone-netcraft-resubmit", marked, {
-              candidates: pending.length,
-              live: live.length,
-              dead,
-              deferred,
-              budget,
-              marked,
-              netcraft_uuid: result.uuid,
-              brands: [
-                ...new Set(live.map((c) => c.inferred_target_domain ?? "unknown")),
-              ],
-              // The probe verdict is the diagnostic a bare count throws away —
-              // without it, a dead verdict needs a live re-probe to explain,
-              // and by then the answer has changed (the v248 lesson).
-              dead_reasons: deadRows.map((c) => ({
-                domain: c.candidate_domain,
-                reason: liveness[c.candidate_url]?.reason ?? "unknown",
-              })),
+            candidates: pending.length,
+            live: live.length,
+            dead,
+            deferred,
+            budget,
+            marked,
+            netcraft_uuid: result.uuid,
+            brands: [
+              ...new Set(
+                live.map((c) => c.inferred_target_domain ?? "unknown"),
+              ),
+            ],
+            // The probe verdict is the diagnostic a bare count throws away —
+            // without it, a dead verdict needs a live re-probe to explain,
+            // and by then the answer has changed (the v248 lesson).
+            dead_reasons: deadRows.map((c) => ({
+              domain: c.candidate_domain,
+              reason: liveness[c.candidate_url]?.reason ?? "unknown",
+            })),
           }),
         );
 

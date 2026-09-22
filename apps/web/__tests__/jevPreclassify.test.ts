@@ -12,8 +12,16 @@ import {
   buildJevState,
   mapJevAnswersToRow,
   riskQuestionId,
+  toClassificationRow,
+  toClassificationRpcArgs,
   toJevRpcArgs,
 } from "@/lib/clone-watch/jev-preclassify";
+import {
+  AUTO_CONFIRM_MIN_CONFIDENCE,
+  IS_CLONE_MIN_P,
+  RISK_INDICATOR_MIN_P,
+  WORKLIST_MIN_CONFIDENCE,
+} from "@/lib/clone-watch/preclassify-thresholds";
 import {
   ATTACK_INTENT_VALUES,
   CLONE_TACTIC_VALUES,
@@ -231,5 +239,81 @@ describe("toJevRpcArgs", () => {
     expect(args.p_prompt_version).toBe(JEV_PROMPT_VERSION);
     expect(args.p_source).toBe("backfill");
     expect(args.p_alert_id).toBe(42);
+  });
+});
+
+describe("toClassificationRow (ADR-0026 — the v157 shape from Jev answers)", () => {
+  it("is_clone flips exactly at IS_CLONE_MIN_P and confidence carries P(clone)", () => {
+    const base = mapJevAnswersToRow(goodAnswers());
+    const below = toClassificationRow({
+      ...base,
+      is_clone_p: IS_CLONE_MIN_P - 0.01,
+    });
+    const at = toClassificationRow({ ...base, is_clone_p: IS_CLONE_MIN_P });
+    expect(below.is_clone).toBe(false);
+    expect(below.confidence).toBeCloseTo(IS_CLONE_MIN_P - 0.01, 10);
+    expect(at.is_clone).toBe(true);
+    expect(at.confidence).toBe(IS_CLONE_MIN_P);
+  });
+
+  it("lists risk indicators at or above RISK_INDICATOR_MIN_P, in vocabulary order", () => {
+    const base = mapJevAnswersToRow(goodAnswers());
+    const probs = { ...base.risk_indicator_probs };
+    probs.suspicious_tld = RISK_INDICATOR_MIN_P;
+    probs.urgency_words = 0.95;
+    probs.login_form_url = RISK_INDICATOR_MIN_P - 0.01;
+    const c = toClassificationRow({ ...base, risk_indicator_probs: probs });
+    expect(c.risk_indicators).toEqual(
+      RISK_INDICATOR_VALUES.filter((ri) => probs[ri] >= RISK_INDICATOR_MIN_P),
+    );
+    expect(c.risk_indicators).toContain("urgency_words");
+    expect(c.risk_indicators).toContain("suspicious_tld");
+    expect(c.risk_indicators).not.toContain("login_form_url");
+  });
+
+  it("synthesises a deterministic reason from the probabilities", () => {
+    const c = toClassificationRow(mapJevAnswersToRow(goodAnswers()));
+    expect(c.reason).toBe(
+      "jev p=0.87 · brandjack (0.70) · credential_phishing (0.90) · urgency_words",
+    );
+    expect(c.clone_tactic).toBe("brandjack");
+    expect(c.attack_intent).toBe("credential_phishing");
+  });
+
+  it("produces the record_clone_watch_classification (v157) parameter set", () => {
+    const args = toClassificationRpcArgs({
+      alertId: 7,
+      brand: "nab.com.au",
+      candidateDomain: "nab-secure.com",
+      classification: toClassificationRow(mapJevAnswersToRow(goodAnswers())),
+      modelId: "jev-1.13.0",
+      inputTokens: 1100,
+    });
+    expect(Object.keys(args).sort()).toEqual(
+      [
+        "p_alert_id",
+        "p_brand",
+        "p_candidate_domain",
+        "p_is_clone",
+        "p_confidence",
+        "p_clone_tactic",
+        "p_attack_intent",
+        "p_risk_indicators",
+        "p_reason",
+        "p_model_id",
+        "p_prompt_version",
+        "p_input_tokens",
+        "p_output_tokens",
+      ].sort(),
+    );
+    expect(args.p_model_id).toBe("jev-1.13.0");
+    expect(args.p_prompt_version).toBe(JEV_PROMPT_VERSION);
+    expect(args.p_output_tokens).toBe(0);
+  });
+
+  it("thresholds are ordered so a gate can never admit a non-clone", () => {
+    expect(IS_CLONE_MIN_P).toBeLessThanOrEqual(WORKLIST_MIN_CONFIDENCE);
+    expect(WORKLIST_MIN_CONFIDENCE).toBeLessThan(AUTO_CONFIRM_MIN_CONFIDENCE);
+    expect(AUTO_CONFIRM_MIN_CONFIDENCE).toBeLessThanOrEqual(1);
   });
 });

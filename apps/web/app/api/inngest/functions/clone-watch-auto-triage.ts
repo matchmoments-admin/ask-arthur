@@ -11,6 +11,7 @@ import CloneWatchRunSummary, {
 } from "@/emails/CloneWatchRunSummary";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
+import { AUTO_CONFIRM_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 
 /**
  * Clone-watch auto-triage — auto-confirm the high-confidence, still-live tail
@@ -20,7 +21,8 @@ import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
  * review demanded:
  *
  *   ELIGIBILITY (the "strict" bar — all must hold):
- *     • Haiku preclassify is_clone = true AND confidence ≥ 0.9
+ *     • pre-classifier is_clone = true AND confidence ≥ AUTO_CONFIRM_MIN_CONFIDENCE
+ *       (0.8 — Jev P(clone) since ADR-0026; was Haiku ≥ 0.9)
  *     • primary signal_type ∈ {confusable, levenshtein}  (excludes the
  *       ~70%-raw-FP 'substring' class)
  *     • urlscan_classification = 'likely_phishing'  (independent signal)
@@ -64,7 +66,9 @@ import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
  * AUTO_PARK_RUN_CAP parks/run.
  */
 
-const STRICT_CONFIDENCE = 0.9;
+// ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
+// with its evidence in lib/clone-watch/preclassify-thresholds.ts.
+const STRICT_CONFIDENCE = AUTO_CONFIRM_MIN_CONFIDENCE;
 const ELIGIBLE_SIGNALS = new Set(["confusable", "levenshtein"]);
 const FETCH_CANDIDATE_LIMIT = 50; // pre-filter pool
 const AUTO_TRIAGE_RUN_CAP = 15; // hard cap on auto-confirm+send per run
@@ -250,7 +254,8 @@ export const cloneWatchAutoTriage = inngest.createFunction(
       const pool = (alerts ?? []) as AlertRow[];
       if (pool.length === 0) return pool;
 
-      // Strict Haiku gate: is_clone AND confidence ≥ 0.9.
+      // Strict gate: is_clone AND confidence ≥ AUTO_CONFIRM_MIN_CONFIDENCE
+      // (lib/clone-watch/preclassify-thresholds.ts — ADR-0026).
       const { data: cls } = await sb
         .from("clone_watch_classifications")
         .select("alert_id, is_clone, confidence")
@@ -314,7 +319,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           p_status: "tp_confirmed",
           p_admin_id: null,
           p_notes:
-            "auto-triage: strict bar (Haiku≥0.9 + confusable/levenshtein + urlscan likely_phishing) + liveness pass",
+            "auto-triage: strict bar (pre-classifier ≥ AUTO_CONFIRM_MIN_CONFIDENCE + confusable/levenshtein + urlscan likely_phishing) + liveness pass",
         });
         if (error) {
           logger.error("clone-watch auto-triage: confirm rpc failed", {

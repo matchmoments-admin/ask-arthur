@@ -868,6 +868,17 @@ export const featureFlags = {
    *  as $0 `shopfront_clone_preclassify_jev_error` telemetry). */
   cloneWatchJevShadow: readBoolEnv("FF_CLONE_WATCH_JEV_SHADOW"),
 
+  /** ADR-0026 (2026-09-22): TypeSafe Jev IS the clone-watch pre-classifier.
+   *  Server-side only. When ON, clone-watch-haiku-preclassify runs ONE
+   *  `classify-jev` step: Jev writes the clone_watch_classifications row
+   *  every worklist gate reads (`confidence` = calibrated P(clone); gates at
+   *  0.4 / 0.8 in lib/clone-watch/preclassify-thresholds.ts) plus the v311
+   *  raw row, and NO Claude call is made. When OFF, the Haiku path (+ the
+   *  Jev shadow tail if cloneWatchJevShadow) runs unchanged — this flag is
+   *  the rollback. Cost ~$0.00005/call vs Haiku's ~$0.0025; same
+   *  `SHOPFRONT_CLONE_OUTREACH_CAP_USD` brake. Requires TYPESAFE_API_KEY. */
+  cloneWatchJevPrimary: readBoolEnv("FF_CLONE_WATCH_JEV_PRIMARY"),
+
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
    *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so

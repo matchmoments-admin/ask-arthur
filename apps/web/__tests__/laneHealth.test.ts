@@ -121,9 +121,6 @@ function healthyRows(): LaneCostRow[] {
     }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
     rawRow("shopfront_clone_preclassify", "classify", 5, { is_clone: true }),
-    rawRow("shopfront_clone_preclassify_jev", "classify", 5, {
-      is_clone_p: 0.8,
-    }),
   ];
 }
 
@@ -229,28 +226,10 @@ describe("classifyLaneHealth", () => {
     ]);
   });
 
-  it("reports the absence-only preclassify streams when no per-alert row arrived", () => {
-    // Both watches share operation "classify" but differ by feature; dropping
-    // the operation removes both, and both must surface.
+  it("reports the absence-only preclassify stream when no per-alert row arrived", () => {
     expect(classifyLaneHealth(without("classify"), { now: NOW })).toEqual([
       expect.objectContaining({
         lane: "shopfront-clone-haiku-preclassify",
-        kind: "absent",
-      }),
-      expect.objectContaining({
-        lane: "shopfront-clone-haiku-preclassify:jev-shadow",
-        kind: "absent",
-      }),
-    ]);
-  });
-
-  it("the Jev shadow watch is independent: Haiku rows present, Jev rows absent → only Jev absent", () => {
-    const rows = healthyRows().filter(
-      (r) => r.feature !== "shopfront_clone_preclassify_jev",
-    );
-    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
-      expect.objectContaining({
-        lane: "shopfront-clone-haiku-preclassify:jev-shadow",
         kind: "absent",
       }),
     ]);
