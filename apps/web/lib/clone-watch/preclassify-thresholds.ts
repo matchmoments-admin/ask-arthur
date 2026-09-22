@@ -6,7 +6,9 @@
 // about its own boolean, which the 2026-09-20 back-test showed had no
 // predictive power (a flat curve across three bins ≥ 0.7). These numbers
 // were chosen from the day-1 calibration over 3,526 alerts
-// (`clone_watch_jev_calibration()`, v312 edges):
+// (`clone_watch_jev_calibration()`, v312 edges — FROZEN to that pre-swap
+// cohort since v313; the 30-day revisit reads live gate rows via
+// `clone_watch_preclassify_calibration(p_since)`, v314):
 //
 //   jev p ≥ 0.4  → n 2857 · 156 weaponised · 305 FP   (Haiku ≥ 0.7: 2923 / 160 / 334)
 //   jev p ≥ 0.5  → n 2336 · 146 weaponised · 197 FP

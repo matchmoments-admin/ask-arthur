@@ -26,6 +26,10 @@ import {
  *   malicious                 → taken_down (+ stamps takedown_at → feeds the KPI)
  *   no threats / unavailable  → declined   (→ feeds the 6h weaponisation recheck)
  *   suspicious / processing / no-match → unchanged (just stamp reconciled_at)
+ * v314: every matched alert also gets Netcraft's own verdict persisted
+ * (submitted_to.netcraft.url_state / url_state_reason), and takedown_at is
+ * dated from Netcraft's classification_log when it has one — see
+ * record_netcraft_url_verdicts.
  * It NEVER downgrades weaponised/taken_down/dormant. This is the single Netcraft
  * verdict source — the rollup poll stays dark.
  *
@@ -155,7 +159,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         return { ok: true, uuids: 0, taken_down: 0, declined: 0 };
       }
 
-      const counts = { takenDown: 0, declined: 0, other: 0, archived: 0, errors: 0 };
+      const counts = {
+        takenDown: 0,
+        declined: 0,
+        other: 0,
+        archived: 0,
+        errors: 0,
+        weaponisedNoThreats: 0,
+      };
 
       const apply = async (
         ids: number[],
@@ -196,9 +207,26 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
           continue;
         }
 
-        const cls = classifyByUrlState(group.alerts, fetched.urls);
+        const cls = classifyByUrlState(
+          group.alerts,
+          fetched.urls,
+          { log: fetched.submissionLog, submittedAt: fetched.submittedAt },
+        );
 
         await step.run(`apply-${uuid}`, async () => {
+          // v314: persist Netcraft's own verdict + clock FIRST, so a
+          // vendor-dated takedown_at wins and apply's witnessed now()-stamp
+          // only fills rows Netcraft's log could not date.
+          if (cls.verdicts.length) {
+            const { error } = await sb.rpc("record_netcraft_url_verdicts", {
+              p_verdicts: cls.verdicts,
+            });
+            if (error) {
+              throw new Error(
+                `record_netcraft_url_verdicts failed (${cls.verdicts.length}): ${error.message}`,
+              );
+            }
+          }
           await apply(cls.takenDown, "taken_down", true);
           await apply(cls.declined, "declined", false);
           await apply(cls.other, null, false);
@@ -217,6 +245,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         counts.takenDown += cls.takenDown.length;
         counts.declined += cls.declined.length;
         counts.other += cls.other.length;
+        // The vendor-gap signal, counted where it happens: Netcraft graded a
+        // site we watched go live as `no threats`.
+        counts.weaponisedNoThreats += cls.verdicts.filter(
+          (v) =>
+            v.url_state === "no threats" &&
+            group.alerts.find((a) => a.id === v.id)?.lifecycle_state ===
+              "weaponised",
+        ).length;
       }
 
       // Degraded-run awareness. Hard failures (RPC/DB) throw and are always-ship

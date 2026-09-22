@@ -455,6 +455,34 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     }
   });
 
+  // v314 — the live calibration instrument (one curve per model_id) and the
+  // Netcraft verdict writer. An empty verdict array is a safe no-op call that
+  // still exercises the body's casts/jsonb paths at runtime.
+  it("clone_watch_preclassify_calibration executes and returns the documented shape", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("clone_watch_preclassify_calibration", {
+      p_since: null,
+    });
+    expect(error).toBeNull();
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      expect(typeof r.model_id).toBe("string");
+      expect(Number(r.bucket)).toBeGreaterThanOrEqual(0);
+      expect(Number(r.bucket)).toBeLessThanOrEqual(10);
+      for (const k of ["n", "urlscan_phish", "weaponised", "netcraft_declined", "triaged_fp", "tp_actioned"]) {
+        expect(Number.isInteger(Number(r[k]))).toBe(true);
+      }
+    }
+  });
+
+  it("record_netcraft_url_verdicts accepts an empty batch and returns 0", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("record_netcraft_url_verdicts", {
+      p_verdicts: [],
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(0);
+  });
+
   it("record_clone_watch_jev_classification rejects an absent alert (FK) without a type error", async () => {
     const supabase = getClient();
     const { error } = await supabase.rpc("record_clone_watch_jev_classification", {

@@ -50,6 +50,10 @@ const BRAKE = "shopfront_clone_outreach";
 // brake-capped + bounded by this cap.
 const ENRICH_RUN_CAP = 60;
 const RECENT_WINDOW_DAYS = 35; // covers a full prior calendar month for the report
+// How long an unscanned lookalike waits for a urlscan render (which brings the
+// hosting block) before we enrich it with registrar data alone. urlscan
+// submits within a day of detection; three days covers a retry.
+const UNSCANNED_GRACE_HOURS = 72;
 // Bounded per-run campaign_key backfill of already-enriched rows (converges to
 // zero over a few days; the "insufficient" sentinel keeps it self-draining).
 const BACKFILL_CAP = 500;
@@ -167,15 +171,27 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         ).toISOString();
         // Enrich ALL report-eligible NRD clones (was tp_confirmed-only): the
         // Brand Stewardship email now surfaces registrar + abuse contact for
-        // every detected clone so brands can action takedowns themselves. Gate
-        // on a completed urlscan render (urlscan_scanned_at) so the dossier's
-        // hosting block is populated; FP/neutral domains still get enriched
-        // because they still appear in the brand's monthly tally.
+        // every detected clone so brands can action takedowns themselves.
+        // Prefer a completed urlscan render (urlscan_scanned_at) so the
+        // dossier's hosting block is populated; FP/neutral domains still get
+        // enriched because they still appear in the brand's monthly tally.
+        //
+        // ...but NOT only scanned rows. A lookalike that never resolves (the
+        // parked/no-DNS squat a bank most wants to hear about early) is never
+        // scanned, so the scanned-only gate left it with no registrar forever:
+        // prod 2026-09-22, 910 of 2,906 90-day alerts, incl. 19 taken down.
+        // RDAP needs no render. After UNSCANNED_GRACE_HOURS we enrich without
+        // hosting (null — honestly unknown, since the domain doesn't serve).
+        const unscannedCutoff = new Date(
+          Date.now() - UNSCANNED_GRACE_HOURS * 60 * 60 * 1000,
+        ).toISOString();
         const { data, error } = await sb
           .from("shopfront_clone_alerts")
           .select("id, candidate_domain, urlscan_evidence")
           .eq("source", "nrd")
-          .not("urlscan_scanned_at", "is", null)
+          .or(
+            `urlscan_scanned_at.not.is.null,first_seen_at.lt.${unscannedCutoff}`,
+          )
           .is("attribution", null)
           .gte("first_seen_at", since)
           .order("first_seen_at", { ascending: false })

@@ -43,11 +43,31 @@ export interface ChannelPlan {
 export interface EnforcementAlert {
   candidateUrl: string;
   candidateDomain: string;
-  /** shopfront_clone_alerts.attribution jsonb — { registrar?, hosting?: { abuse_email?, provider? }, ... } */
+  /**
+   * shopfront_clone_alerts.attribution jsonb, as enrichCloneAttribution WRITES
+   * it: registrar + abuse contact live under `whois` (camelCase). The flat
+   * `registrar_abuse_email` shape this type used to declare was never written
+   * by anything — prod 2026-09-22: 0 rows in that shape, 2,455 in `whois` — so
+   * the registrar-abuse channel could never be offered. The flat keys stay as
+   * a read fallback only.
+   */
   attribution?: {
+    whois?: {
+      registrar?: string | null;
+      registrarAbuseEmail?: string | null;
+    } | null;
     registrar?: string | null;
     registrar_abuse_email?: string | null;
-    hosting?: { provider?: string | null; abuse_email?: string | null } | null;
+    /** The enricher writes ip/country/asn only; provider/abuse_email are not
+     *  produced by anything today, so hosting abuse is offered only when a
+     *  future enrichment adds them. */
+    hosting?: {
+      ip?: string | null;
+      country?: string | null;
+      asn?: string | null;
+      provider?: string | null;
+      abuse_email?: string | null;
+    } | null;
   } | null;
 }
 
@@ -82,13 +102,17 @@ export function selectChannels(alert: EnforcementAlert): ChannelPlan[] {
     },
   ];
 
-  const registrarEmail = alert.attribution?.registrar_abuse_email;
+  const whois = alert.attribution?.whois;
+  const registrarEmail =
+    whois?.registrarAbuseEmail ?? alert.attribution?.registrar_abuse_email;
+  const registrarName =
+    whois?.registrar ?? alert.attribution?.registrar ?? "unknown registrar";
   if (registrarEmail) {
     plans.push({
       channel: "registrar_abuse",
       autonomy: "human_required",
       actsOnParked: false, // registrars increasingly decline parked-only lookalikes
-      note: `Registrar abuse → ${registrarEmail} (${alert.attribution?.registrar ?? "unknown registrar"}). Frame as evidenced phishing/DNS-abuse, NOT trademark.`,
+      note: `Registrar abuse → ${registrarEmail} (${registrarName}). Frame as evidenced phishing/DNS-abuse, NOT trademark.`,
     });
   }
 

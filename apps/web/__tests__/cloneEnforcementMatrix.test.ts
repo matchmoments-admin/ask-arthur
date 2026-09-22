@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { CloneAttribution } from "@/lib/clone-watch/enrich-attribution";
 import { selectChannels } from "@/lib/clone-watch/enforcement/matrix";
 
 const base = {
@@ -62,5 +63,35 @@ describe("selectChannels — clone enforcement matrix", () => {
     });
     expect(plans.find((p) => p.channel === "registrar_abuse")).toBeUndefined();
     expect(plans.find((p) => p.channel === "hosting_abuse")).toBeUndefined();
+  });
+
+  // The dossier shape the enricher ACTUALLY writes (typed as CloneAttribution,
+  // so a drift in either module breaks this at compile time). Until 2026-09-22
+  // the matrix read a flat `registrar_abuse_email` nothing ever wrote, and the
+  // tests above pinned that fictional shape — so registrar abuse was never
+  // offered on any of 2,455 enriched alerts while every test stayed green.
+  it("offers registrar abuse from the enricher's real whois dossier", () => {
+    const dossier: CloneAttribution = {
+      whois: {
+        registrar: "Dynadot Inc",
+        registrarAbuseEmail: "abuse@dynadot.com",
+        registrantCountry: null,
+        createdDate: "2026-09-19",
+        nameServers: ["ns1.cloudflare.com"],
+        statuses: ["active"],
+        registrarIanaId: "472",
+        source: "rdap",
+      },
+      ct: null,
+      ip_rep: null,
+      hosting: { ip: null, country: null, asn: null },
+      enriched_at: "2026-09-22T13:33:00Z",
+    };
+    const plan = selectChannels({ ...base, attribution: dossier }).find(
+      (p) => p.channel === "registrar_abuse",
+    );
+    expect(plan?.autonomy).toBe("human_required");
+    expect(plan?.note).toContain("abuse@dynadot.com");
+    expect(plan?.note).toContain("Dynadot Inc");
   });
 });

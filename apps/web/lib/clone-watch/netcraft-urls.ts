@@ -42,11 +42,23 @@ const UNSETTLED = new Set<string>([
 // Every state we recognise — anything outside this set is drift we log.
 const KNOWN_STATES = new Set<string>(Object.values(NETCRAFT_URL_STATE));
 
+/** One entry of Netcraft's `classification_log` (unix-seconds `date`). */
+export interface NetcraftClassificationLogEntry {
+  date: number;
+  from_state?: string;
+  to_state: string;
+}
+
 export interface NetcraftUrlEntry {
   url: string;
   hostname: string;
   url_state: string;
   uuid?: string;
+  /** Netcraft's own reason, e.g. "Already reported and rejected." */
+  url_classification_reason?: string | null;
+  /** Netcraft's own clock for this URL's state changes. Empty when the URL was
+   *  classified once, directly — the submission-level log then dates it. */
+  classification_log?: NetcraftClassificationLogEntry[];
 }
 
 export interface NetcraftSubmissionUrls {
@@ -67,6 +79,12 @@ export interface NetcraftSubmissionUrls {
    * actioned/unsettled and should be drained, not filed.
    */
   noEscalatable: boolean;
+  /** Submission-level classification_log — dates a URL whose own log is empty. */
+  submissionLog: NetcraftClassificationLogEntry[];
+  /** Netcraft's own receipt time for the submission (its `date`), ISO. Our
+   *  submitted_at is written AFTER the POST returns, so it trails this by
+   *  seconds — and Netcraft often classifies inside that gap. */
+  submittedAt: string | null;
 }
 
 /**
@@ -306,6 +324,67 @@ export interface ReconcileClassification {
   declined: number[];
   /** Still moving / no match / unknown → leave lifecycle, just mark reconciled. */
   other: number[];
+  /** v314 — Netcraft's own per-URL verdict for every MATCHED alert, persisted
+   *  by record_netcraft_url_verdicts whatever the lifecycle bucket. Without it a
+   *  `no threats` on a weaponised row was indistinguishable from "not looked at
+   *  yet", and the takedown clock was our first look instead of Netcraft's. */
+  verdicts: NetcraftUrlVerdict[];
+}
+
+export interface NetcraftUrlVerdict {
+  id: number;
+  url_state: string;
+  reason: string | null;
+  /** ISO time Netcraft moved this URL to `malicious`, from its own log. */
+  malicious_at: string | null;
+  /** Netcraft's receipt time for the submission — the RPC's lower bound for a
+   *  vendor-dated takedown, alongside our own submitted_at. */
+  netcraft_submitted_at: string | null;
+}
+
+/** Submission-level context from GET /submission/{uuid}. */
+export interface NetcraftSubmissionContext {
+  log: NetcraftClassificationLogEntry[];
+  submittedAt: string | null;
+}
+
+/** State precedence when one host has several URL entries in a submission. */
+const STATE_PRECEDENCE: string[] = [
+  NETCRAFT_URL_STATE.MALICIOUS,
+  NETCRAFT_URL_STATE.SUSPICIOUS,
+  NETCRAFT_URL_STATE.PROCESSING,
+  NETCRAFT_URL_STATE.NO_THREATS,
+  NETCRAFT_URL_STATE.UNAVAILABLE,
+  NETCRAFT_URL_STATE.REJECTED,
+];
+
+function unixToIso(date: unknown): string | null {
+  return typeof date === "number" && Number.isFinite(date) && date > 0
+    ? new Date(date * 1000).toISOString()
+    : null;
+}
+
+/**
+ * When did Netcraft call this URL malicious? Its own `classification_log`
+ * first; an EMPTY per-URL log means it was classified once, directly, while the
+ * submission was processed — so the submission log's first `→ malicious` dates
+ * it. Returns null rather than guess (the reconciler then falls back to the
+ * v219 witnessed-transition stamp).
+ */
+export function maliciousAt(
+  entry: NetcraftUrlEntry,
+  submissionLog: NetcraftClassificationLogEntry[] = [],
+): string | null {
+  if (normState(entry.url_state) !== NETCRAFT_URL_STATE.MALICIOUS) return null;
+  const own = (entry.classification_log ?? []).filter(
+    (l) => normState(l.to_state) === NETCRAFT_URL_STATE.MALICIOUS,
+  );
+  if (own.length > 0) return unixToIso(Math.max(...own.map((l) => l.date)));
+  if ((entry.classification_log ?? []).length > 0) return null;
+  const sub = submissionLog.filter(
+    (l) => normState(l.to_state) === NETCRAFT_URL_STATE.MALICIOUS,
+  );
+  return sub.length > 0 ? unixToIso(Math.min(...sub.map((l) => l.date))) : null;
 }
 
 /**
@@ -317,23 +396,43 @@ export interface ReconcileClassification {
 export function classifyByUrlState(
   alerts: ReconcileAlert[],
   urls: NetcraftUrlEntry[],
+  submission: NetcraftSubmissionContext = { log: [], submittedAt: null },
 ): ReconcileClassification {
   const byHost = new Map<string, Set<string>>();
+  const entriesByHost = new Map<string, NetcraftUrlEntry[]>();
   for (const entry of urls) {
     const host = normHost(entry.hostname || entry.url);
     if (!host) continue;
     (byHost.get(host) ?? byHost.set(host, new Set()).get(host)!).add(
       normState(entry.url_state),
     );
+    (entriesByHost.get(host) ?? entriesByHost.set(host, []).get(host)!).push(entry);
   }
   const takenDown: number[] = [];
   const declined: number[] = [];
   const other: number[] = [];
+  const verdicts: NetcraftUrlVerdict[] = [];
   for (const alert of alerts) {
-    const S = byHost.get(normHost(alert.candidate_domain));
+    const host = normHost(alert.candidate_domain);
+    const S = byHost.get(host);
     if (!S || S.size === 0) {
       other.push(alert.id);
       continue;
+    }
+    const entries = entriesByHost.get(host) ?? [];
+    const rank = (e: NetcraftUrlEntry) => {
+      const i = STATE_PRECEDENCE.indexOf(normState(e.url_state));
+      return i === -1 ? STATE_PRECEDENCE.length : i;
+    };
+    const best = [...entries].sort((a, b) => rank(a) - rank(b))[0];
+    if (best) {
+      verdicts.push({
+        id: alert.id,
+        url_state: normState(best.url_state),
+        reason: best.url_classification_reason?.trim() || null,
+        malicious_at: maliciousAt(best, submission.log),
+        netcraft_submitted_at: submission.submittedAt,
+      });
     }
     if (S.has(NETCRAFT_URL_STATE.MALICIOUS)) takenDown.push(alert.id);
     else if (S.has(NETCRAFT_URL_STATE.SUSPICIOUS) || S.has(NETCRAFT_URL_STATE.PROCESSING))
@@ -351,7 +450,7 @@ export function classifyByUrlState(
       declined.push(alert.id);
     else other.push(alert.id);
   }
-  return { takenDown, declined, other };
+  return { takenDown, declined, other, verdicts };
 }
 
 /**
@@ -383,6 +482,8 @@ export async function fetchNetcraftSubmissionUrls(
       totalCount: 0,
       stateCounts: {},
       noEscalatable: false,
+      submissionLog: [],
+      submittedAt: null,
     };
   }
 }
@@ -407,6 +508,8 @@ async function fetchNetcraftSubmissionUrlsInner(
       totalCount: 0,
       stateCounts: {},
       noEscalatable: false,
+      submissionLog: [],
+      submittedAt: null,
     };
   }
   const sub = (await subRes.json()) as Record<string, unknown>;
@@ -415,6 +518,10 @@ async function fetchNetcraftSubmissionUrlsInner(
   const stateCounts =
     ((sub.state_counts as { urls?: Record<string, number> } | undefined)?.urls) ??
     {};
+  const submissionLog = Array.isArray(sub.classification_log)
+    ? (sub.classification_log as NetcraftClassificationLogEntry[])
+    : [];
+  const submittedAt = unixToIso(sub.date);
 
   // Pre-filter: skip the /urls GET when the histogram has no escalatable state.
   if (opts?.escalatableStates && Object.keys(stateCounts).length > 0) {
@@ -431,6 +538,8 @@ async function fetchNetcraftSubmissionUrlsInner(
         totalCount: 0,
         stateCounts,
         noEscalatable: true,
+        submissionLog,
+        submittedAt,
       };
     }
   }
@@ -449,6 +558,8 @@ async function fetchNetcraftSubmissionUrlsInner(
       totalCount: 0,
       stateCounts,
       noEscalatable: false,
+      submissionLog,
+      submittedAt,
     };
   }
   const body = (await urlsRes.json()) as {
@@ -465,6 +576,8 @@ async function fetchNetcraftSubmissionUrlsInner(
     totalCount: typeof body.total_count === "number" ? body.total_count : urls.length,
     stateCounts,
     noEscalatable: false,
+    submissionLog,
+    submittedAt,
   };
 }
 

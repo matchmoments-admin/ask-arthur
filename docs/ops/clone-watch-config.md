@@ -638,6 +638,30 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 > `declined` — post-v284 "decline rate" is structurally unmeasurable for the
 > weaponised cohort; the success signal to watch is takedown conversions.
 
+> **v314 (2026-09-23) — Netcraft's own verdict and clock are now persisted.** For every
+> matched alert the reconciler first calls `record_netcraft_url_verdicts`, writing
+> `submitted_to.netcraft.url_state` (`malicious` / `no threats` / `unavailable` / …),
+> `url_state_reason` (Netcraft's text, e.g. "Already reported and rejected.") and
+> `url_state_at`. When Netcraft's `classification_log` dates the `→ malicious` transition at or
+> after the submission (the earlier of our `submitted_at` and Netcraft's own receipt `date`),
+> `takedown_at` is stamped from THAT date with `takedown_at_source='netcraft_log'`; v219's
+> witnessed `now()` stamp only fills rows the log can't date. A malicious date before the
+> submission sets `already_malicious_at_submit` (not our credit; kept out of the TTD KPI).
+> Vendor-gap query — sites we watched go live that Netcraft still grades clean:
+>
+> ```sql
+> select submitted_to->'netcraft'->>'url_state' s, submitted_to->'netcraft'->>'url_state_reason' r, count(*)
+> from shopfront_clone_alerts where lifecycle_state = 'weaponised' and submitted_to->'netcraft' ? 'url_state'
+> group by 1, 2 order by 3 desc;
+> ```
+>
+> First backfill (30 days, 96 alerts, 2026-09-23): weaponised → `no threats` **51** (38 "Already
+> reported and rejected."), → `unavailable` 36, → `malicious` 7 (6 vendor-dated, all 11 s–2 min
+> after receipt — so "time to takedown" on this cohort is Netcraft's triage latency, not a site
+> going offline). **Credit:** reports go out under `NETCRAFT_REPORTER_EMAIL ?? brendan@askarthur.au`
+> and Netcraft credits by that email (leaderboard handle `br_4918435`); its crediting emails
+> showed 10 sites credited all-time as of 2026-09-22.
+
 The per-URL flow (PRs #701/#702/#703, all default-OFF) that reads
 `GET /submission/{uuid}/urls` (keyless — no API key), drives the lifecycle, and
 files false-negative `report_issue` escalations. Plans:
@@ -1362,6 +1386,18 @@ Rows land with `source='backfill'`; the live step writes `source='live'`. Keep t
 ```sql
 select * from clone_watch_jev_calibration() order by classifier, bucket;
 ```
+
+> **FROZEN since v313 (found 2026-09-22, documented v314).** Its `model_id NOT LIKE 'jev%'`
+> filter sits in the CTE BOTH sides project from, so once Jev writes the gate row the alert
+> vanishes from both curves. It remains the reproducible day-1 comparison. **For the 30-day
+> threshold revisit use the live instrument** — one curve per `model_id` over the gate rows
+> (`clone_watch_classifications.confidence`), uniform buckets, no prefix filter:
+>
+> ```sql
+> select * from clone_watch_preclassify_calibration('2026-09-22 09:00+00') order by model_id, bucket;
+> ```
+>
+> Outcomes (urlscan, weaponised, Netcraft) mature over days, so read a cohort ≥ 14 days old.
 
 One row per (classifier, probability bucket) over the alerts BOTH classifiers scored. `haiku` bucket 0 = `is_clone=false`; buckets 1–10 = confidence deciles. `jev` buckets 1–10 = `is_clone_p` deciles. Bucket k = [(k-1)/10, k/10), 1.0 folded into 10 — **v312** fixed the edges (v311's `1.0001` bound + float32 REAL put every exact decile one bucket low; the table on PR #1172 predates the fix, the corrected one is on #1173). Columns: `n`, `urlscan_phish`, `weaponised`, `netcraft_declined`, `triaged_fp`, `tp_actioned`.
 
