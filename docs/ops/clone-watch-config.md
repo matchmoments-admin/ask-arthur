@@ -1278,6 +1278,73 @@ VALUES
   ('abuse@somebrand.com', 'stop', 'manual-' || gen_random_uuid(), 'manual suppression', 'Manual STOP');
 ```
 
+### Monthly brand store — frozen months + re-publish (v319)
+
+`clone_watch_monthly_brand_stats` (+ `_registrar_stats`) is the ONE per-brand
+monthly store. `clone-watch-report-summary` (cron `0 11 1 * *`) is its only
+producer and writes it through `write_clone_watch_monthly_stats`, which
+**freezes** the month (`frozen_at`). Everything that prints a per-brand monthly
+clone number reads it — including the brand-stewardship ledger, which now runs
+on the producer's completion event (`clone-watch/monthly-store.written.v1`)
+instead of its own cron two hours earlier.
+
+What frozen means, and what enforces it:
+
+| Situation                                                      | What happens                                                                                         | Enforced by                                                                       |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Scheduled run, month not yet published                         | summary upserted, store written + frozen, event emitted                                              | `clone-watch-report-summary.ts` → `write_clone_watch_monthly_stats` (v319)        |
+| Any run (retry, backfill, manual) for a frozen month           | **nothing written** — not the store, not the summary row                                             | `readMonthFrozenAt` early return + the writer's `status: "frozen"` refusal (v319) |
+| Direct SQL / script UPDATE, DELETE or INSERT on a frozen month | raises `check_violation`                                                                             | trigger `clone_watch_brand_stats_freeze_guard` (v319)                             |
+| Manual `{ periodMonth, republish: true }`                      | restated, `frozen_at` re-stamped, `previous_frozen_at` warn-logged to Axiom, stewardship re-prepared | `p_republish` (v319)                                                              |
+
+The freeze is an INTENT guard against accidental restatement, not an access
+control: the writer lifts it for its own transaction through the
+`app.clone_watch_republish` setting, and service_role could do the same.
+
+**Re-publish a month deliberately** (a methodology fix you WANT reflected in a
+published month — say so in the edition's caveat):
+
+```bash
+# $KEY = the Inngest event key (see § Manual ad-hoc trigger above)
+curl -X POST "https://inn.gs/e/$KEY" -H "Content-Type: application/json" \
+  -d '{"name":"clone-watch/report-summary.manual-trigger.v1","data":{"periodMonth":"2026-08","republish":true}}'
+```
+
+Then check the run output for `storeStatus: "republished"` and
+`previousFrozenAt`, and that `report-brand-stewardship` ran for the month.
+
+**Backfill a month that was never published** — same event without
+`republish`. On a frozen month that is a no-op (`skipped: "frozen"`).
+
+Column semantics that are easy to misread:
+
+- `weaponised` = cohort members **currently** weaponised when frozen (a later
+  takedown removes them); `weaponised_ever` = members with `weaponised_at` set.
+- `taken_down` = members **first seen** this month that are taken down, dated or
+  not; `taken_down_in_month` = distinct lookalikes of the brand (any first-seen
+  month) whose `submitted_to.netcraft.takedown_at` falls **in** the month.
+  Undated takedowns (68 of 91 in prod on 2026-09-23) are not in
+  `taken_down_in_month`, and it is only attached to brands with ≥1 detection
+  that month. NULL = the takedown events could not be read (not measured).
+- `brand` is the primary DOMAIN; `brand_normalized` is the Canonical Brand key.
+  A domain shared by several brands (`servicesaustralia.gov.au`) is one row
+  keyed to its owner.
+- Jun/Jul/Aug 2026 were frozen by the migration at their
+  `clone_watch_report_summary.generated_at` (2026-09-04 — the day all three
+  were last restated); their v319 columns were backfilled from live data on
+  the day v319 was applied.
+
+**August 2026 brand-stewardship batch is missing.** The 1 Sep 09:00 run was
+cancelled at its then-4m finish timeout (Inngest `function.cancelled` at
+09:05:44, slot starvation — ADR-0019 2026-09-02 amendment); cancelled runs get
+no retry and nothing re-fired it. After v319 is applied and this code is
+deployed, re-fire it once:
+
+```bash
+curl -X POST "https://inn.gs/e/$KEY" -H "Content-Type: application/json" \
+  -d '{"name":"report/brand-stewardship.manual-trigger.v1","data":{"periodMonth":"2026-08-01"}}'
+```
+
 ### Weekly digest
 
 Sun 10:00 UTC — `shopfront-clone-weekly-digest` Telegram-pages admin with KPI summary + LinkedIn-post draft (anonymised; never names a specific operator domain). Operator copy-pastes the draft to LinkedIn manually for v1.

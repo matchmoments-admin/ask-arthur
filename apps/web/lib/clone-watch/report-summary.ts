@@ -1,8 +1,5 @@
 import { createServiceClient } from "@askarthur/supabase/server";
-import type {
-  CloneWatchReportCard,
-  CloneWatchTrendRows,
-} from "@/lib/clone-watch/report-card-data";
+import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
 
 /**
  * Shared writer/reader for clone_watch_report_summary (v189) — the single column
@@ -111,36 +108,11 @@ export async function getPinnedCard(
   return data.card_json as CloneWatchReportCard;
 }
 
-/**
- * Persist the FULL per-brand + per-registrar trend rows for a month (v193).
- * Delete-then-insert so a re-snapshot/backfill is idempotent. Small row counts
- * (a few hundred/month) — not a hot table, no chunking needed.
- */
-export async function writeTrendRows(
-  sb: ServiceClient,
-  rows: CloneWatchTrendRows,
-): Promise<void> {
-  const pm = rows.periodMonth;
-
-  await sb.from("clone_watch_monthly_brand_stats").delete().eq("period_month", pm);
-  if (rows.brandRows.length > 0) {
-    const { error } = await sb
-      .from("clone_watch_monthly_brand_stats")
-      .insert(rows.brandRows.map((r) => ({ period_month: pm, ...r })));
-    if (error) throw new Error(`brand trend insert failed: ${error.message}`);
-  }
-
-  await sb
-    .from("clone_watch_monthly_registrar_stats")
-    .delete()
-    .eq("period_month", pm);
-  if (rows.registrarRows.length > 0) {
-    const { error } = await sb
-      .from("clone_watch_monthly_registrar_stats")
-      .insert(rows.registrarRows.map((r) => ({ period_month: pm, ...r })));
-    if (error) throw new Error(`registrar trend insert failed: ${error.message}`);
-  }
-}
+// The per-brand + per-registrar trend rows (v193) are NOT written here any
+// more. Their delete-then-insert writer restated published months on every
+// re-run (June–August were all rewritten on 2026-09-04) and could lose a month
+// between its two calls; the ONE writer is now the v319 SQL function, called
+// through lib/clone-watch/monthly-brand-store.ts `writeMonthlyStats`.
 
 /**
  * The recorded LinkedIn post URN for a report month, or null when the row is

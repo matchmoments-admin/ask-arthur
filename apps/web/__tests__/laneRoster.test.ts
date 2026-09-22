@@ -32,9 +32,8 @@ const EXEMPT: Record<string, string> = {
     "one event per weaponisation; delivery is watched by urlscan-retrieve's unnotified_weaponised",
   "shopfront-clone-enforcement-plan":
     "one event per weaponisation behind FF_CLONE_ENFORCEMENT; opens human-gated cases only, failures surface as fn.error",
-  "clone-watch-internal-digest": "monthly; lands with the monthly brand store (deepening PR 7)",
-  "clone-watch-report-summary": "monthly; lands with the monthly brand store (deepening PR 7)",
-  "report-brand-stewardship": "monthly; lands with the monthly brand store (deepening PR 7)",
+  "clone-watch-internal-digest":
+    "monthly operator email; its Resend cost row (brand_stewardship/internal_digest) is the run record",
 };
 
 function functionIds(): string[] {

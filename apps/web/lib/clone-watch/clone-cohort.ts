@@ -46,6 +46,9 @@ export interface CloneAlertRow {
   /** Full URL. The internal digest lists these verbatim for Scamwatch. */
   candidate_url?: string | null;
   inferred_target_domain: string | null;
+  /** Canonical Brand key (v197). Read by the monthly brand store to key its
+   *  domain-grain rows to a brand (v319, monthly-brand-store.ts). */
+  target_brand_normalized?: string | null;
   urlscan_classification: string | null;
   urlscan_evidence: {
     server?: { ip?: string; asn?: string; country?: string };
@@ -92,7 +95,7 @@ export interface CloneAlertRow {
  * missing one is a distribution that reads as 100% unknown.
  */
 export const CLONE_COHORT_SELECT =
-  "id, candidate_domain, candidate_url, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)";
+  "id, candidate_domain, candidate_url, inferred_target_domain, target_brand_normalized, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)";
 
 /** The NRD daily sweep — the only source these reporting surfaces count. */
 export const CLONE_COHORT_SOURCE = "nrd";

@@ -126,6 +126,11 @@ function healthyRows(): LaneCostRow[] {
       offline: 2,
     }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
+    // Monthly: written on the 1st, so up to ~31 days old on a healthy day.
+    outcomeRow("clone-watch-report-summary", 20 * 24, 148, {
+      total: 855,
+      brand_rows: 148,
+    }),
     rawRow("shopfront_clone_preclassify", "classify", 5, { is_clone: true }),
   ];
 }

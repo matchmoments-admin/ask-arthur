@@ -19,7 +19,7 @@
  * With the fold separated from the read, `loadCardInputs` runs once and every
  * surface folds the same bytes.
  *
- * @see report-card-data.ts — the I/O half (four reads, no computation)
+ * @see report-card-data.ts — the I/O half (five reads, no computation)
  * @see spotlight.ts — the ladder, extracted so it can be tested directly
  */
 import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
@@ -59,6 +59,12 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 import { SUPER_FUND_DOMAINS } from "@/lib/clone-watch/brand-display";
 import { pickSpotlight, type Spotlight } from "@/lib/clone-watch/spotlight";
 import type { MonthWindow } from "@/lib/clone-watch/month-window";
+import {
+  brandKeyForDomain,
+  takedownsInMonthByBrand,
+  weaponisedEverByBrand,
+  type TakedownEvent,
+} from "@/lib/clone-watch/monthly-brand-store";
 
 export type { Spotlight };
 export type SpotlightKind = Spotlight["kind"];
@@ -300,6 +306,19 @@ export interface BrandTrendRow {
   clusters: InfrastructureCluster[];
   fingerprinted_clones: number;
   largest_cluster: number;
+  // ── one monthly store (v319, monthly-brand-store.ts) ───────────────────
+  /** Canonical Brand key beside the domain grain (ADR-0020). */
+  brand_normalized: string | null;
+  /** Members with weaponised_at set — survives a later takedown, unlike
+   *  `weaponised` (current state). */
+  weaponised_ever: number;
+  weaponised_after_decline: number;
+  re_taken_down: number;
+  /** EVENT-dated takedowns inside the month (any first-seen month). null =
+   *  the takedown events were not read, never a silent 0. */
+  taken_down_in_month: number | null;
+  /** Cohort membership — first alert id per candidate domain. */
+  alert_ids: number[];
 }
 export interface RegistrarTrendRow {
   registrar: string;
@@ -327,7 +346,7 @@ function totalsOf(byBrand: Map<string, CloneBrandMetrics>): {
 
 
 /**
- * Everything the fold needs. Four reads produce this; see `loadCardInputs`.
+ * Everything the fold needs. Five reads produce this; see `loadCardInputs`.
  */
 export interface CardInputs {
   window: MonthWindow;
@@ -354,6 +373,12 @@ export interface CardInputs {
    * determinism is the entire point of computing the card once.
    */
   watchlistFallbackSize?: number;
+  /**
+   * Vendor-dated takedowns across ALL first-seen months (v319). Optional:
+   * only the monthly store needs them, and an absent read folds to
+   * `taken_down_in_month: null` ("not measured"), never to 0.
+   */
+  takedownEvents?: TakedownEvent[];
 }
 
 
@@ -545,10 +570,13 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
  * Full per-brand + per-registrar rows for a month (NOT just the top-N the
  * report card keeps). Folds the SAME rows buildReportCard does, so trend rows
  * sum back to the summary card by construction rather than by two functions
- * agreeing. Written to the v193 trend tables by the monthly snapshot cron.
+ * agreeing. Written to the v193 trend tables by the monthly snapshot cron,
+ * through the one SQL writer that freezes a published month (v319,
+ * monthly-brand-store.ts).
  */
 export function buildTrendRows(
-  input: Pick<CardInputs, "window" | "rows">,
+  input: Pick<CardInputs, "window" | "rows"> &
+    Partial<Pick<CardInputs, "coverage" | "takedownEvents">>,
 ): CloneWatchTrendRows {
   const { periodMonth } = input.window;
   const rows = input.rows;
@@ -561,6 +589,21 @@ export function buildTrendRows(
   // normalised brand name would join to nothing (see migration v295).
   const intelByBrand = computeTargetingIntelByBrand(rows);
   const emptyMix: Mix = { top: [], other: 0, unknown: 0, total: 0 };
+
+  // v319 store columns — folded from the SAME rows, so every count stays a
+  // subset of that brand's `clones` by construction.
+  const weaponisedEver = weaponisedEverByBrand(rows);
+  const takedownsInMonth = input.takedownEvents
+    ? takedownsInMonthByBrand(input.takedownEvents, input.window)
+    : null;
+  const alertKeysByBrand = new Map<string, Array<string | null | undefined>>();
+  for (const r of rows) {
+    const b = r.inferred_target_domain?.trim().toLowerCase();
+    if (!b) continue;
+    const keys = alertKeysByBrand.get(b) ?? [];
+    keys.push(r.target_brand_normalized);
+    alertKeysByBrand.set(b, keys);
+  }
 
   const brandRows: BrandTrendRow[] = [...byBrand.entries()]
     .map(([brand, m]) => {
@@ -592,6 +635,18 @@ export function buildTrendRows(
         clusters: intel?.clusters.clusters ?? [],
         fingerprinted_clones: intel?.clusters.fingerprintedN ?? 0,
         largest_cluster: intel?.clusters.largestClusterN ?? 0,
+        brand_normalized: brandKeyForDomain(
+          brand,
+          alertKeysByBrand.get(brand) ?? [],
+          input.coverage ?? null,
+        ),
+        weaponised_ever: weaponisedEver.get(brand) ?? 0,
+        weaponised_after_decline: m.weaponisedAfterDecline,
+        re_taken_down: m.reTakenDown,
+        taken_down_in_month: takedownsInMonth
+          ? (takedownsInMonth.get(brand) ?? 0)
+          : null,
+        alert_ids: m.alertIds,
       };
     })
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));

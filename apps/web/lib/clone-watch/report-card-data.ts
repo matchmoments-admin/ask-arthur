@@ -11,6 +11,10 @@ import {
 import { monthWindow, priorWindow } from "@/lib/clone-watch/month-window";
 import type { BrandCoverage } from "@/lib/clone-watch/brand-coverage";
 import {
+  takedownEventsFromRows,
+  type TakedownEvent,
+} from "@/lib/clone-watch/monthly-brand-store";
+import {
   buildReportCard,
   buildTrendRows,
   type CardInputs,
@@ -19,7 +23,7 @@ import {
 } from "@/lib/clone-watch/report-card";
 
 /**
- * The report card's I/O half — four reads, zero computation.
+ * The report card's I/O half — five reads, zero computation.
  *
  * The fold lives in report-card.ts. This file exists only to turn a month into
  * the rows that fold needs, which is what makes the card testable from fixtures
@@ -89,7 +93,53 @@ async function fetchMonth(
 }
 
 /**
- * The four reads, in one place.
+ * Every vendor-dated takedown (submitted_to.netcraft.takedown_at, v219/v314),
+ * across ALL first-seen months — the monthly store credits a takedown to the
+ * month it happened (v319). A few dozen rows in total today.
+ *
+ * DEGRADES rather than throws: the internal digest and the admin preview share
+ * this loader and never read the column, so a failure here must not cost them
+ * their run. `undefined` folds to `taken_down_in_month: null` ("not
+ * measured"), which the monthly store persists honestly.
+ */
+async function fetchTakedownEvents(
+  sb: ServiceClient,
+): Promise<TakedownEvent[] | undefined> {
+  type Row = Pick<
+    CloneAlertRow,
+    "candidate_domain" | "inferred_target_domain" | "submitted_to" | "triage_status"
+  >;
+  let failure: string | null = null;
+  try {
+    const { rows, truncated, error } = await fetchAllRows<Row>(
+      (from, to) =>
+        sb
+          .from("shopfront_clone_alerts")
+          .select("candidate_domain, inferred_target_domain, submitted_to, triage_status")
+          .eq("source", CLONE_COHORT_SOURCE)
+          .not("inferred_target_domain", "is", null)
+          .not("submitted_to->netcraft->>takedown_at", "is", null)
+          .order("id", { ascending: true })
+          .range(from, to) as unknown as PromiseLike<{
+          data: Row[] | null;
+          error: { message: string } | null;
+        }>,
+      { maxRows: FETCH_LIMIT },
+    );
+    if (!error && !truncated) return takedownEventsFromRows(rows ?? []);
+    failure = error?.message ?? "truncated";
+  } catch (err) {
+    failure = err instanceof Error ? err.message : String(err);
+  }
+  logger.warn("report-card: takedown events unavailable", {
+    error: failure,
+    consequence: "taken_down_in_month persisted as null (not measured)",
+  });
+  return undefined;
+}
+
+/**
+ * The five reads, in one place.
  *
  * Call this ONCE per edition and fold it as many times as you like — that is
  * the whole point. `getCloneWatchReportCard` and `getCloneWatchTrendRows` below
@@ -176,6 +226,8 @@ export async function loadCardInputs(month?: string): Promise<CardInputs> {
     }
   }
 
+  const takedownEvents = await fetchTakedownEvents(sb);
+
   return {
     window,
     priorWindow: prevWin,
@@ -184,6 +236,7 @@ export async function loadCardInputs(month?: string): Promise<CardInputs> {
     coverage,
     priorSpotlightBrand,
     watchlistFallbackSize: AU_BRAND_WATCHLIST.length,
+    takedownEvents,
   };
 }
 

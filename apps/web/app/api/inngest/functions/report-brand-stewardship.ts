@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import {
@@ -14,21 +15,24 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   applyCohortRules,
   CLONE_COHORT_SELECT,
-  CLONE_COHORT_SOURCE,
   type CloneAlertRow,
 } from "@/lib/clone-watch/clone-cohort";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
-import {
-  aggregateClonesByDomain,
-  topRiskUnactioned,
-  type CloneBrandMetrics,
-} from "@/lib/clone-watch/clone-metrics";
+import { aggregateClonesByDomain } from "@/lib/clone-watch/clone-metrics";
 import { priorMonthStart } from "@/lib/clone-watch/month-window";
+import {
+  ledgerCloneMetrics,
+  MONTHLY_STORE_WRITTEN_EVENT,
+  readMonthlyBrandStore,
+  type LedgerStoreRow,
+} from "@/lib/clone-watch/monthly-brand-store";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Monthly Brand Stewardship Report — aggregation + ledger (WS2-cap).
  *
- * Runs on the 1st of each month, aggregates the PRIOR calendar month's
+ * Runs once per published month (after clone-watch-report-summary — see the
+ * trigger note below), aggregates that calendar month's
  * onward_report_log (joined to scam_reports for the impersonated brand) and
  * UPSERTs one brand_stewardship_reports row per brand that (a) had ≥1 onward
  * report actually sent on its behalf AND (b) has an active known_brands email
@@ -39,12 +43,28 @@ import { priorMonthStart } from "@/lib/clone-watch/month-window";
  * which keeps the SQL surface to a lean table — no PL/pgSQL RPC, no
  * search_path/variable_conflict gotchas, no preview-branch smoke-test dance.
  *
- * Gated by FF_BRAND_STEWARDSHIP_REPORT (default OFF). When OFF the cron
+ * Gated by FF_BRAND_STEWARDSHIP_REPORT (default OFF). When OFF the run
  * no-ops, so no rows are prepared and (downstream) no emails are sent.
  *
  * Honesty: we only count onward reports we actually SENT (status='sent') and
  * never claim takedowns — these destinations (OpenPhish/APWG/ACMA) are
  * fire-and-forget email intakes with no takedown callback.
+ *
+ * CLONE METRICS COME FROM THE MONTHLY BRAND STORE (v319), not a refold.
+ * This function used to run on its own cron (0 9 1 * *) — two hours BEFORE
+ * clone-watch-report-summary — and re-fetch + refold the month's alerts, so the
+ * brand-facing email and the published report counted the same month twice, on
+ * two clocks. It is now triggered by that function's completion event
+ * (`clone-watch/monthly-store.written.v1`) and reads the store it wrote:
+ * counts from the frozen month, the per-lookalike watch-list from the store's
+ * member alert ids (their CURRENT state — see ledgerCloneMetrics).
+ *
+ * Why August 2026 has no batch: the 1 Sep 09:00 run was CANCELLED at its 4m
+ * finish timeout (Inngest function.cancelled 09:05:44, the Aug 27–Sep 2 5-slot
+ * starvation; ADR-0019 amendment). A cancelled run gets no retry and no error,
+ * and nothing re-fired it. #1072 raised the budget to 8m the next day; this
+ * rewrite also removes the alert refold step. Re-fire August by hand:
+ * `report/brand-stewardship.manual-trigger.v1` { periodMonth: "2026-08-01" }.
  */
 
 const ONWARD_LOG_FETCH_LIMIT = 5000;
@@ -271,7 +291,8 @@ export { priorMonthStart } from "@/lib/clone-watch/month-window";
 
 // ── Clone-watch detections (the lookalike-domain + hosting/registrar source) ──
 
-const CLONE_FETCH_LIMIT = 3000;
+/** `.in("id", …)` chunk for the member-alert read. */
+const MEMBER_ID_CHUNK = 500;
 
 /**
  * Re-exported from its real home. The type lived here — inside an Inngest
@@ -300,7 +321,20 @@ export {
   type CloneBrandMetrics,
   type CloneDetail,
 } from "@/lib/clone-watch/clone-metrics";
-import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
+
+/**
+ * The trigger set, exported so a test can pin the ordering contract: the
+ * store's completion event, never a free-running cron that could fire before
+ * the store is written (the pre-v319 cron ran two hours early).
+ */
+export const STEWARDSHIP_TRIGGERS = [
+  { event: MONTHLY_STORE_WRITTEN_EVENT }, // { periodMonth: "YYYY-MM-01", … }
+  // Manual re-run (ops / pre-launch shadow review). Optional event.data.
+  // periodMonth ("YYYY-MM-01") overrides the window. The month's store must
+  // already be written (clone-watch/report-summary.manual-trigger.v1) or the
+  // clone section is empty — the Telegram digest says so.
+  { event: "report/brand-stewardship.manual-trigger.v1" },
+] as const;
 
 export const reportBrandStewardship = inngest.createFunction(
   {
@@ -312,13 +346,7 @@ export const reportBrandStewardship = inngest.createFunction(
     name: "Brand Stewardship: monthly report aggregation",
     retries: 2,
   },
-  [
-    { cron: "0 9 1 * *" }, // 1st of month, 09:00 UTC
-    // Manual re-run (ops / pre-launch shadow review). Optional event.data.
-    // periodMonth ("YYYY-MM-01") overrides the window — e.g. to prepare the
-    // CURRENT month for a review before the scheduled 1st-of-month run.
-    { event: "report/brand-stewardship.manual-trigger.v1" },
-  ],
+  [...STEWARDSHIP_TRIGGERS],
   withAxiomLogging(
     { fnId: "report-brand-stewardship" },
     async ({ event, step }) => {
@@ -478,55 +506,50 @@ export const reportBrandStewardship = inngest.createFunction(
         toIdMap(brandByCloneId),
       );
 
-      // Clone-watch lookalike detections for the period — the lookalike-domain +
-      // hosting/registrar source. Keyed by the impersonated brand's domain.
-      const cloneRows = await step.run("fetch-clone-detections", async () => {
+      // Clone-watch lookalike detections for the period — READ from the
+      // monthly brand store (v319), which clone-watch-report-summary wrote and
+      // froze just before emitting the event that triggered this run.
+      //
+      // Membership is the store's (alert_ids), so this step never re-derives
+      // "who counts for brand X in month M" — the window filter, the source and
+      // the cohort rules used to be restated here and could disagree with the
+      // published report. The member alerts are fetched only for the
+      // per-lookalike watch-list, which is about their state NOW.
+      const clonesFromStore = await step.run("read-clone-store", async () => {
         const sb = createServiceClient();
         if (!sb) throw new Error("brand-stewardship: clone data unavailable");
-        const { rows: data, error, truncated } = await fetchAllRows<CloneAlertRow>(
-          (from, to) =>
-            sb
-              .from("shopfront_clone_alerts")
-              // The cohort's own SELECT (clone-cohort.ts), shared with the
-              // report card. campaign_key + clone_tactic feed
-              // targeting-intelligence.ts; omitting one does not error, the
-              // distributions just come back 100% empty, which reads as thin
-              // classifier coverage rather than as a missing column.
-              .select(CLONE_COHORT_SELECT)
-              .eq("source", CLONE_COHORT_SOURCE)
-              .gte("first_seen_at", period.startIso)
-              .lt("first_seen_at", period.endIso)
-              .not("inferred_target_domain", "is", null)
-              // Exclude confirmed false positives, but KEEP untriaged rows (null) —
-              // most detections are untriaged and the digest is meant to show them.
-              .or("triage_status.is.null,triage_status.neq.fp")
-              .order("id", { ascending: true })
-              .range(from, to) as unknown as PromiseLike<{
-              data: CloneAlertRow[] | null;
-              error: { message: string } | null;
-            }>,
-          { maxRows: CLONE_FETCH_LIMIT },
-        );
-        if (error) {
-          logger.error("brand-stewardship: clone fetch failed", {
-            error: error.message,
-          });
-          throw new Error("brand-stewardship: clone data unavailable");
+        const storeRows = await readMonthlyBrandStore(sb, periodMonth);
+
+        const ids = [...new Set(storeRows.flatMap((r) => r.alert_ids ?? []))];
+        const members: CloneAlertRow[] = [];
+        for (let i = 0; i < ids.length; i += MEMBER_ID_CHUNK) {
+          const chunk = ids.slice(i, i + MEMBER_ID_CHUNK);
+          const { data, error } = await sb
+            .from("shopfront_clone_alerts")
+            .select(CLONE_COHORT_SELECT)
+            .in("id", chunk);
+          if (error) {
+            logger.error("brand-stewardship: member alert fetch failed", {
+              error: error.message,
+            });
+            throw new Error("brand-stewardship: clone data unavailable");
+          }
+          members.push(...((data ?? []) as unknown as CloneAlertRow[]));
         }
-        if (truncated) {
-          throw new Error("brand-stewardship: clone data truncated");
-        }
-        if (data.length >= CLONE_FETCH_LIMIT) {
-          logger.warn("brand-stewardship: clone fetch hit LIMIT", {
-            limit: CLONE_FETCH_LIMIT,
-            period: periodMonth,
-          });
-        }
-        // Drop generic-dictionary FP brands (domain.com.au / lendi.com.au / …)
-        // so they never surface in the digest or the LinkedIn worklist, even if
-        // a stale detection wasn't triaged 'fp'. Mirrors the Netcraft denylist.
-        return applyCohortRules((data ?? []) as unknown as CloneAlertRow[]);
+        members.sort((a, b) => a.id - b.id);
+        // Counts are frozen in the store; this only keeps a lookalike triaged
+        // `fp` SINCE publication off the brand-facing watch-list.
+        const cloneRows = applyCohortRules(members);
+        return {
+          storeRows,
+          cloneRows,
+          frozenAt: storeRows[0]?.frozen_at ?? null,
+          // Member ids that no longer resolve to a (non-fp) alert — counted in
+          // the store, missing from the watch-list. Surfaced, not hidden.
+          unreadMembers: ids.length - cloneRows.length,
+        };
       });
+      const cloneRows = clonesFromStore.cloneRows;
       // F3: per-row weaponisation risk (the ONE formula — weaponisation-risk.ts)
       // via a lightweight brand-category map (~300 rows). Inside step.run so the
       // clock read is replay-stable.
@@ -570,7 +593,18 @@ export const reportBrandStewardship = inngest.createFunction(
         }
         return out;
       });
-      const cloneAgg = aggregateClonesByDomain(cloneRows, riskByAlertId);
+      // Detail (watch-list + breakdown bars) over exactly the member alerts;
+      // the COUNTS come from the store row — see ledgerCloneMetrics.
+      const cloneDetail = aggregateClonesByDomain(cloneRows, riskByAlertId);
+      const cloneLedger = new Map<
+        string,
+        { store: LedgerStoreRow; metrics: Record<string, unknown> }
+      >(
+        clonesFromStore.storeRows.map((r) => [
+          r.brand,
+          { store: r, metrics: ledgerCloneMetrics(r, cloneDetail.get(r.brand)) },
+        ]),
+      );
 
       // Reddit community-report mentions for the period (data-prep only — the
       // brand-facing send stays gated on #371). Bounded window read; no paid API.
@@ -604,9 +638,17 @@ export const reportBrandStewardship = inngest.createFunction(
 
       if (
         aggregated.size === 0 &&
-        cloneAgg.size === 0 &&
+        cloneLedger.size === 0 &&
         redditAgg.size === 0
       ) {
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("report-brand-stewardship", 0, {
+            reason: "no_activity",
+            prepared: 0,
+            failed: 0,
+            clone_brands: 0,
+          }),
+        );
         return { ok: true, period: periodMonth, brands: 0 };
       }
 
@@ -674,7 +716,7 @@ export const reportBrandStewardship = inngest.createFunction(
         type Merged = {
           contact: KnownBrandContact;
           onward?: BrandMetrics;
-          clones?: CloneBrandMetrics;
+          clones?: Record<string, unknown>;
           reddit?: RedditBrandMetrics;
         };
         const byKey = new Map<string, Merged>();
@@ -698,19 +740,22 @@ export const reportBrandStewardship = inngest.createFunction(
         // but we DON'T drop them silently — they become 'no_contact' rows so the
         // admin can do manual outreach (find a security.txt, or LinkedIn the
         // brand's security lead). Surfaced in the dashboard + the Telegram digest.
-        const noContact = new Map<string, CloneBrandMetrics>();
+        const noContact = new Map<
+          string,
+          { store: LedgerStoreRow; metrics: Record<string, unknown> }
+        >();
 
-        for (const [brandDomain, cm] of cloneAgg) {
+        for (const [brandDomain, ledger] of cloneLedger) {
           const contact = contactByDomain.get(brandDomain);
           if (!contact) {
-            noContact.set(brandDomain, cm);
+            noContact.set(brandDomain, ledger);
             continue;
           }
           const key = (
             contact.brand_key || deriveBrandKey(contact.brand_name)
           ).toLowerCase();
           const e = byKey.get(key) ?? { contact };
-          e.clones = cm;
+          e.clones = ledger.metrics;
           byKey.set(key, e);
         }
 
@@ -758,23 +803,7 @@ export const reportBrandStewardship = inngest.createFunction(
             reported_clone_alert_ids: e.onward?.cloneAlertIds ?? [],
           };
           if (e.clones) {
-            metrics.clones = {
-              detected: e.clones.detected,
-              netcraft_reported: e.clones.netcraftReported,
-              taken_down: e.clones.takenDown,
-              declined: e.clones.declined,
-              escalated: e.clones.escalated,
-              weaponised: e.clones.weaponised,
-              weaponised_after_decline: e.clones.weaponisedAfterDecline,
-              re_taken_down: e.clones.reTakenDown,
-              top_risk: topRiskUnactioned(e.clones.domains),
-              by_classification: e.clones.byClassification,
-              by_country: e.clones.byCountry,
-              by_registrar: e.clones.byRegistrar,
-              by_asn: e.clones.byAsn,
-              domains: e.clones.domains,
-              alert_ids: e.clones.alertIds,
-            };
+            metrics.clones = e.clones;
             clonesAttached += 1;
           }
           if (e.reddit) {
@@ -816,7 +845,7 @@ export const reportBrandStewardship = inngest.createFunction(
         // row for the same brand in a later month.
         let noContactCount = 0;
         const noContactBrands: Array<{ domain: string; count: number }> = [];
-        for (const [brandDomain, cm] of noContact) {
+        for (const [brandDomain, { store, metrics: cloneMetrics }] of noContact) {
           const key = `nocontact_${deriveBrandKey(brandDomain)}`;
           if (alreadySent.has(key)) continue;
           const { error } = await sb.from("brand_stewardship_reports").upsert(
@@ -828,23 +857,7 @@ export const reportBrandStewardship = inngest.createFunction(
                 detected: 0,
                 reported_by_destination: {},
                 reports_sent: 0,
-                clones: {
-                  detected: cm.detected,
-                  netcraft_reported: cm.netcraftReported,
-                  taken_down: cm.takenDown,
-                  declined: cm.declined,
-                  escalated: cm.escalated,
-                  weaponised: cm.weaponised,
-                  weaponised_after_decline: cm.weaponisedAfterDecline,
-                  re_taken_down: cm.reTakenDown,
-                  top_risk: topRiskUnactioned(cm.domains),
-                  by_classification: cm.byClassification,
-                  by_country: cm.byCountry,
-                  by_registrar: cm.byRegistrar,
-                  by_asn: cm.byAsn,
-                  domains: cm.domains,
-                  alert_ids: cm.alertIds,
-                },
+                clones: cloneMetrics,
               },
               evidence_scam_report_ids: [],
               recipient_email: null,
@@ -864,7 +877,7 @@ export const reportBrandStewardship = inngest.createFunction(
             continue;
           }
           noContactCount += 1;
-          noContactBrands.push({ domain: brandDomain, count: cm.detected });
+          noContactBrands.push({ domain: brandDomain, count: store.clones });
         }
         noContactBrands.sort((a, b) => b.count - a.count);
 
@@ -883,12 +896,23 @@ export const reportBrandStewardship = inngest.createFunction(
       await step.run("telegram-digest", async () => {
         const lines = [
           `<b>Brand Stewardship — ${periodMonth} prepared</b>`,
-          `Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneAgg.size}</b>`,
+          `Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneLedger.size}</b>`,
           `Reports prepared (have contact): <b>${prepared.prepared}</b>`,
           `…of which carry clone detections: <b>${prepared.clones_attached}</b>`,
           `…of which carry Reddit mentions: <b>${prepared.reddit_attached}</b> (reddit-active brands: ${redditAgg.size})`,
           `Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
         ];
+        if (clonesFromStore.storeRows.length === 0) {
+          // Loud, not silent: an empty store is either a month with no clones
+          // (never, in practice) or a manual run before report-summary wrote it.
+          lines.push(
+            `⚠️ <b>Monthly clone store has 0 rows for ${periodMonth}</b> — clone section empty. Run clone-watch/report-summary.manual-trigger.v1 first.`,
+          );
+        } else if (clonesFromStore.unreadMembers > 0) {
+          lines.push(
+            `⚠️ ${clonesFromStore.unreadMembers} member alert(s) no longer readable — counts kept, watch-list shorter`,
+          );
+        }
         if (prepared.failed > 0) {
           lines.push(
             `⚠️ <b>${prepared.failed} report row(s) failed to write</b> — see brand-stewardship logs`,
@@ -909,10 +933,20 @@ export const reportBrandStewardship = inngest.createFunction(
         await sendAdminTelegramMessage(lines.join("\n"));
       });
 
+      await step.run("log-outcome", () =>
+        recordLaneOutcome("report-brand-stewardship", prepared.prepared, {
+          prepared: prepared.prepared,
+          failed: prepared.failed,
+          clone_brands: cloneLedger.size,
+          period: periodMonth,
+        }),
+      );
+
       logger.info("brand-stewardship: complete", {
         period: periodMonth,
         onwardBrands: aggregated.size,
-        cloneBrands: cloneAgg.size,
+        cloneBrands: cloneLedger.size,
+        storeFrozenAt: clonesFromStore.frozenAt,
         ...prepared,
       });
 
@@ -920,7 +954,8 @@ export const reportBrandStewardship = inngest.createFunction(
         ok: true,
         period: periodMonth,
         onward_brands: aggregated.size,
-        clone_brands: cloneAgg.size,
+        clone_brands: cloneLedger.size,
+        store_frozen_at: clonesFromStore.frozenAt,
         ...prepared,
       };
     },
