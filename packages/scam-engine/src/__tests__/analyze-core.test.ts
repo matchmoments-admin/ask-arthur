@@ -22,6 +22,7 @@ vi.mock("../pipeline", () => ({
 vi.mock("../analysis-cache", () => ({
   getCachedAnalysis: vi.fn(),
   setCachedAnalysis: vi.fn(),
+  analyzeOutputAffectingFlags: vi.fn(() => ({ asicLookup: false })),
 }));
 vi.mock("../retrieval/themes", () => ({
   getRelevantThemes: vi.fn(() => Promise.resolve([])),

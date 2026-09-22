@@ -6,6 +6,7 @@ import {
   type Verdict,
 } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { scrubPII } from "./sanitize";
 import { SYSTEM_PROMPT_HASH } from "./claude";
 
@@ -125,6 +126,23 @@ export interface AnalyzeCacheInput {
    * cached `AnalysisResult` — NOT flags that govern post-Claude enrichment.
    */
   outputAffectingFlags?: Record<string, boolean | string | number>;
+}
+
+/**
+ * The flags that change the merged analyze output for identical input — the
+ * ONE list both analyze call sites (web /api/analyze and runAnalysisCore) key
+ * the cache on, so flipping one re-keys the cache instead of replaying a result
+ * computed under the other setting.
+ *   - asicLookup: appends an ASIC red flag post-analysis.
+ *   - firstPartyUrls (FF_ANALYZE_FIRST_PARTY_URLS): can escalate the verdict.
+ *     Included only when ON so that shipping the flag dark leaves every
+ *     existing key (and its hit rate) untouched.
+ */
+export function analyzeOutputAffectingFlags(): Record<string, boolean> {
+  return {
+    asicLookup: featureFlags.asicLookup,
+    ...(featureFlags.analyzeFirstPartyUrls && { firstPartyUrls: true }),
+  };
 }
 
 function modeTag(input: AnalyzeCacheInput): string {

@@ -12,7 +12,11 @@ import { logEvent } from "@/lib/analytics-events";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
-import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { extractURLs } from "@askarthur/scam-engine/safebrowsing";
+import {
+  checkAnalyzeUrlReputation,
+  isFirstPartySource,
+} from "@askarthur/scam-engine/first-party-url-reputation";
 import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
 import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
@@ -25,7 +29,11 @@ import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
 import { hashIdentifier } from "@askarthur/utils/hash";
-import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
+import {
+  getCachedAnalysis,
+  setCachedAnalysis,
+  analyzeOutputAffectingFlags,
+} from "@askarthur/scam-engine/analysis-cache";
 import type { PhoneLookupResult } from "@askarthur/types";
 import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
@@ -198,9 +206,9 @@ export async function POST(req: NextRequest) {
         surface: "web",
         images,
         mode: cacheMode,
-        // asicLookup mutates redFlags post-analysis; key on it so flipping the
-        // flag off re-keys the cache instead of serving stale ASIC citations.
-        outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+        // Flags that change the output post-analysis (ASIC citation, first-party
+        // URL escalation) — one list, shared with runAnalysisCore.
+        outputAffectingFlags: analyzeOutputAffectingFlags(),
       });
       if (cached) {
         const geo = geolocateFromHeaders(req.headers);
@@ -358,7 +366,12 @@ export async function POST(req: NextRequest) {
         redirectChains.length > 0 ? redirectChains : undefined,
         themesPromptBlock || undefined,
       ),
-      checkURLReputation(allUrls),
+      // GSB + VirusTotal + (FF_ANALYZE_FIRST_PARTY_URLS) our own first-party
+      // threat URLs — a Weaponised clone escalates through mergeVerdict below
+      // exactly like a GSB hit. Shared with runAnalysisCore (extension + bots).
+      // Fail-open; the first-party half is bounded at 1.5 s and runs in
+      // parallel, so it adds no wall-clock latency.
+      checkAnalyzeUrlReputation(allUrls, { requestId, source: "api/analyze" }),
     ]);
 
     // 5b. Cost telemetry — fire-and-forget, wrapped in waitUntil internally.
@@ -414,12 +427,23 @@ export async function POST(req: NextRequest) {
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
 
     // 6a-clone. Clone-watch citation (Phase 2b, brand-convergence-seam) —
-    // flag-gated, default OFF. If a submitted URL is an operator-CONFIRMED
-    // clone-watch alert, add a red flag so the background NRD/CT sweep pays off
-    // in a real user check. Only CONFIRMED alerts are cited (never raw lexical
-    // matches). Never throws; the lookup rides the existing url_hash index.
-    if (featureFlags.analyzeCloneCitation && allUrls.length > 0) {
-      const clone = await lookupCloneAlert(allUrls);
+    // flag-gated FF_ANALYZE_CLONE_CITATION, default OFF, red-flag only (the
+    // ADR-0024 precedent: corroborating evidence, never a verdict weight). It
+    // cites an operator-CONFIRMED clone (tp_confirmed / tp_actioned) that is
+    // NOT a first-party reputation hit: a Weaponised clone is a scam_urls
+    // Platform Entity, so it already escalated the verdict above with its own
+    // "URL flagged by Ask Arthur Clone Watch …" red flag — citing it again
+    // would duplicate the line. What remains here is the confirmed-lookalike
+    // tail (no live phishing proven), which informs but must not escalate.
+    // Never throws; the lookup rides the existing url_hash index.
+    const firstPartyFlaggedUrls = new Set(
+      urlResults
+        .filter((r) => r.isMalicious && r.sources.some(isFirstPartySource))
+        .map((r) => r.url),
+    );
+    const citationUrls = allUrls.filter((u) => !firstPartyFlaggedUrls.has(u));
+    if (featureFlags.analyzeCloneCitation && citationUrls.length > 0) {
+      const clone = await lookupCloneAlert(citationUrls);
       if (clone) {
         aiResult.redFlags = [
           ...aiResult.redFlags,
@@ -514,7 +538,7 @@ export async function POST(req: NextRequest) {
             surface: "web",
             images,
             mode: cacheMode,
-            outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+            outputAffectingFlags: analyzeOutputAffectingFlags(),
           },
           aiResult,
         ),

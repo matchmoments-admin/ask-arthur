@@ -7,6 +7,12 @@ import { logCost } from "@/lib/cost-telemetry";
 // sweep pay off in a real user check. Given the URLs a user submitted to
 // /api/analyze, find whether any is a CONFIRMED clone-watch alert and, if so,
 // return a citation for a red flag.
+//
+// Scope since clone-watch deepening PR 5: a WEAPONISED clone is a scam_urls
+// Platform Entity and escalates the verdict through First-party URL Reputation
+// (packages/scam-engine/src/first-party-url-reputation.ts), and the analyze
+// route skips those URLs here. What this module still cites is the
+// confirmed-but-not-weaponised lookalike — informative, never a verdict weight.
 
 export interface CloneAlertCitation {
   /** The clone domain the user checked (candidate_domain). */

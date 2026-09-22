@@ -3,7 +3,8 @@
 //
 //   detectInjection(text)
 //     ├── analyzeWithClaude(text, images, mode, redirectChains?)   ─┐
-//     └── extractURLs(text) → checkURLReputation(urls)               ├─ parallel
+//     └── extractURLs(text) → checkAnalyzeUrlReputation(urls)        ├─ parallel
+//           (GSB + VirusTotal + first-party threat URLs, merged per URL)  │
 //   → mergeVerdict({ ai, urlResults, redirectChains, injection })    ┘
 //   → background fan-out: storeVerifiedScam (HIGH_RISK only),
 //                          incrementStats, setCachedAnalysis
@@ -32,17 +33,18 @@ import {
   MARKETPLACE_PROMPT_BLOCK,
   type Verdict,
 } from "./claude";
-import { extractURLs, checkURLReputation } from "./safebrowsing";
+import { extractURLs } from "./safebrowsing";
+import { checkAnalyzeUrlReputation } from "./first-party-url-reputation";
 import { resolveRedirects, extractFinalUrls } from "./redirect-resolver";
 import { storeVerifiedScam, incrementStats } from "./pipeline";
 import {
   getCachedAnalysis,
   setCachedAnalysis,
+  analyzeOutputAffectingFlags,
   type AnalyzeCacheSurface,
 } from "./analysis-cache";
 import { mergeVerdict } from "@askarthur/core-analysis";
 import { logger } from "@askarthur/utils/logger";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import type {
   AnalysisResult,
   RedirectChain,
@@ -175,9 +177,9 @@ export async function runAnalysisCore(
       surface,
       images,
       mode: aiMode,
-      // asicLookup mutates redFlags post-analysis; key on it so flipping the
-      // flag off re-keys the cache instead of serving stale ASIC citations.
-      outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+      // Flags that change the output post-analysis (ASIC citation, first-party
+      // URL escalation); key on them so a flip re-keys instead of serving stale.
+      outputAffectingFlags: analyzeOutputAffectingFlags(),
     });
     if (cached) {
       const cachedTasks: Promise<unknown>[] =
@@ -229,7 +231,20 @@ export async function runAnalysisCore(
       ? await getRelevantThemes(text, { requestId }).then(renderThemesForPrompt)
       : "";
 
+  // Axiom `source` tag for this surface (shared by the first-party URL hit log
+  // and the ASIC citation log).
+  const logSource =
+    surface === "extension"
+      ? "api/extension"
+      : surface === "bot"
+        ? "api/webhooks"
+        : "api/analyze";
+
   // 4. Parallel: AI analysis + URL reputation. (aiMode derived above.)
+  // URL reputation = GSB + VirusTotal + (FF_ANALYZE_FIRST_PARTY_URLS) our own
+  // high/confirmed first-party threat URLs — e.g. a Weaponised clone — so a
+  // first-party hit escalates through mergeVerdict exactly like a GSB hit.
+  // Same helper as the web route; fail-open, 1.5 s bound on the first-party half.
   const [aiResult, urlResults] = await Promise.all([
     analyzeWithClaude(
       text,
@@ -240,7 +255,7 @@ export async function runAnalysisCore(
       marketplace ? MARKETPLACE_PROMPT_BLOCK : undefined,
     ),
     urlsToCheck.length > 0
-      ? checkURLReputation(urlsToCheck)
+      ? checkAnalyzeUrlReputation(urlsToCheck, { requestId, source: logSource })
       : Promise.resolve([]),
   ]);
 
@@ -286,15 +301,7 @@ export async function runAnalysisCore(
   await applyAsicCitation(
     result,
     [text, ...urlsToCheck].filter(Boolean).join(" "),
-    {
-      requestId,
-      source:
-        surface === "extension"
-          ? "api/extension"
-          : surface === "bot"
-            ? "api/webhooks"
-            : "api/analyze",
-    },
+    { requestId, source: logSource },
   );
 
   // 6. Background fan-out.
@@ -329,7 +336,7 @@ export async function runAnalysisCore(
             surface,
             images,
             mode: aiMode,
-            outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+            outputAffectingFlags: analyzeOutputAffectingFlags(),
           },
           result,
         ),

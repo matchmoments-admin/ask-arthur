@@ -51,6 +51,7 @@ vi.mock("@askarthur/scam-engine/pipeline", () => ({
 vi.mock("@askarthur/scam-engine/analysis-cache", () => ({
   getCachedAnalysis: vi.fn(() => Promise.resolve(null)),
   setCachedAnalysis: vi.fn(() => Promise.resolve()),
+  analyzeOutputAffectingFlags: vi.fn(() => ({ asicLookup: false })),
 }));
 
 vi.mock("@askarthur/utils/logger", () => ({
