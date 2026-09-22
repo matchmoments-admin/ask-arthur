@@ -5,7 +5,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { logCost } from "@/lib/cost-telemetry";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * PR-D1 (#497) — Weekly FP-cluster digest.
@@ -124,6 +124,13 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
 
       if (rows.length === 0) {
         logger.info("clone-watch fp-cluster-digest: no FPs in window");
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("shopfront-clone-fp-cluster-digest", 0, {
+            reason: "no_fps_in_window",
+            clusters: 0,
+            fp_count: 0,
+          }),
+        );
         return { ok: true, clusters: 0, window_days: WINDOW_DAYS };
       }
 
@@ -134,6 +141,13 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
           fp_count: rows.length,
           min_cluster_size: MIN_CLUSTER_SIZE,
         });
+        await step.run("log-outcome-quiet", () =>
+          recordLaneOutcome("shopfront-clone-fp-cluster-digest", 0, {
+            reason: "no_clusters_above_threshold",
+            clusters: 0,
+            fp_count: rows.length,
+          }),
+        );
         return {
           ok: true,
           clusters: 0,
@@ -148,18 +162,14 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
         );
       });
 
-      logCost({
-        feature: "shopfront_clone_fp_cluster_digest",
-        provider: "telegram",
-        operation: "weekly_digest",
-        units: 0,
-        unitCostUsd: 0,
-        metadata: {
+      // Inside a step (was a bare await after one — lost on replay/cancel).
+      await step.run("log-outcome", () =>
+        recordLaneOutcome("shopfront-clone-fp-cluster-digest", clusters.length, {
           clusters: clusters.length,
           fp_count: rows.length,
           window_days: WINDOW_DAYS,
-        },
-      });
+        }),
+      );
 
       logger.info("clone-watch fp-cluster-digest: done", {
         clusters: clusters.length,

@@ -966,7 +966,7 @@ default 10 URLs/day for it.
 > Read `resubmit.validated` / `resubmit.status` / `resubmit.response` off the
 > run. A non-2xx here is the answer to the open question — Netcraft's limit on
 > the `reason` field. In a real run a rejection soft-fails ($0 diagnostic under
-> `shopfront-clone-netcraft-resubmit-error`, rows left unmarked, retried next
+> `shopfront_clone_netcraft_resubmit_error`, rows left unmarked, retried next
 > run): nothing breaks, but the submission is wasted.
 >
 > Note this still does NOT confirm the flag reached the runtime — test mode
@@ -979,7 +979,7 @@ default 10 URLs/day for it.
 -- lane outcome (candidates / live / dead / marked / brands / netcraft_uuid)
 select created_at, metadata from cost_telemetry
 where feature in ('shopfront_clone_netcraft_resubmit',
-                  'shopfront-clone-netcraft-resubmit-error')
+                  'shopfront_clone_netcraft_resubmit_error')
 order by created_at desc limit 5;
 
 -- rows that actually moved

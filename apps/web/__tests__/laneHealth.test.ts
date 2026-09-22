@@ -106,18 +106,24 @@ function healthyRows(): LaneCostRow[] {
       permanentRejects: 0,
       braked: false,
     }),
-    outcomeRow("shopfront-clone-netcraft-resubmit", 20, 3, {
+    outcomeRow("shopfront-clone-netcraft-auto/resubmit", 20, 3, {
       candidates: 13,
       marked: 3,
       deferred: 10,
       dead: 10,
     }),
     outcomeRow("shopfront-clone-netcraft-reconcile", 3, 12, { uuids: 12 }),
-    outcomeRow("shopfront-clone-nrd-daily-ingest", 22, 70000, {
+    outcomeRow("shopfront-nrd-daily-ingest", 22, 70000, {
       domains_scanned: 70000,
       hits_found: 27,
       total_chunks: 1,
       failed_chunks: 0,
+    }),
+    outcomeRow("clone-watch-auto-triage", 20, 3, {
+      parked: 2,
+      eligible: 3,
+      confirmed: 1,
+      offline: 2,
     }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
     rawRow("shopfront_clone_preclassify", "classify", 5, { is_clone: true }),
@@ -207,7 +213,7 @@ describe("classifyLaneHealth", () => {
       classifyLaneHealth(without("nrd_daily_ingest"), { now: NOW }),
     ).toEqual([
       expect.objectContaining({
-        lane: "shopfront-clone-nrd-daily-ingest",
+        lane: "shopfront-nrd-daily-ingest",
         kind: "absent",
       }),
     ]);
@@ -293,6 +299,51 @@ describe("classifyLaneHealth", () => {
     ]);
   });
 
+  it("auto-triage pages when every eligible row is neither confirmed nor offline (a mis-set confirm threshold)", () => {
+    const rows = without("run");
+    for (const hoursAgo of [20, 44]) {
+      rows.push(
+        outcomeRow("clone-watch-auto-triage", hoursAgo, 5, {
+          parked: 1,
+          eligible: 5,
+          confirmed: 0,
+          offline: 0,
+        }),
+      );
+    }
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "clone-watch-auto-triage",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
+  it("auto-triage is quiet when nothing was eligible (reason set), and when liveness explained the misses", () => {
+    const quiet = without("run");
+    quiet.push(
+      outcomeRow("clone-watch-auto-triage", 20, 0, {
+        reason: "no_eligible",
+        parked: 0,
+        eligible: 0,
+        confirmed: 0,
+        offline: 0,
+      }),
+    );
+    expect(classifyLaneHealth(quiet, { now: NOW })).toEqual([]);
+
+    const allOffline = without("run");
+    allOffline.push(
+      outcomeRow("clone-watch-auto-triage", 20, 4, {
+        parked: 0,
+        eligible: 4,
+        confirmed: 0,
+        offline: 4,
+      }),
+    );
+    expect(classifyLaneHealth(allOffline, { now: NOW })).toEqual([]);
+  });
+
   it("the event-driven feed-platform lane is never 'absent', only silent_zero", () => {
     const none = without("feed_batch");
     expect(classifyLaneHealth(none, { now: NOW })).toEqual([]);
@@ -349,7 +400,7 @@ describe("classifyLaneHealth", () => {
         permanentRejects: 0,
         braked: false,
       }),
-      outcomeRow("shopfront-clone-netcraft-resubmit", 20, 0, {
+      outcomeRow("shopfront-clone-netcraft-auto/resubmit", 20, 0, {
         reason: "all_dead",
         candidates: 9,
         dead: 9,
@@ -368,7 +419,7 @@ describe("classifyLaneHealth", () => {
     );
     expect(classifyLaneHealth(starved, { now: NOW })).toEqual([
       expect.objectContaining({
-        lane: "shopfront-clone-netcraft-resubmit",
+        lane: "shopfront-clone-netcraft-auto/resubmit",
         kind: "silent_zero",
       }),
     ]);
@@ -399,5 +450,30 @@ describe("classifyLaneHealth", () => {
       rawRow("hive_ai", "image_check", 1, { anything: 0 }),
     ];
     expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
+  });
+});
+
+// A flag-off Lane writes nothing by design; `enabled()` keeps it from paging
+// "absent" every day, and it pages the moment the flag is on and rows stop.
+describe("classifyLaneHealth — enabled() gate", () => {
+  it("skips a disabled lane, flags it absent once enabled", async () => {
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
+    const flags = featureFlags as unknown as Record<string, boolean>;
+    const saved = { e: flags.cloneEnforcement, r: flags.cloneReemergenceMonitor };
+    try {
+      flags.cloneEnforcement = false;
+      flags.cloneReemergenceMonitor = false;
+      expect(
+        classifyLaneHealth([]).some((p) => p.lane === "shopfront-clone-reemergence-monitor"),
+      ).toBe(false);
+      flags.cloneEnforcement = true;
+      flags.cloneReemergenceMonitor = true;
+      expect(
+        classifyLaneHealth([]).find((p) => p.lane === "shopfront-clone-reemergence-monitor")?.kind,
+      ).toBe("absent");
+    } finally {
+      flags.cloneEnforcement = saved.e;
+      flags.cloneReemergenceMonitor = saved.r;
+    }
   });
 });

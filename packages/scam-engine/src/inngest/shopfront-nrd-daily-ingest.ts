@@ -113,7 +113,7 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       });
 
       await step.run("log-cost-telemetry", () =>
-        recordLaneOutcome("shopfront-clone-nrd-daily-ingest", domains.length, {
+        recordLaneOutcome("shopfront-nrd-daily-ingest", domains.length, {
           domains_scanned: domains.length,
           hits_found: hits.length,
           rows_inserted: upsertResult.inserted,

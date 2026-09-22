@@ -117,30 +117,53 @@ export async function logFunctionFailure(
   }
 }
 
+/** A feature brake read has THREE outcomes, not two — the third is the one
+ *  every hand-rolled check collapsed differently. */
+export type BrakeState = "engaged" | "clear" | "unknown";
+
 /**
- * Read-side cost-brake check for any feature. Generic version of
- * isRedditIntelBraked — returns true when feature_brakes has a row for
- * `feature` with paused_until in the future. Best-effort: any DB error
- * returns false (don't block the pipeline if the brake check itself fails).
+ * The ONE read of `feature_brakes`. `unknown` = the read itself failed (no
+ * client, PostgREST error, throw). Callers choose the policy for `unknown`
+ * through the two wrappers below — never by re-implementing the read.
+ * (Before 2026-09-23 there were five copies: isFeatureBraked treated a
+ * PostgREST error — returned, not thrown — as `clear`, while three inline
+ * copies treated it as `engaged`, so outbound Lanes proceeded on a DB error
+ * while notify Lanes stopped.)
  *
  * cost-daily-check sets these rows when a feature's daily spend exceeds its
  * configured cap (see apps/web/app/api/cron/cost-daily-check/route.ts).
  */
-export async function isFeatureBraked(feature: string): Promise<boolean> {
+export async function brakeState(feature: string): Promise<BrakeState> {
   const supabase = createServiceClient();
-  if (!supabase) return false;
+  if (!supabase) return "unknown";
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("feature_brakes")
       .select("paused_until")
       .eq("feature", feature)
       .maybeSingle();
-    if (!data) return false;
-    const pausedUntil = data.paused_until
-      ? new Date(data.paused_until as string)
+    if (error) {
+      logger.warn("brakeState: lookup failed", { feature, error: error.message });
+      return "unknown";
+    }
+    const pausedUntil = data?.paused_until
+      ? new Date(data.paused_until as string).getTime()
       : null;
-    return !!(pausedUntil && pausedUntil.getTime() > Date.now());
-  } catch {
-    return false;
+    return pausedUntil && pausedUntil > Date.now() ? "engaged" : "clear";
+  } catch (err) {
+    logger.warn("brakeState: lookup threw", { feature, error: String(err) });
+    return "unknown";
   }
+}
+
+/** Fail-OPEN: only a confirmed engaged brake stops the caller. For pipelines
+ *  where a skipped run costs more than a possibly-braked one. */
+export async function isFeatureBraked(feature: string): Promise<boolean> {
+  return (await brakeState(feature)) === "engaged";
+}
+
+/** Fail-CLOSED: an unreadable brake counts as engaged. For Lanes that spend
+ *  money or send outbound (vendor reports, emails, paid APIs). */
+export async function isFeatureBrakedOrUnknown(feature: string): Promise<boolean> {
+  return (await brakeState(feature)) !== "clear";
 }

@@ -13,7 +13,7 @@ import WeaponisedCloneAlert, {
   type WeaponisedCloneAlertProps,
 } from "@/emails/WeaponisedCloneAlert";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import { resolveEmailCopy } from "@/lib/email/resolve-copy";
 import {
   decideNotificationAction,
@@ -21,6 +21,7 @@ import {
 } from "./clone-watch-notify-brand";
 import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
 import { readAttribution } from "@/lib/clone-watch/attribution";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 
 /**
  * F1 — weaponisation early-warning brand alert.
@@ -103,23 +104,10 @@ export const cloneWatchNotifyWeaponised = inngest.createFunction(
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
       // Cost brake — shares the outreach brake with the routine sends.
-      const brakeEngaged = await step.run("check-brake", async () => {
-        const { data: brake, error } = await sb
-          .from("feature_brakes")
-          .select("paused_until")
-          .eq("feature", "shopfront_clone_outreach")
-          .maybeSingle();
-        if (error) {
-          logger.warn("clone-watch weaponised: brake lookup failed", {
-            error: error.message,
-          });
-          return true; // conservative
-        }
-        return Boolean(
-          brake?.paused_until &&
-            new Date(brake.paused_until).getTime() > Date.now(),
-        );
-      });
+      const brakeEngaged = await step.run("check-brake", () =>
+        // Fail-closed: an unreadable brake counts as engaged (outbound send).
+        isFeatureBrakedOrUnknown("shopfront_clone_outreach"),
+      );
       if (brakeEngaged) {
         return { skipped: true, reason: "cost_brake_engaged" };
       }
@@ -353,7 +341,7 @@ export const cloneWatchNotifyWeaponised = inngest.createFunction(
       });
 
       await step.run("log-cost", async () => {
-        logCost({
+        await logCostAsync({
           feature: "shopfront_clone_notify_brand",
           provider: "queue",
           operation: "weaponised_enqueue",

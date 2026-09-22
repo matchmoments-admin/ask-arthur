@@ -1,7 +1,7 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -24,6 +24,7 @@ import {
   type KitPivotOutcome,
   type KitPivotRow,
 } from "@/lib/clone-watch/kit-pivot";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Clone-watch attribution enricher (Phase 2). Builds the per-clone dossier —
@@ -157,7 +158,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       }
 
       const braked = await step.run("check-brake", () =>
-        isFeatureBraked(BRAKE),
+        isFeatureBrakedOrUnknown(BRAKE),
       );
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
@@ -445,6 +446,18 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         kitPivotNotReachedQuota: kitPivots.notReachedQuota,
         kitPivotNotReachedBudget: kitPivots.notReachedBudget,
       });
+      // One Outcome Row per run, quiet or not (ADR-0025). This Lane wrote no
+      // cost_telemetry at all before 2026-09-23, so six silent days
+      // (09-11..16) were indistinguishable from "nothing to enrich".
+      await step.run("log-outcome", () =>
+        recordLaneOutcome("clone-watch-enrich-attribution", enriched, {
+          ...(pending.length === 0 ? { reason: "nothing_pending" as const } : {}),
+          pending: pending.length,
+          enriched,
+          backfilled: backfill.written,
+          kit_pivoted: kitPivots.written,
+        }),
+      );
       return {
         ok: true,
         candidates: pending.length,

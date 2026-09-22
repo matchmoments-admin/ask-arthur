@@ -5,7 +5,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { logCost } from "@/lib/cost-telemetry";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Layer 5 — weekly digest of clone-watch activity. Cron Sun 09:00 UTC
@@ -282,21 +282,14 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
         await sendAdminTelegramMessage(telegramMessage);
       });
 
-      await step.run("log-cost", async () => {
-        logCost({
-          feature: "shopfront_clone_weekly_digest",
-          provider: "telegram",
-          operation: "weekly_digest_send",
-          units: 1,
-          unitCostUsd: 0,
-          metadata: {
-            period,
-            candidates_total: metrics.candidates_total,
-            triaged_tp: metrics.triaged_tp,
-            brands_touched: metrics.brands_touched,
-          },
-        });
-      });
+      await step.run("log-cost", () =>
+        recordLaneOutcome("shopfront-clone-weekly-digest", 1, {
+          period,
+          candidates_total: metrics.candidates_total,
+          triaged_tp: metrics.triaged_tp,
+          brands_touched: metrics.brands_touched,
+        }),
+      );
 
       logger.info("clone-watch weekly digest sent", {
         period,

@@ -35,6 +35,7 @@ import {
   toJevRpcArgs,
   type JevPreclassifyInput,
 } from "@/lib/clone-watch/jev-preclassify";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 
 /** Shadow-mode telemetry tags (rollback + repair). */
 export const JEV_COST_FEATURE = "shopfront_clone_preclassify_jev";
@@ -54,21 +55,8 @@ type Sb = NonNullable<ReturnType<typeof createServiceClient>>;
  * (a paid vendor call is the thing being protected). Used by both modes'
  * callers before spending.
  */
-export async function isPreclassifyBraked(sb: Sb): Promise<boolean> {
-  const { data, error } = await sb
-    .from("feature_brakes")
-    .select("paused_until")
-    .eq("feature", BRAKE)
-    .maybeSingle();
-  if (error) {
-    logger.warn("clone-watch preclassify: brake lookup failed", {
-      error: error.message,
-    });
-    return true;
-  }
-  return Boolean(
-    data?.paused_until && new Date(data.paused_until).getTime() > Date.now(),
-  );
+export async function isPreclassifyBraked(): Promise<boolean> {
+  return isFeatureBrakedOrUnknown(BRAKE);
 }
 
 export class JevPrimaryError extends Error {

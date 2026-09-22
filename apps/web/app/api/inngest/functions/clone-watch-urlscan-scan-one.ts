@@ -6,7 +6,7 @@ import {
 } from "@askarthur/scam-engine/inngest/events";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 
 /**
@@ -66,7 +66,7 @@ export const cloneWatchUrlscanScanOne = inngest.createFunction(
     // reach 20, and the limit could not fire however hard the button was
     // clicked. Writing one row per operator scan is what makes it real.
     await step.run("log-cost", async () => {
-      logCost({
+      await logCostAsync({
         feature: "shopfront_clone_urlscan",
         provider: "urlscan",
         operation: "scan_one",

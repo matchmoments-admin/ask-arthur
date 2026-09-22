@@ -1,4 +1,4 @@
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
@@ -190,7 +190,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         return { skipped: true, reason: "FF_CLONE_NETCRAFT_ISSUE disabled" };
       }
       const braked = await step.run("check-brake", () =>
-        isFeatureBraked(BRAKE),
+        isFeatureBrakedOrUnknown(BRAKE),
       );
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };

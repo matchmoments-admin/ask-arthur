@@ -39,9 +39,9 @@ describe("KNOWN_BRAKE_KEYS covers the keys workers check", () => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full);
-        else if (e.name.endsWith(".ts")) {
+        else if (e.name.endsWith(".ts") && !e.name.endsWith(".test.ts")) {
           const src = fs.readFileSync(full, "utf8");
-          for (const m of src.matchAll(/isFeatureBraked\("([a-z0-9_]+)"\)/g)) found.add(m[1]);
+          for (const m of src.matchAll(/isFeatureBraked(?:OrUnknown)?\("([a-z0-9_]+)"\)/g)) found.add(m[1]);
           for (const m of src.matchAll(/const (?:\w*BRAKE\w*) = "([a-z0-9_]+)"/g)) found.add(m[1]);
           // Raw feature_brakes lookups/writes the helper doesn't wrap (e.g. the
           // cost cron's auto-pause upserts). SCOPED to feature_brakes blocks:
