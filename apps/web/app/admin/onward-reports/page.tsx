@@ -6,7 +6,12 @@ import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 interface ReviewRow {
   id: string;
+  /** scam_report | clone_alert (v318 — one ledger for both sources). */
+  source: string;
   scam_report_id: number | null;
+  clone_alert_id: number | null;
+  /** The per-URL dedup key (host+path) — what a URL-blocklist row reported. */
+  url_key: string | null;
   destination: string;
   destination_key: string | null;
   status: string;
@@ -24,6 +29,8 @@ interface SentStats {
   total: number;
   last30d: number;
   byDestination: Record<string, number>;
+  /** scam_report vs clone_alert (v318). */
+  bySource: Record<string, number>;
 }
 
 /**
@@ -31,26 +38,42 @@ interface SentStats {
  * (status='sent' only — never claims a takedown). Date math lives here, not in
  * the component render. 0 today until the onward flags are flipped.
  */
+// One ledger, two producers (v318, ADR-0018 amendment 2026-09-23).
+const SOURCE_LABEL: Record<string, string> = {
+  scam_report: "scam reports",
+  clone_alert: "clone-watch",
+};
+
 async function loadSentStats(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   loadErrors: string[],
 ): Promise<SentStats> {
-  const stats: SentStats = { total: 0, last30d: 0, byDestination: {} };
+  const stats: SentStats = {
+    total: 0,
+    last30d: 0,
+    byDestination: {},
+    bySource: {},
+  };
   // `.limit(5000)` returned at most 1000 rows, so `stats.total` — a lifetime
   // running total — was guaranteed wrong the moment the table passed 1000.
   // Paged, because the per-destination tally needs the rows, not just a count.
   const { rows: sentRows, error: qe1 } = await fetchAllRows<{
     destination: string;
+    source: string;
     sent_at: string | null;
   }>(
     (from, to) =>
       supabase
         .from("onward_report_log")
-        .select("destination, sent_at")
+        .select("destination, source, sent_at")
         .eq("status", "sent")
         .order("id", { ascending: true })
         .range(from, to) as unknown as PromiseLike<{
-        data: Array<{ destination: string; sent_at: string | null }> | null;
+        data: Array<{
+          destination: string;
+          source: string;
+          sent_at: string | null;
+        }> | null;
         error: { message: string } | null;
       }>,
     { maxRows: 200_000 },
@@ -64,6 +87,8 @@ async function loadSentStats(
     }
     const d = r.destination as string;
     stats.byDestination[d] = (stats.byDestination[d] ?? 0) + 1;
+    const src = r.source ?? "scam_report";
+    stats.bySource[src] = (stats.bySource[src] ?? 0) + 1;
   }
   return stats;
 }
@@ -78,15 +103,20 @@ export default async function OnwardReportsPage() {
   let recent: ReviewRow[] = [];
   const sentStats = supabase
     ? await loadSentStats(supabase, loadErrors)
-    : { total: 0, last30d: 0, byDestination: {} as Record<string, number> };
+    : {
+        total: 0,
+        last30d: 0,
+        byDestination: {} as Record<string, number>,
+        bySource: {} as Record<string, number>,
+      };
 
   if (supabase) {
     // Manual-review queue (held pending admin approval)
     const { data: pending, error: qe2 } = await supabase
       .from("onward_report_log")
       .select(
-        `id, scam_report_id, destination, destination_key, status,
-         status_reason, queued_at,
+        `id, source, scam_report_id, clone_alert_id, url_key, destination,
+         destination_key, status, status_reason, queued_at,
          scam_reports ( scam_type, impersonated_brand, channel )`,
       )
       .eq("status", "manual_review")
@@ -98,8 +128,8 @@ export default async function OnwardReportsPage() {
     const { data: recentRows, error: qe3 } = await supabase
       .from("onward_report_log")
       .select(
-        `id, scam_report_id, destination, destination_key, status,
-         status_reason, queued_at,
+        `id, source, scam_report_id, clone_alert_id, url_key, destination,
+         destination_key, status, status_reason, queued_at,
          scam_reports ( scam_type, impersonated_brand, channel )`,
       )
       .neq("status", "manual_review")
@@ -156,7 +186,10 @@ export default async function OnwardReportsPage() {
             : null;
         return {
           id: r.id as string,
+          source: (r.source as string | null) ?? "scam_report",
           scam_report_id: r.scam_report_id as number | null,
+          clone_alert_id: r.clone_alert_id as number | null,
+          url_key: r.url_key as string | null,
           destination: r.destination as string,
           destination_key: r.destination_key as string | null,
           status: r.status as string,
@@ -208,6 +241,11 @@ export default async function OnwardReportsPage() {
             {Object.entries(sentStats.byDestination)
               .sort((a, b) => b[1] - a[1])
               .map(([d, n]) => `${d}: ${n}`)
+              .join(" · ")}
+            {" — by source: "}
+            {Object.entries(sentStats.bySource)
+              .sort((a, b) => b[1] - a[1])
+              .map(([src, n]) => `${SOURCE_LABEL[src] ?? src}: ${n}`)
               .join(" · ")}
           </p>
         ) : (

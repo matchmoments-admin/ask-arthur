@@ -638,7 +638,9 @@ export const featureFlags = {
 
   /** Wave 1 master — multi-channel enforcement layer (clone-watch-enforcement-*
    *  Inngest fns). When ON, a weaponised.v1 event opens enforcement CASES in
-   *  shopfront_takedown_attempts (the audit record). Opening cases performs NO
+   *  shopfront_takedown_attempts for the human-gated levers (auto blocklist
+   *  sends open no case since v318 — they are onward_report_log rows with
+   *  source='clone_alert'). Opening cases performs NO
    *  outbound reporting — every domain-level send stays human-gated behind its
    *  own channel flag + the /admin enforcement tab (the itch.io false-takedown
    *  invariant). Default OFF. Kill-switch: feature_brakes.clone_enforcement. */
@@ -647,8 +649,10 @@ export const featureFlags = {
   /** Wave 1 — the ONLY machine-send channel: auto-report weaponised lookalikes to
    *  the reversible, re-verified ecosystem blocklists (APWG + OpenPhish) via
    *  email. Domain-level levers (registrar/host/UDRP) NEVER auto-send — they stay
-   *  human-gated (itch.io invariant). Sub-flag of FF_CLONE_ENFORCEMENT so the send
-   *  can canary after cases have been eyeballed in the admin tab. Default OFF.
+   *  human-gated (itch.io invariant). Sub-flag of FF_CLONE_ENFORCEMENT. Default OFF.
+   *  Since v318 the execute step ENQUEUES onto the onward ledger and the
+   *  report.onward.<dest> workers send, so a destination is only used when its
+   *  worker flag (FF_ONWARD_OPENPHISH / FF_ONWARD_APWG) is ALSO on.
    *  Set ONWARD_CANARY_RECIPIENT first to route the initial reports to our own
    *  inbox until the format + acceptance are confirmed. Bounded by the shared
    *  daily cap CLONE_SUBMISSION_DAILY_CAP. */

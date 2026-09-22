@@ -5,18 +5,25 @@ import {
   runUrlBlocklistOnward,
   type OnwardStepCtx,
 } from "@/lib/onward/url-blocklist-report";
+import { URL_BLOCKLIST_DESTINATIONS } from "@/lib/onward/destinations";
 
 /**
- * Onward destination: OpenPhish community blocklist (report@openphish.com).
+ * Onward destination: OpenPhish community blocklist (intake address in
+ * lib/onward/destinations.ts). Sends BOTH ledger subjects — scam reports and,
+ * since v318, clone-watch lookalikes (shopfront-clone-enforcement-execute).
  *
  * OpenPhish's free submission path is email — its REST submit endpoint
  * requires a static source IP we don't have on Vercel serverless. So we
  * forward the suspected phishing URL(s) by email, mirroring onward-acma.ts.
  *
  * Gated by FF_ONWARD_OPENPHISH (default OFF) + RESEND_API_KEY presence.
- * Conservative rate-limit so we read as a normal forwarder, not a firehose.
+ * Conservative send rate so we read as a normal forwarder, not a firehose.
+ * `throttle`, not `rateLimit`: rateLimit DISCARDS events over the limit, and a
+ * discarded event here is a ledger row left `queued` forever (never sent, never
+ * failed). Since v318 two producers share this worker, so an over-limit burst
+ * is plausible; throttle queues the excess and sends it at the same rate.
  */
-const OPENPHISH_INTAKE = "report@openphish.com";
+const OPENPHISH = URL_BLOCKLIST_DESTINATIONS.openphish;
 
 // inngest-finish-budget: 4 boundaries — this file has NO step.run of its own;
 // all four steps live in runUrlBlocklistOnward (lib/onward/url-blocklist-report.ts),
@@ -28,7 +35,7 @@ export const onwardOpenphish = inngest.createFunction(
     timeouts: { finish: "5m" },
     name: "Onward report: OpenPhish blocklist",
     retries: 4,
-    rateLimit: {
+    throttle: {
       limit: 60,
       period: "1h",
       key: "event.data.destination_key",
@@ -41,8 +48,8 @@ export const onwardOpenphish = inngest.createFunction(
       // generic run()); shapes are compatible at runtime.
       { event, step } as unknown as OnwardStepCtx,
       {
-        intakeEmail: OPENPHISH_INTAKE,
-        intakeName: "OpenPhish",
+        intakeEmail: OPENPHISH.destinationKey,
+        intakeName: OPENPHISH.intakeName,
         featureEnabled: featureFlags.onwardOpenphish,
         logFeature: "onward_openphish",
         logOperation: "openphish_url_forward",

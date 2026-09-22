@@ -4,19 +4,29 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { logger } from "@askarthur/utils/logger";
+import { enabledUrlBlocklistDestinations } from "@/lib/onward/destinations";
+import {
+  enqueueUrlBlocklistReports,
+  onwardEventsFor,
+  type UrlReportRequest,
+} from "@/lib/onward/url-blocklist-report";
 
 /**
  * Proactive onward-report producer (WS2 — "report on behalf of brands without
  * being asked").
  *
- * Hourly cron that sweeps recent HIGH_RISK scam_reports carrying a scammer URL
- * and enqueues onward reports to the enabled URL-blocklist destinations
- * (OpenPhish / APWG), then fires the report.onward.<destination> events the
- * existing workers consume. No human gate — auto-fire is acceptable for
- * neutral blocklists; safety comes from (a) HIGH_RISK + has-URL filter,
- * (b) the worker rate-limits (60/hr), (c) the onward_report_log dedup unique
- * index on (scam_report_id, destination, destination_key) so re-scanning the
- * lookback window never double-reports.
+ * Sweeps recent HIGH_RISK scam_reports carrying a scammer URL and enqueues
+ * onward reports to the enabled URL-blocklist destinations (OpenPhish / APWG),
+ * then fires the report.onward.<destination> events the existing workers
+ * consume. No human gate — auto-fire is acceptable for neutral blocklists;
+ * safety comes from (a) HIGH_RISK + has-URL filter, (b) the worker throttle
+ * (60/hr per intake), (c) the dedup in enqueue_onward_url_reports (v318): the
+ * v119 (scam_report_id, destination, destination_key) unique AND the per-URL
+ * (destination, destination_key, url_key) unique, so re-scanning the lookback
+ * window never double-reports and a URL already reported — by another scam
+ * report or by clone-watch enforcement — is not reported again (ADR-0018 F9).
+ * The dedup key is the report's PRIMARY (first) scammer URL; the email still
+ * lists every URL.
  *
  * Triple-gated:
  *   - FF_ONWARD_AUTO_REPORT  → whether the producer runs at all
@@ -34,31 +44,6 @@ import { logger } from "@askarthur/utils/logger";
 
 const LOOKBACK_HOURS = 24;
 const CANDIDATE_LIMIT = 200;
-
-export interface UrlBlocklistDestination {
-  destination: "openphish" | "apwg";
-  destinationKey: string;
-}
-
-const OPENPHISH: UrlBlocklistDestination = {
-  destination: "openphish",
-  destinationKey: "report@openphish.com",
-};
-const APWG: UrlBlocklistDestination = {
-  destination: "apwg",
-  destinationKey: "reportphishing@apwg.org",
-};
-
-/** Which URL-blocklist destinations are enabled by their per-destination flags. */
-export function enabledUrlBlocklistDestinations(flags: {
-  onwardOpenphish: boolean;
-  onwardApwg: boolean;
-}): UrlBlocklistDestination[] {
-  const out: UrlBlocklistDestination[] = [];
-  if (flags.onwardOpenphish) out.push(OPENPHISH);
-  if (flags.onwardApwg) out.push(APWG);
-  return out;
-}
 
 /** Extract scammer URLs from a scam_reports.analysis_result JSON blob. */
 export function extractScammerUrls(analysisResult: unknown): string[] {
@@ -140,47 +125,21 @@ export const onwardAutoReport = inngest.createFunction(
       return { ok: true, candidates: 0, enqueued: 0 };
     }
 
-    // Enqueue onward_report_log rows (dedup via the v119 unique index) and
-    // collect the freshly-inserted (log_id, scam_report_id, destination) so we
-    // only fire events for genuinely-new reports.
+    // Enqueue through the ONE URL-blocklist path; it returns only the rows it
+    // inserted, so events fire for genuinely new reports only.
     const fresh = await step.run("enqueue-rows", async () => {
       const sb = createServiceClient();
-      if (!sb) return [] as Array<{
-        log_id: string;
-        scam_report_id: number;
-        destination: string;
-        destination_key: string;
-      }>;
-      const rows = candidates.flatMap((c) =>
+      if (!sb) return [];
+      const rows: UrlReportRequest[] = candidates.flatMap((c) =>
         destinations.map((d) => ({
+          source: "scam_report" as const,
           scam_report_id: c.id,
           destination: d.destination,
           destination_key: d.destinationKey,
-          status: "queued",
-          provider: "inngest",
+          url: extractScammerUrls(c.analysis_result)[0],
         })),
       );
-      // ignoreDuplicates → conflicting (already-reported) rows are skipped and
-      // NOT returned, so `inserted` is exactly the new work.
-      const { data: inserted, error } = await sb
-        .from("onward_report_log")
-        .upsert(rows, {
-          onConflict: "scam_report_id,destination,destination_key",
-          ignoreDuplicates: true,
-        })
-        .select("id, scam_report_id, destination, destination_key");
-      if (error) {
-        logger.error("onward-auto-report: enqueue failed", {
-          error: error.message,
-        });
-        return [];
-      }
-      return (inserted ?? []).map((r) => ({
-        log_id: r.id as string,
-        scam_report_id: r.scam_report_id as number,
-        destination: r.destination as string,
-        destination_key: r.destination_key as string,
-      }));
+      return enqueueUrlBlocklistReports(sb, rows);
     });
 
     if (fresh.length === 0) {
@@ -188,17 +147,7 @@ export const onwardAutoReport = inngest.createFunction(
     }
 
     await step.run("fire-events", async () => {
-      await inngest.send(
-        fresh.map((r) => ({
-          name: `report.onward.${r.destination}`,
-          data: {
-            log_id: r.log_id,
-            scam_report_id: r.scam_report_id,
-            destination_key: r.destination_key,
-            analysis_id: null,
-          },
-        })),
-      );
+      await inngest.send(onwardEventsFor(fresh));
     });
 
     logger.info("onward-auto-report: enqueued", {

@@ -455,6 +455,34 @@ INSERT regulator_alert_pushes (report_id, destination, delivered_at)
 
 **Why event-driven, not cron:** these submissions are bursty and admin-approved. Cron polling would either lag or burn cost. Event-driven Inngest gives durable retry per destination with native idempotency on `report_id × destination`.
 
+### 6b. URL-blocklist reports — one ledger, two producers (v318)
+
+OpenPhish / APWG reports come from two proactive producers and share ONE path
+(ADR-0018 amendment 2026-09-23). Neither producer sends; both enqueue.
+
+```
+report-onward-auto-report (HIGH_RISK scam_reports)      shopfront-clone-enforcement-execute (weaponised clones)
+  source='scam_report', url = primary scammer URL          list_clone_alerts_pending_onward(destinations)
+                    │                                        source='clone_alert', url = candidate_url
+                    └───────────────┬───────────────────────────────┘
+                                    ▼
+            enqueue_onward_url_reports(p_rows)  — INSERT … ON CONFLICT DO NOTHING
+              url_key = onward_url_key(url)       (host+path, lower-cased, no query)
+              dedup: (scam_report_id, dest, key) AND (dest, key, url_key)  → a URL
+              already reported from EITHER source is not reported again (F9)
+              returns only the inserted rows
+                                    │
+                                    ▼  one report.onward.<dest> event per new row
+            report-onward-openphish / report-onward-apwg  (throttle 60/h per intake)
+              runUrlBlocklistOnward: scam subject → load scam_reports;
+                                     clone subject → load shopfront_clone_alerts,
+                                       skip unless still 'weaponised'
+              stripUrlPii → sendOnward (ONWARD_CANARY_RECIPIENT reroute) → status='sent'
+                                    │
+                                    ▼
+            /admin/onward-reports (source column) · report-brand-stewardship ("reported")
+```
+
 ---
 
 ## 7. Clone-watch — NRD ingest → triage → brand notification

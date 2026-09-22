@@ -6,7 +6,10 @@ import { Loader2, CheckCircle, XCircle, Clock } from "lucide-react";
 
 interface ReviewRow {
   id: string;
+  source: string;
   scam_report_id: number | null;
+  clone_alert_id: number | null;
+  url_key: string | null;
   destination: string;
   destination_key: string | null;
   status: string;
@@ -196,11 +199,7 @@ export default function OnwardReportsDashboard({
                     {r.destination === "brand_abuse"
                       ? `Brand abuse → ${r.brand_name ?? r.destination_key}`
                       : r.destination}
-                    {r.scam_report_id && (
-                      <span className="ml-2 text-xs text-gov-slate">
-                        report #{r.scam_report_id}
-                      </span>
-                    )}
+                    <SourceTag row={r} />
                   </p>
                   {r.status_reason && (
                     <p className="text-xs text-gov-slate font-mono truncate">
@@ -226,6 +225,26 @@ export default function OnwardReportsDashboard({
       </section>
     </>
   );
+}
+
+/** Which producer wrote the row — a scam report or clone-watch (v318). */
+function SourceTag({ row }: { row: ReviewRow }) {
+  if (row.source === "clone_alert") {
+    return (
+      <span className="ml-2 text-xs text-gov-slate">
+        <span className="mr-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-violet-700">
+          clone-watch
+        </span>
+        {row.clone_alert_id ? `alert #${row.clone_alert_id}` : "alert purged"}
+        {row.url_key && <code className="ml-1">{row.url_key}</code>}
+      </span>
+    );
+  }
+  return row.scam_report_id ? (
+    <span className="ml-2 text-xs text-gov-slate">
+      report #{row.scam_report_id}
+    </span>
+  ) : null;
 }
 
 function Field({ label, value }: { label: string; value: string }) {

@@ -32,7 +32,10 @@ import { logCost } from "@/lib/cost-telemetry";
 
 export type EnforcementEvent =
   | "cases_opened" // enforcement plan opened cases for a weaponised lookalike
-  | "reported" // submitted to a takedown channel (outbound)
+  | "queued" // enqueued on the onward ledger for an auto blocklist send (v318);
+  //            the onward worker sends it — status='sent' on onward_report_log
+  //            is the send record. Counted by count_todays_takedown_submissions.
+  | "reported" // sent to a takedown channel by this code path (human admin send)
   | "actioned" // a channel confirmed the takedown
   | "declined" // a channel declined (e.g. Netcraft "no threats")
   | "issue_reported" // filed a false-negative issue on a Netcraft submission

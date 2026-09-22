@@ -5,17 +5,24 @@ import {
   runUrlBlocklistOnward,
   type OnwardStepCtx,
 } from "@/lib/onward/url-blocklist-report";
+import { URL_BLOCKLIST_DESTINATIONS } from "@/lib/onward/destinations";
 
 /**
- * Onward destination: APWG eCrime Exchange (reportphishing@apwg.org).
+ * Onward destination: APWG eCrime Exchange (intake address in
+ * lib/onward/destinations.ts). Sends BOTH ledger subjects — scam reports and,
+ * since v318, clone-watch lookalikes (shopfront-clone-enforcement-execute).
  *
  * APWG accepts unsolicited phishing reports by email for free. We forward the
  * suspected phishing URL(s) + PII-redacted context, mirroring onward-acma.ts.
  *
  * Gated by FF_ONWARD_APWG (default OFF) + RESEND_API_KEY presence.
- * Conservative rate-limit so we read as a normal forwarder, not a firehose.
+ * Conservative send rate so we read as a normal forwarder, not a firehose.
+ * `throttle`, not `rateLimit`: rateLimit DISCARDS events over the limit, and a
+ * discarded event here is a ledger row left `queued` forever (never sent, never
+ * failed). Since v318 two producers share this worker, so an over-limit burst
+ * is plausible; throttle queues the excess and sends it at the same rate.
  */
-const APWG_INTAKE = "reportphishing@apwg.org";
+const APWG = URL_BLOCKLIST_DESTINATIONS.apwg;
 
 // inngest-finish-budget: 4 boundaries — this file has NO step.run of its own;
 // all four steps live in runUrlBlocklistOnward (lib/onward/url-blocklist-report.ts),
@@ -27,7 +34,7 @@ export const onwardApwg = inngest.createFunction(
     timeouts: { finish: "5m" },
     name: "Onward report: APWG eCrime Exchange",
     retries: 4,
-    rateLimit: {
+    throttle: {
       limit: 60,
       period: "1h",
       key: "event.data.destination_key",
@@ -40,8 +47,8 @@ export const onwardApwg = inngest.createFunction(
       // generic run()); shapes are compatible at runtime.
       { event, step } as unknown as OnwardStepCtx,
       {
-        intakeEmail: APWG_INTAKE,
-        intakeName: "APWG",
+        intakeEmail: APWG.destinationKey,
+        intakeName: APWG.intakeName,
         featureEnabled: featureFlags.onwardApwg,
         logFeature: "onward_apwg",
         logOperation: "apwg_url_forward",
