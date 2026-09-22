@@ -13,7 +13,17 @@ import {
   buildReportCard,
   buildTrendRows,
 } from "@/lib/clone-watch/report-card";
-import { upsertSummary, writeTrendRows } from "@/lib/clone-watch/report-summary";
+import { upsertSummary } from "@/lib/clone-watch/report-summary";
+import {
+  MONTHLY_STORE_WRITTEN_EVENT,
+  readMonthFrozenAt,
+  shouldEmitStoreWritten,
+  writeMonthlyStats,
+  type MonthlyStoreWrittenData,
+  type StoreWriteStatus,
+} from "@/lib/clone-watch/monthly-brand-store";
+
+const MANUAL_TRIGGER_EVENT = "clone-watch/report-summary.manual-trigger.v1";
 
 /**
  * clone-watch-report-summary — durable monthly Clone Watch snapshot.
@@ -36,11 +46,27 @@ import { upsertSummary, writeTrendRows } from "@/lib/clone-watch/report-summary"
  * lib/clone-watch/clone-metrics.ts and no `lib/` Module imports from
  * app/api/inngest at all, so that constraint is gone.
  *
- * Idempotent + backfill-safe: the manual-trigger event carries an optional
- * { periodMonth: "YYYY-MM" } override (used to backfill historical months).
- * The upsert overwrites the metric columns but OMITS published_post_urn, so a
- * re-snapshot never wipes the recorded LinkedIn post URN (the publish step owns
- * that column).
+ * PUBLISHED MONTHS ARE FROZEN (v319). This run is the ONE producer of the
+ * monthly per-brand store (clone_watch_monthly_brand_stats); the first write of
+ * a month freezes it, and a later run for the same month — a retry, a
+ * backfill, a methodology change — writes NOTHING (neither the store nor the
+ * summary row). Before v319 every re-run restated the month: June, July and
+ * August were all rewritten on 2026-09-04. The freeze is enforced in SQL
+ * (write_clone_watch_monthly_stats + a guard trigger), not only here.
+ *
+ * Manual trigger: { periodMonth?: "YYYY-MM", republish?: true }.
+ *   - periodMonth alone writes a month that has never been published (a
+ *     backfill) and is a no-op on a frozen one;
+ *   - republish: true is the ONE deliberate restatement path. It rewrites the
+ *     summary + store and re-stamps frozen_at (the previous stamp is returned
+ *     and warn-logged), then re-triggers brand stewardship for the month.
+ * The summary upsert still OMITS published_post_urn, so even a re-publish
+ * never wipes the recorded LinkedIn post URN (the publish step owns it).
+ *
+ * Completion event: once the month's store is in place this emits
+ * `clone-watch/monthly-store.written.v1`, which report-brand-stewardship
+ * consumes. Stewardship used to run on its own cron two hours BEFORE this one
+ * and refold the same alerts itself; it now reads the store this run wrote.
  *
  * Cheap: one getCloneWatchReportCard call (2 SELECTs) + one UPSERT, monthly —
  * well under the pg-stuck-query-watchdog's 10-min threshold.
@@ -65,13 +91,19 @@ export const cloneWatchReportSummary = inngest.createFunction(
   },
   [
     { cron: "0 11 1 * *" }, // 1st of month, 11:00 UTC (after the 10:00 internal digest)
-    { event: "clone-watch/report-summary.manual-trigger.v1" }, // { periodMonth?: "YYYY-MM" }
+    { event: MANUAL_TRIGGER_EVENT }, // { periodMonth?: "YYYY-MM", republish?: true }
   ],
   withAxiomLogging(
     { fnId: "clone-watch-report-summary" },
     async ({ event, step }) => {
-      const override = (event?.data as { periodMonth?: string } | undefined)
-        ?.periodMonth;
+      // A cron tick carries a payload too ({ cron }), so "is this manual" is
+      // decided by the event NAME, never by whether data is present.
+      const scheduled = event?.name !== MANUAL_TRIGGER_EVENT;
+      const manual = scheduled
+        ? {}
+        : ((event?.data ?? {}) as { periodMonth?: string; republish?: boolean });
+      const override = manual.periodMonth;
+      const republish = manual.republish === true;
 
       const periodYm = await step.run("compute-period", async () => {
         const start = override
@@ -155,29 +187,70 @@ export const cloneWatchReportSummary = inngest.createFunction(
       // value, and CardInputs carries thousands of alert rows, so it cannot
       // cross a step boundary. Folding the writes in alongside keeps the rows
       // inside the step and costs one fewer boundary to queue for — which is
-      // what actually bites on the 5-slot Hobby plan (ADR-0019, #1069). Both
-      // writes are idempotent, so a retry of the whole step is safe.
+      // what actually bites on the 5-slot Hobby plan (ADR-0019, #1069).
+      //
+      // Retry-safe: the freeze check runs first, so a retry after the store
+      // write committed sees a frozen month and writes nothing.
       const result = await step.run("compute-and-write-summary", async () => {
+        const periodMonth = `${periodYm}-01`;
+        const sb = createServiceClient();
+        if (!sb) throw new Error("service client unavailable");
+
+        // Published already? Then this run restates nothing — not the store,
+        // not the summary row — unless the operator asked for it.
+        const frozenAt = await readMonthFrozenAt(sb, periodMonth);
+        if (frozenAt && !republish) {
+          return {
+            period: periodMonth,
+            storeStatus: "frozen" as StoreWriteStatus,
+            frozenAt,
+            skipped: "frozen" as const,
+          };
+        }
+
         const inputs = await loadCardInputs(periodYm);
         const card = buildReportCard(inputs);
         if (card.total === 0) {
-          return { period: card.periodMonth, skipped: "no_clones" as const };
+          return {
+            period: card.periodMonth,
+            storeStatus: "empty" as StoreWriteStatus,
+            frozenAt: null,
+            skipped: "no_clones" as const,
+          };
         }
-        const sb = createServiceClient();
-        if (!sb) throw new Error("service client unavailable");
         // Shared writer (report-summary.ts) — omits published_post_urn so a
-        // re-snapshot preserves a URN the LinkedIn publish step recorded.
+        // re-publish preserves a URN the LinkedIn publish step recorded.
         await upsertSummary(sb, card);
-        // Full per-brand + per-registrar trend rows (v193) — powers per-brand /
-        // per-registrar MoM on the owned-media pages. Idempotent delete+insert.
+        // The monthly per-brand + per-registrar store, through the ONE SQL
+        // writer: atomic, and it refuses a frozen month unless `republish`.
         const trendRows = buildTrendRows(inputs);
-        await writeTrendRows(sb, trendRows);
+        const store = await writeMonthlyStats(sb, trendRows, { republish });
+        if (store.status === "republished") {
+          // Rare and deliberate — always-ship so the restatement is on record.
+          logger.warn("clone-watch-report-summary: month RE-PUBLISHED", {
+            period: card.periodMonth,
+            previousFrozenAt: store.previousFrozenAt,
+            frozenAt: store.frozenAt,
+            brandRows: store.brandRows,
+          });
+        } else if (store.status === "frozen") {
+          // Lost a race with another writer between the check and the write.
+          logger.warn("clone-watch-report-summary: month frozen mid-run", {
+            period: card.periodMonth,
+            frozenAt: store.frozenAt,
+          });
+        }
         return {
           period: card.periodMonth,
+          storeStatus: store.status as StoreWriteStatus,
+          frozenAt: store.frozenAt,
+          previousFrozenAt: store.previousFrozenAt,
           total: card.total,
           brands: card.brands,
-          brandRows: trendRows.brandRows.length,
-          registrarRows: trendRows.registrarRows.length,
+          brandRows: store.brandRows,
+          registrarRows: store.registrarRows,
+          // false = taken_down_in_month persisted as null (not measured).
+          takedownEventsRead: inputs.takedownEvents !== undefined,
           // Vendor-gap clock medians for the month cohort (null = leg empty).
           declineToWeaponiseMedianH:
             card.durations.declineToWeaponise.medianHours,
@@ -189,12 +262,37 @@ export const cloneWatchReportSummary = inngest.createFunction(
         };
       });
 
+      // Hand the month to brand stewardship, which reads the store this run
+      // just wrote. The id dedupes a retry of this send against the original
+      // (Inngest drops a repeated event id within 24h), and a re-publish has a
+      // new frozen_at so it gets a new id.
+      const emitted = shouldEmitStoreWritten(result.storeStatus, { scheduled });
+      if (emitted) {
+        const data: MonthlyStoreWrittenData = {
+          periodMonth: result.period,
+          status: result.storeStatus,
+          frozenAt: result.frozenAt,
+        };
+        await step.sendEvent("emit-monthly-store-written", {
+          name: MONTHLY_STORE_WRITTEN_EVENT,
+          id: `monthly-store-${result.period}-${result.frozenAt ?? "empty"}`,
+          data,
+        });
+      }
+
       if ("skipped" in result) {
-        return { ok: true, period: result.period, coverage, skipped: result.skipped };
+        return {
+          ok: true,
+          period: result.period,
+          coverage,
+          skipped: result.skipped,
+          frozenAt: result.frozenAt,
+          emitted,
+        };
       }
 
       logger.info("clone-watch-report-summary: snapshot written", result);
-      return { ok: true, ...result };
+      return { ok: true, ...result, emitted };
     },
   ),
 );

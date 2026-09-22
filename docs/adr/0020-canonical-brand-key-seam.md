@@ -122,6 +122,68 @@ old way, and re-keying it is a data migration with a reconciliation obligation
 to those editions — not something to bundle into a reporting feature. The bridge
 is honest and tested; the debt is named.
 
+## Amendment 2026-09-23 — one monthly per-brand store, frozen once published (v319)
+
+The 2026-09-03 amendment named the completing move ("give the store a
+`brand_normalized` sibling") and deferred it because re-keying would restate
+three published editions. Measuring prod before doing it found the store had a
+bigger problem than its key — **it had two producers and no memory**:
+
+- `clone-watch-report-summary` wrote per-brand monthly counts here, while
+  `report-brand-stewardship` re-fetched the same month of
+  `shopfront_clone_alerts` two hours EARLIER and refolded the same counts into
+  its ledger. Two folds of one month, on two clocks, printed in two places.
+- Every run was a delete-then-insert of the whole month, so re-runs restated
+  published editions: June, July and August were all rewritten on 2026-09-04.
+- `weaponised` meant "currently weaponised", and `taken_down` credited a
+  takedown to the month the lookalike was first seen (July's row: 48; takedowns
+  actually dated in July: 11, six on earlier-seen lookalikes).
+- The August stewardship batch was never written: the 1 Sep run was cancelled
+  at its 4m finish during the ADR-0019 slot starvation, silently.
+
+**Decision.**
+
+1. **One producer, many readers.** `clone-watch-report-summary` is the only
+   writer; stewardship is triggered by its completion event
+   (`clone-watch/monthly-store.written.v1`) and READS the store — counts from the
+   frozen row, the per-lookalike watch-list from the row's member `alert_ids`
+   (their current state). Deletion test: the Module that carries this
+   (`lib/clone-watch/monthly-brand-store.ts`) concentrates the freeze protocol,
+   the membership read and the ledger mapping that two Inngest functions each
+   owned a version of; the watch-list stays a projection of member alerts, not a
+   store column, because it is one reader's presentation and freezing it would
+   make it stale by design.
+2. **Published months are frozen, in SQL.** `write_clone_watch_monthly_stats`
+   is the one writer: atomic (the old two-call write could lose a month), and it
+   refuses a month whose `frozen_at` is set unless `p_republish` — which
+   re-stamps `frozen_at` so a restatement is visible. A guard trigger refuses
+   direct writes. The producer also skips the `clone_watch_report_summary`
+   upsert for a frozen month — enforced in TS only
+   (`clone-watch-report-summary.ts`, the `readMonthFrozenAt` early return); the
+   LinkedIn publish write-back still records its post URN there, as it should.
+3. **The key promotion, partially.** `brand_normalized` is added and populated
+   (TS `brandKeyForDomain` / SQL backfill twin, parity-tested), but the grain
+   stays the DOMAIN. Re-keying the grain is a restatement of frozen editions,
+   which is precisely what (2) now forbids; it becomes an explicit re-publish
+   decision if it is ever wanted. Consequence: a domain shared by several brands
+   (`servicesaustralia.gov.au`) is still ONE row, keyed to its owner
+   (`servicesaustralia`), so the `brand_coverage_history.brand_domain` bridge
+   keeps its job for those three brands. For single-brand domains readers may
+   now join on `brand_normalized` directly.
+4. **Honest columns beside the old ones**, never in place of them (the frozen
+   editions keep their meaning): `weaponised_ever`, `taken_down_in_month`
+   (event-dated from the vendor/witnessed `takedown_at`; undated takedowns are
+   excluded and stay in `taken_down`), plus `weaponised_after_decline` and
+   `re_taken_down`, which only the stewardship refold used to compute.
+
+**Consequences.** Inngest: stewardship loses its cron and gains one event
+trigger (same monthly run count); its clone step reads ~150 store rows + ~1,000
+member alerts by id instead of a windowed cohort scan. The three published
+months were frozen at their summary's `generated_at` (2026-09-04); their new
+columns were backfilled from live data at apply time, which is recorded in the
+migration and the ops runbook. August's stewardship batch has to be re-fired by
+hand once.
+
 ## Related
 
 - `docs/plans/brand-convergence-seam.md` — the phased plan (Phases 0–3).
@@ -129,4 +191,5 @@ is honest and tested; the debt is named.
   ADR-0019 (Inngest concurrency + cadence budget).
 - Migrations v195 (known_brands alias seed), v196 (multi-source candidates),
   v197 (clone-triage corroboration), v198 (brand_register), v294–v297
-  (brand_coverage_history + the two-key bridge above).
+  (brand_coverage_history + the two-key bridge above), v319 (the monthly
+  store's `brand_normalized` + freeze, 2026-09-23 amendment).
