@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   classifyByUrlState,
   normHost,
+  planReconcile,
+  slimUrls,
+  type ReconcileFetch,
   selectFalseNegativeCandidates,
   type NetcraftUrlEntry,
   type PendingAlert,
@@ -698,5 +701,66 @@ describe("classifyByUrlState — v314 Netcraft verdicts + vendor clock", () => {
   it("an unmatched alert gets no verdict (nothing to persist)", () => {
     const r = classifyByUrlState([{ id: 6, candidate_domain: "gone.com" }], [maliciousDirect]);
     expect(r.verdicts).toEqual([]);
+  });
+});
+
+// v316 — the reconciler folds every uuid's fetch into ONE set of writes.
+describe("planReconcile", () => {
+  const f = (o: Partial<ReconcileFetch> & { uuid: string }): ReconcileFetch => ({
+    alerts: [],
+    ok: true,
+    status: 200,
+    isArchived: false,
+    urls: [],
+    submission: { log: [], submittedAt: null },
+    ...o,
+  });
+
+  it("aggregates buckets and verdicts across uuids", () => {
+    const plan = planReconcile([
+      f({
+        uuid: "u1",
+        alerts: [{ id: 1, candidate_domain: "a.com", lifecycle_state: "weaponised" }],
+        urls: [urlEntry("a.com", "no threats")],
+      }),
+      f({
+        uuid: "u2",
+        alerts: [{ id: 2, candidate_domain: "b.com", lifecycle_state: "declined" }],
+        urls: [urlEntry("b.com", "malicious")],
+      }),
+    ]);
+    expect(plan.takenDown).toEqual([2]);
+    expect(plan.other).toEqual([1]);
+    expect(plan.verdicts.map((v) => [v.id, v.url_state])).toEqual([
+      [1, "no threats"],
+      [2, "malicious"],
+    ]);
+    expect(plan.weaponisedNoThreats).toBe(1);
+  });
+
+  it("archived uuids are stamped (other); failed ones are left for retry", () => {
+    const plan = planReconcile([
+      f({ uuid: "arch", isArchived: true, alerts: [{ id: 7, candidate_domain: "x.com" }] }),
+      f({ uuid: "down", ok: false, status: 503, alerts: [{ id: 8, candidate_domain: "y.com" }] }),
+    ]);
+    expect(plan.archived).toBe(1);
+    expect(plan.other).toEqual([7]);
+    expect(plan.errors).toBe(1);
+    expect(plan.failedUuids).toEqual(["down"]);
+    expect([...plan.takenDown, ...plan.declined, ...plan.other]).not.toContain(8);
+  });
+
+  it("slimUrls keeps only what the planner reads", () => {
+    const [u] = slimUrls([
+      {
+        ...urlEntry("a.com", "malicious"),
+        classification_log: [{ date: 1, from_state: "processing", to_state: "malicious" }],
+        // extra payload Netcraft returns (screenshots, tags…) must not persist
+        ...({ screenshots: ["big"], tags: [1] } as object),
+      },
+    ]);
+    expect(Object.keys(u).sort()).toEqual(
+      ["classification_log", "hostname", "url", "url_classification_reason", "url_state"].sort(),
+    );
   });
 });

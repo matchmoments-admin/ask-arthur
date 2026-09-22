@@ -6,10 +6,14 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
+import { mapWithConcurrency } from "@askarthur/utils/concurrency";
 import {
-  classifyByUrlState,
   fetchNetcraftSubmissionUrls,
+  planReconcile,
+  slimUrls,
   type ReconcileAlert,
+  type ReconcileFetch,
 } from "@/lib/clone-watch/netcraft-urls";
 
 /**
@@ -56,21 +60,19 @@ import {
  * See docs/plans/clone-watch-brand-story-reporting.md §3 Part A.
  */
 
-// Bounded so a run reliably COMPLETES within the finish budget (and thus logs
-// its heartbeat + runs the outage-check). Live smoke (2026-07-10) showed 60 was
-// too many — Netcraft /urls latency under a burst meant ~2-3 uuids/min, so a
-// 60-uuid run hit the 5m budget and was cancelled mid-batch. 12 uuids × 2
-// keyless GETs completes with headroom; the 24h cadence throttle + singleton
-// grind the ~164 backlog down over a handful of daily runs, self-healing.
-//
-// Do NOT raise this to buy throughput. Measured 2026-08-23: 44 live uuids in
-// the 30-day window against 12/day means each uuid is actually revisited every
-// ~3.7 days, not the 24h `CADENCE_HOURS` advertises — so `takedown_at`, and
-// the time-to-takedown KPI built on it, ran ~3.7 days stale. The fix is a
-// SECOND daily run (see the cron list below), which doubles throughput to
-// ~1.8-day latency while leaving the per-run budget exactly where the live
-// smoke proved it safe. Raising UUID_LIMIT re-opens the 2026-07-10 timeout.
-const UUID_LIMIT = 12;
+// Bounded so a run reliably COMPLETES within the finish budget. History: 60
+// timed out (2026-07-10: ~2-3 uuids/min when each uuid was its own queued
+// step); 12 held but left each uuid revisited only every ~3.7 days. v316 fetches
+// all uuids in ONE budgeted step at FETCH_CONCURRENCY in flight, so the batch
+// size no longer multiplies queue waits; anything the budget can't reach is
+// simply left for the next run.
+const UUID_LIMIT = 24;
+// v316: one budgeted fetch step replaces a step per uuid, so the per-run batch
+// can double without re-opening the 2026-07-10 timeout: 24 uuids × 2 keyless
+// GETs at 4 in flight ≈ 12 sequential round-trips, well inside the budget.
+// Unchanged verdicts back off to 72 h (v316), so the pool shrinks, not grows.
+const FETCH_CONCURRENCY = 4;
+const FETCH_WALL_CLOCK_MS = 180_000;
 const CADENCE_HOURS = 24;
 const MAX_AGE_DAYS = 30;
 
@@ -79,8 +81,8 @@ interface ReconcileGroup {
   alerts: ReconcileAlert[];
 }
 
-// inngest-finish-budget: 27 boundaries — 3 static + 2 effective per-uuid
-// steps (fetch, then archived XOR apply) x UUID_LIMIT (12).
+// inngest-finish-budget: 6 boundaries — load-worklist, fetch-all (budgeted
+// 180 s), apply-all, page-on-outage, log-cost, log-cost-quiet (exclusive).
 export const cloneWatchNetcraftReconcile = inngest.createFunction(
   {
     id: "shopfront-clone-netcraft-reconcile",
@@ -88,23 +90,15 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     retries: 2,
     singleton: { mode: "skip" },
     concurrency: { limit: 1 },
-    // 8m finish (matches the poll fn) — the slow part is keyless Netcraft HTTP,
-    // not a PG backend, so the 10m pg-stuck-query-watchdog is not at risk.
-    // 12m, not 8m (#1069): per-uuid fetch/apply steps each queue for an
-    // account-concurrency slot (~30–60s under contention) on top of the slow
-    // keyless Netcraft HTTP. Finite per ADR-0019; guarded by
-    // inngestFinishBudgets.test.ts.
-    // NOTE: this budget now exceeds the 10m pg-stuck-query-watchdog window.
-    // That watchdog pages on a Postgres BACKEND running >=10 min; the long
-    // pole here is external HTTP plus account-concurrency queue wait, not a
-    // PG query, so a long run is expected and is not a watchdog condition
-    // (CLAUDE.md requires documenting exactly this).
-    timeouts: { finish: "15m" },
+    // 8m: 6 counted boundaries × 30 s queue wait + the 180 s in-step fetch
+    // budget + slack (ADR-0019; inngestFinishBudgets.test.ts). Was 15m when
+    // every uuid cost two queued steps; the batched shape (v316) removes that
+    // queue-wait multiplier, which was the long pole.
+    timeouts: { finish: "8m" },
   },
   [
-    // Twice daily (v284). Two 12-uuid runs clear ~24 uuids/day against a live
-    // population of ~44, halving reconcile latency to ~1.8 days without
-    // touching the per-run batch the 2026-07-10 smoke tuned. The 24h
+    // Twice daily (v284). Two 24-uuid runs (v316); unchanged verdicts back off
+    // to 72 h, so live verdicts are followed at ~12–24 h latency. The 24h
     // CADENCE_HOURS throttle means the 22:00 run picks up DIFFERENT uuids
     // than 10:00 did rather than re-checking them, and `singleton: skip`
     // makes an overrun harmless.
@@ -159,15 +153,6 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         return { ok: true, uuids: 0, taken_down: 0, declined: 0 };
       }
 
-      const counts = {
-        takenDown: 0,
-        declined: 0,
-        other: 0,
-        archived: 0,
-        errors: 0,
-        weaponisedNoThreats: 0,
-      };
-
       const apply = async (
         ids: number[],
         toState: string | null,
@@ -186,74 +171,77 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         }
       };
 
-      for (const group of groups) {
-        const uuid = group.netcraft_uuid;
-        const allIds = group.alerts.map((a) => a.id);
-
-        const fetched = await step.run(`fetch-${uuid}`, () =>
-          fetchNetcraftSubmissionUrls(uuid),
-        );
-
-        if (fetched.isArchived) {
-          // Submission aged out of Netcraft — leave lifecycle, just stamp
-          // reconciled_at so the cadence throttle stops re-fetching it hard.
-          counts.archived++;
-          await step.run(`archived-${uuid}`, () => apply(allIds, null, false));
-          continue;
-        }
-        if (!fetched.ok) {
-          counts.errors++; // transient — no stamp, retried next run
-          logger.warn("netcraft-reconcile: fetch non-200", { uuid, status: fetched.status });
-          continue;
-        }
-
-        const cls = classifyByUrlState(
-          group.alerts,
-          fetched.urls,
-          { log: fetched.submissionLog, submittedAt: fetched.submittedAt },
-        );
-
-        await step.run(`apply-${uuid}`, async () => {
-          // v314: persist Netcraft's own verdict + clock FIRST, so a
-          // vendor-dated takedown_at wins and apply's witnessed now()-stamp
-          // only fills rows Netcraft's log could not date.
-          if (cls.verdicts.length) {
-            const { error } = await sb.rpc("record_netcraft_url_verdicts", {
-              p_verdicts: cls.verdicts,
+      // ONE fetch step for every uuid (bounded parallelism, soft-fail per
+      // uuid), then ONE apply step. Was two steps per uuid: ~54 steps/day and
+      // a 13.6 min worst case against the 15 min finish (audit 2026-09-22).
+      const fetches = await budgetedStep(
+        step,
+        "fetch-all",
+        FETCH_WALL_CLOCK_MS,
+        async (budget) => {
+          const out: ReconcileFetch[] = [];
+          await mapWithConcurrency(groups, FETCH_CONCURRENCY, async (g) => {
+            if (budget.expired()) return; // unfetched → retried next run
+            const f = await fetchNetcraftSubmissionUrls(g.netcraft_uuid);
+            out.push({
+              uuid: g.netcraft_uuid,
+              alerts: g.alerts,
+              ok: f.ok,
+              status: f.status,
+              isArchived: f.isArchived,
+              urls: slimUrls(f.urls),
+              submission: { log: f.submissionLog, submittedAt: f.submittedAt },
             });
-            if (error) {
-              throw new Error(
-                `record_netcraft_url_verdicts failed (${cls.verdicts.length}): ${error.message}`,
-              );
-            }
-          }
-          await apply(cls.takenDown, "taken_down", true);
-          await apply(cls.declined, "declined", false);
-          await apply(cls.other, null, false);
-          // Takedowns are rare + valuable → always-ship audit event (once/uuid).
-          if (cls.takenDown.length) {
-            logEnforcementEvent("actioned", {
-              alertId: cls.takenDown[0],
-              domain: uuid,
-              channel: "netcraft",
-              runId,
-              extra: { via: "reconcile", uuid, count: cls.takenDown.length },
-            });
-          }
+          });
+          return out;
+        },
+      );
+
+      const plan = planReconcile(fetches as ReconcileFetch[]);
+      if (plan.failedUuids.length) {
+        logger.warn("netcraft-reconcile: fetch non-200", {
+          uuids: plan.failedUuids,
         });
-
-        counts.takenDown += cls.takenDown.length;
-        counts.declined += cls.declined.length;
-        counts.other += cls.other.length;
-        // The vendor-gap signal, counted where it happens: Netcraft graded a
-        // site we watched go live as `no threats`.
-        counts.weaponisedNoThreats += cls.verdicts.filter(
-          (v) =>
-            v.url_state === "no threats" &&
-            group.alerts.find((a) => a.id === v.id)?.lifecycle_state ===
-              "weaponised",
-        ).length;
       }
+
+      await step.run("apply-all", async () => {
+        // v314: Netcraft's own verdict + clock FIRST, so a vendor-dated
+        // takedown_at wins and apply's witnessed now()-stamp only fills rows
+        // Netcraft's log could not date.
+        if (plan.verdicts.length) {
+          const { error } = await sb.rpc("record_netcraft_url_verdicts", {
+            p_verdicts: plan.verdicts,
+          });
+          if (error) {
+            throw new Error(
+              `record_netcraft_url_verdicts failed (${plan.verdicts.length}): ${error.message}`,
+            );
+          }
+        }
+        await apply(plan.takenDown, "taken_down", true);
+        await apply(plan.declined, "declined", false);
+        await apply(plan.other, null, false);
+        // Takedowns are rare + valuable → always-ship audit event (once/run).
+        if (plan.takenDown.length) {
+          logEnforcementEvent("actioned", {
+            alertId: plan.takenDown[0],
+            domain: "netcraft-reconcile",
+            channel: "netcraft",
+            runId,
+            extra: { via: "reconcile", count: plan.takenDown.length },
+          });
+        }
+      });
+
+      const counts = {
+        takenDown: plan.takenDown.length,
+        declined: plan.declined.length,
+        other: plan.other.length,
+        archived: plan.archived,
+        errors: plan.errors,
+        weaponisedNoThreats: plan.weaponisedNoThreats,
+        unfetched: groups.length - fetches.length,
+      };
 
       // Degraded-run awareness. Hard failures (RPC/DB) throw and are always-ship
       // fn.error via withAxiomLogging. A Netcraft OUTAGE, though, only soft-fails

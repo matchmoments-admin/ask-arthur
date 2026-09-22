@@ -22,10 +22,11 @@ import { onwardMarkers } from "./functions/onward-skipped";
 // notification), Layer 5 (weekly digest). Triggered by shopfront/clone.
 // triaged.v1 emitted from /api/admin/clone-watch/triage. Plan:
 // docs/plans/clone-watch-outreach.md.
-import { cloneWatchSubmitNetcraft } from "./functions/clone-watch-submit-netcraft";
 // Auto-report high-confidence branded clones to Netcraft without manual triage
-// (gated FF_SHOPFRONT_CLONE_NETCRAFT_AUTO). Emits netcraft-auto.v1 → the
-// submit-netcraft worker's second trigger. Needs post-deploy Inngest resync.
+// (gated FF_SHOPFRONT_CLONE_NETCRAFT_AUTO). Reports through the Netcraft report
+// Module (lib/clone-watch/netcraft-report.ts). The per-candidate
+// shopfront-clone-submit-netcraft lane was removed 2026-09-23 (0 runs in 30
+// days; the v284 evidence gate makes this lane the one reporting path).
 import { cloneWatchNetcraftAuto } from "./functions/clone-watch-netcraft-auto";
 import { cloneWatchNetcraftIssue } from "./functions/clone-watch-netcraft-issue";
 import { cloneWatchNetcraftReconcile } from "./functions/clone-watch-netcraft-reconcile";
@@ -116,7 +117,6 @@ const appFunctions = [
   onwardAutoReport,
   onwardMarkers,
   // Clone-watch outreach (v143)
-  cloneWatchSubmitNetcraft,
   cloneWatchNetcraftAuto,
   cloneWatchNetcraftIssue,
   cloneWatchNetcraftReconcile,

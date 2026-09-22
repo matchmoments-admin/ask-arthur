@@ -144,7 +144,7 @@ export const LIFECYCLE_EDGES: readonly LifecycleEdge[] = [
   { from: "declined", to: "weaponised", trigger: "urlscan_verdict", because: "vendor graded no-threat, then it weaponised" },
   { from: "reported", to: "weaponised", trigger: "urlscan_verdict", because: "weaponised while awaiting a vendor verdict" },
 
-  // manual per-candidate Netcraft submission (v199 via clone-watch-submit-netcraft)
+  // Netcraft submission (v199; recordAutoSubmission in lib/clone-watch/netcraft-report.ts)
   { from: "detected", to: "reported", trigger: "netcraft_submit", because: "operator triaged and submitted" },
   { from: "monitoring", to: "reported", trigger: "netcraft_submit", because: "operator triaged and submitted" },
 

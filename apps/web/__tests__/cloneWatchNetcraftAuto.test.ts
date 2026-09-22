@@ -8,7 +8,7 @@ import {
   postNetcraftBulk,
   type NetcraftAutoCandidate,
   type NetcraftResubmitCandidate,
-} from "@/app/api/inngest/functions/clone-watch-netcraft-auto";
+} from "@/lib/clone-watch/netcraft-report";
 
 function candidate(o: Partial<NetcraftAutoCandidate> = {}): NetcraftAutoCandidate {
   return {

@@ -638,6 +638,16 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 > `declined` — post-v284 "decline rate" is structurally unmeasurable for the
 > weaponised cohort; the success signal to watch is takedown conversions.
 
+> **v316 + PR 3 of the deepening plan (2026-09-23) — one Netcraft Module, batched reconcile.**
+> Every report goes through `apps/web/lib/clone-watch/netcraft-report.ts` (endpoint, reporter
+> email, body builders, the POST — one timeout, never throws — and `recordAutoSubmission`, which
+> also advances `detected|monitoring → reported` where the SQL guard allows). The per-candidate
+> `shopfront-clone-submit-netcraft` lane is DELETED (0 runs in 30 days; v284 made netcraft-auto
+> the one reporting path). The reconciler fetches up to 24 uuids in ONE budgeted step (4 in
+> flight) and writes in ONE step via `planReconcile` (pure, `netcraft-urls.ts`) — ~54 → ~8
+> steps/day, finish 15m → 8m. v316: `submitted_to.netcraft.unchanged_reads` counts repeated
+> verdicts; ≥ 3 backs the row off to a 72 h cadence, and any change resets it.
+
 > **v314 (2026-09-23) — Netcraft's own verdict and clock are now persisted.** For every
 > matched alert the reconciler first calls `record_netcraft_url_verdicts`, writing
 > `submitted_to.netcraft.url_state` (`malicious` / `no threats` / `unavailable` / …),

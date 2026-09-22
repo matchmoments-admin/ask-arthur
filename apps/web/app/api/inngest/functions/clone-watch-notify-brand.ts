@@ -360,8 +360,8 @@ async function persistNotification(
   fragment: NotificationFragment,
 ): Promise<void> {
   if (!sb) return;
-  // Atomic JSONB merge via v147 RPC — prevents lost-update races with
-  // submit-netcraft (which can run concurrently on the same alert).
+  // Atomic JSONB merge via v147 RPC — prevents lost-update races with the
+  // Netcraft lanes' own submitted_to writes on the same alert.
   const { error } = await sb.rpc("merge_clone_alert_submission", {
     p_alert_id: alertId,
     p_key: "brand_notification",

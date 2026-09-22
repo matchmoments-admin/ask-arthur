@@ -30,7 +30,6 @@ const EXEMPT: Record<string, string> = {
   "shopfront-clone-notify-brand": "one event per triaged alert; failures surface as fn.error (withAxiomLogging)",
   "shopfront-clone-notify-weaponised":
     "one event per weaponisation; delivery is watched by urlscan-retrieve's unnotified_weaponised",
-  "shopfront-clone-submit-netcraft": "manual triage path; folded into the Netcraft report Module (deepening PR 3)",
   "shopfront-clone-enforcement-plan": "event per weaponisation behind FF_CLONE_ENFORCEMENT (off); deepening PR 6",
   "shopfront-clone-enforcement-execute": "rewired onto onward_report_log in deepening PR 6, which adds its row",
   "clone-watch-internal-digest": "monthly; lands with the monthly brand store (deepening PR 7)",

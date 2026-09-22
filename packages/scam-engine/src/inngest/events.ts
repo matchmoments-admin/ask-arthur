@@ -524,9 +524,10 @@ export function parseShopCheckRequestedData(
 // ── shopfront/clone.triaged.v1 ──────────────────────────────────────────
 //
 // Emitted by POST /api/admin/clone-watch/triage when an admin marks a
-// shopfront_clone_alerts row as tp_confirmed. Fan-out to two consumers:
-//   1. clone-watch-submit-netcraft  — Layer 2 community blocklist submission
-//   2. clone-watch-notify-brand     — Layer 3+4 brand-direct notification
+// shopfront_clone_alerts row as tp_confirmed. Consumer:
+//   clone-watch-notify-brand — Layer 3+4 brand-direct notification.
+// (The per-candidate Netcraft consumer was removed 2026-09-23; Netcraft
+// reporting is evidence-gated in shopfront-clone-netcraft-auto, v284.)
 //
 // Event id is `clone-watch-triage:${alertId}` — the same alert id can be
 // re-triaged (e.g. FP → TP after evidence review). Re-emit produces a
