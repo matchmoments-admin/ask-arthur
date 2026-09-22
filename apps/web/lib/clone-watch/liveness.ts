@@ -147,6 +147,13 @@ async function lookup(fn: () => Promise<string[]>): Promise<DnsLookup> {
 /** True when the domain has neither an A nor an NS record — the only signal
  *  that honestly means "gone". Inconclusive resolver errors read as `null`,
  *  matching clone-watch-reemergence-monitor.ts's domainResolves(). */
+/** DNS-only deadness: true = no A and no NS (NXDOMAIN-class), false =
+ *  resolves, null = the resolver proved nothing. Cheap (~ms, 4 s cap) — the
+ *  precheck urlscan submits use before spending a scan on a dead name. */
+export async function isDomainGone(hostname: string): Promise<boolean | null> {
+  return domainIsGone(hostname);
+}
+
 async function domainIsGone(hostname: string): Promise<boolean | null> {
   if (!hostname) return null;
   const r = new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });

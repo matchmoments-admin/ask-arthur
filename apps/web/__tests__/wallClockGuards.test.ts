@@ -190,10 +190,12 @@ describe("wall-clock guards survive Inngest step replay", () => {
       }
     }
 
+    // Floor, not a target: moving a Lane OFF spanningBudget (urlscan-retrieve,
+    // 2026-09-23 — it never awaited step.run in its loop) lowers the count.
     expect(
       checksSeen,
       "found no budget checks — sweep is inert",
-    ).toBeGreaterThan(4);
+    ).toBeGreaterThan(3);
     expect(
       [...new Set(offenders)],
       "These files check a Step Budget in handler scope rather than inside a " +

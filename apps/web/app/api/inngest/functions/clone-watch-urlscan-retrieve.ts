@@ -4,7 +4,7 @@ import {
   CLONE_WATCH_WEAPONISED_EVENT,
   type CloneWatchWeaponisedData,
 } from "@askarthur/scam-engine/inngest/events";
-import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
+import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -73,15 +73,16 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
   },
   [
     // :10, not :00 (#1069): the top of the hour is the fleet's worst
-    // concurrency pileup (hourly + */3 + */4 + */6 + */12 crons all fire).
-    // Same 3h cadence; netcraft-auto's derived cron-ordering test still holds
-    // (first verdict pass after the 09:00 submit is now 12:10 < 13:00).
-    { cron: "10 */3 * * *" },
+    // concurrency pileup. 5 runs, not 8 (2026-09-23): 29 of 32 empty runs in
+    // 14 days were the 00:10 / 06:10 / 18:10 ticks, which fire 20 min BEFORE
+    // the :30 recheck submits anything to retrieve. 09:10 follows the 09:00
+    // submit; 12:10 still precedes netcraft-auto at 13:00 (cron-ordering test).
+    { cron: "10 3,9,12,15,21 * * *" },
     { event: "shopfront/clone.urlscan-retrieve.manual-trigger.v1" },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-urlscan-retrieve" },
-    async ({ event, step }) => {
+    async ({ step }) => {
       if (!featureFlags.shopfrontCloneUrlscan) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
       }
@@ -100,7 +101,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             p_max_failure_streak: MAX_FAILURE_STREAK,
           },
         );
-        if (error) throw new Error(`retrieve worklist failed: ${error.message}`);
+        if (error)
+          throw new Error(`retrieve worklist failed: ${error.message}`);
         return (data as RetrieveRow[] | null) ?? [];
       });
 
@@ -121,101 +123,127 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       // A wall-clock guard breaks the loop before the 10m finish budget so
       // worst-case external latency (40 rows × urlscan GET) can't force a
       // full-batch replay — leftovers drain next tick (worklist is idempotent).
-      // Spanning budget: this loop awaits step.run per item, so it crosses
-      // step boundaries and is bounded by timeouts.finish, with event.ts as
-      // its clock (survives replay; see step-budget.ts for the two bounds and
-      // the degraded mode when event.ts is unusable).
-      const budget = spanningBudget({ event }, BATCH_WALL_CLOCK_MS, logger);
+      // In-step budget (budgetedStep): the loop runs INSIDE one step and never
+      // awaits step.run, so its clock must start at step entry. The previous
+      // spanningBudget (event.ts clock, "this loop awaits step.run per item" —
+      // it does not) is the #1142 constructor bug fixed in urlscan-submit and
+      // lifecycle-recheck: a tick that queued behind the fleet could expire at
+      // index 0 and classify nothing while reporting ok.
+      const batch = await budgetedStep(
+        step,
+        "retrieve-batch",
+        BATCH_WALL_CLOCK_MS,
+        async (budget) => {
+          let classified = 0;
+          let stillPending = 0;
+          let reputationFallback = 0;
+          // Rows we did not read because the miss was OUR fault (quota/transient),
+          // not evidence about the URL. Counted, not silent.
+          let skippedNotOurSignal = 0;
+          let quotaExhausted = false;
 
-      const batch = await step.run("retrieve-batch", async () => {
-        let classified = 0;
-        let stillPending = 0;
-        let reputationFallback = 0;
-        // Rows we did not read because the miss was OUR fault (quota/transient),
-        // not evidence about the URL. Counted, not silent.
-        let skippedNotOurSignal = 0;
-        let quotaExhausted = false;
+          for (const [idx, row] of pending.entries()) {
+            if (budget.expired()) break;
+            try {
+              const reputation = reputationFromEvidence(row.urlscan_evidence);
+              const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);
+              const nowIso = new Date().toISOString();
 
-        for (const [idx, row] of pending.entries()) {
-          if (budget.expired()) break;
-          try {
-            const reputation = reputationFromEvidence(row.urlscan_evidence);
-            const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);
-            const nowIso = new Date().toISOString();
-
-            // A 429 is OUR quota running out and a 5xx/timeout is urlscan being
-            // unhealthy — neither is evidence about this URL. Persisting a null
-            // classification here would bump urlscan_failure_streak, and three
-            // strikes drop the row out of BOTH worklists permanently. This lane
-            // runs 8x/day, so a single rate-limited window could strand a whole
-            // batch.
-            //
-            // A 429 is global to the API key, so the rest of the batch would 429
-            // too — stop, don't burn the remaining rows on calls we know will fail.
-            if (retrieval.kind === "quota_exhausted") {
-              skippedNotOurSignal += pending.length - idx;
-              quotaExhausted = true;
-              break;
-            }
-
-            // A transient miss leaves the verdict alone but MUST still be stamped.
-            // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT 40 and is
-            // saturated on ~45% of runs, so a uuid that deterministically returns
-            // `transient` would keep its oldest submitted_at and re-present at the
-            // head forever, starving everything behind it — an unbounded skip is
-            // the worklist-gate-starvation trap, not a fix for it. v274 counts the
-            // miss in evidence without touching urlscan_scanned_at or the streak,
-            // and only escalates to the streak after MAX_TRANSIENT_MISSES.
-            if (retrieval.kind === "transient") {
-              skippedNotOurSignal++;
-              const miss = await sb.rpc(
-                "record_clone_alert_urlscan_transient_miss",
-                {
-                  p_alert_id: row.id,
-                  p_detail: retrieval.detail.slice(0, 200),
-                  p_max_misses: MAX_TRANSIENT_MISSES,
-                },
-              );
-              if (miss.error) {
-                throw new Error(
-                  `record_clone_alert_urlscan_transient_miss failed for alert ${row.id}: ${miss.error.message}`,
-                );
+              // A 429 is OUR quota running out and a 5xx/timeout is urlscan being
+              // unhealthy — neither is evidence about this URL. Persisting a null
+              // classification here would bump urlscan_failure_streak, and three
+              // strikes drop the row out of BOTH worklists permanently. This lane
+              // runs 8x/day, so a single rate-limited window could strand a whole
+              // batch.
+              //
+              // A 429 is global to the API key, so the rest of the batch would 429
+              // too — stop, don't burn the remaining rows on calls we know will fail.
+              if (retrieval.kind === "quota_exhausted") {
+                skippedNotOurSignal += pending.length - idx;
+                quotaExhausted = true;
+                break;
               }
-              continue;
-            }
 
-            const result = retrieval.kind === "ready" ? retrieval.result : null;
+              // A transient miss leaves the verdict alone but MUST still be stamped.
+              // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT 40 and is
+              // saturated on ~45% of runs, so a uuid that deterministically returns
+              // `transient` would keep its oldest submitted_at and re-present at the
+              // head forever, starving everything behind it — an unbounded skip is
+              // the worklist-gate-starvation trap, not a fix for it. v274 counts the
+              // miss in evidence without touching urlscan_scanned_at or the streak,
+              // and only escalates to the streak after MAX_TRANSIENT_MISSES.
+              if (retrieval.kind === "transient") {
+                skippedNotOurSignal++;
+                const miss = await sb.rpc(
+                  "record_clone_alert_urlscan_transient_miss",
+                  {
+                    p_alert_id: row.id,
+                    p_detail: retrieval.detail.slice(0, 200),
+                    p_max_misses: MAX_TRANSIENT_MISSES,
+                  },
+                );
+                if (miss.error) {
+                  throw new Error(
+                    `record_clone_alert_urlscan_transient_miss failed for alert ${row.id}: ${miss.error.message}`,
+                  );
+                }
+                continue;
+              }
 
-            // Render ready → full classification (reputation merged in).
-            if (result) {
-              const classification = classifyScan(
-                result,
-                reputation.isMalicious,
-              );
-              const persisted = await sb.rpc("persist_clone_alert_urlscan", {
-                p_alert_id: row.id,
-                p_urlscan_uuid: row.urlscan_uuid,
-                p_urlscan_evidence: serialiseRetrievedEvidence(
-                  row.urlscan_uuid,
+              const result =
+                retrieval.kind === "ready" ? retrieval.result : null;
+
+              // Render ready → full classification (reputation merged in).
+              if (result) {
+                const classification = classifyScan(
                   result,
-                  reputation,
-                  nowIso,
-                ),
-                p_classification: classification,
-                p_set_triage_status: suggestTriageTransition(classification),
-              });
-              if (persisted.error) {
-                throw new Error(
-                  `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+                  reputation.isMalicious,
                 );
+                const persisted = await sb.rpc("persist_clone_alert_urlscan", {
+                  p_alert_id: row.id,
+                  p_urlscan_uuid: row.urlscan_uuid,
+                  p_urlscan_evidence: serialiseRetrievedEvidence(
+                    row.urlscan_uuid,
+                    result,
+                    reputation,
+                    nowIso,
+                  ),
+                  p_classification: classification,
+                  p_set_triage_status: suggestTriageTransition(classification),
+                });
+                if (persisted.error) {
+                  throw new Error(
+                    `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+                  );
+                }
+                classified++;
+                continue;
               }
-              classified++;
-              continue;
-            }
 
-            // Render not ready. If reputation is decisive, classify now and stop
-            // waiting; otherwise persist NULL (bumps failure_streak → ages out).
-            if (reputation.isMalicious) {
+              // Render not ready. If reputation is decisive, classify now and stop
+              // waiting; otherwise persist NULL (bumps failure_streak → ages out).
+              if (reputation.isMalicious) {
+                const persisted = await sb.rpc("persist_clone_alert_urlscan", {
+                  p_alert_id: row.id,
+                  p_urlscan_uuid: row.urlscan_uuid,
+                  p_urlscan_evidence: serialiseRetrievalPending(
+                    row.urlscan_uuid,
+                    reputation,
+                    nowIso,
+                  ),
+                  p_classification: "likely_phishing",
+                  p_set_triage_status: null, // operator confirms TP (ultrareview F5)
+                });
+                if (persisted.error) {
+                  throw new Error(
+                    `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+                  );
+                }
+                classified++;
+                reputationFallback++;
+                continue;
+              }
+
               const persisted = await sb.rpc("persist_clone_alert_urlscan", {
                 p_alert_id: row.id,
                 p_urlscan_uuid: row.urlscan_uuid,
@@ -224,52 +252,32 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                   reputation,
                   nowIso,
                 ),
-                p_classification: "likely_phishing",
-                p_set_triage_status: null, // operator confirms TP (ultrareview F5)
+                p_classification: null, // failure_streak++; retried next tick
+                p_set_triage_status: null,
               });
               if (persisted.error) {
                 throw new Error(
                   `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
                 );
               }
-              classified++;
-              reputationFallback++;
-              continue;
+              stillPending++;
+            } catch (err) {
+              logger.error("clone-watch urlscan retrieve: row failed", {
+                alertId: row.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
             }
-
-            const persisted = await sb.rpc("persist_clone_alert_urlscan", {
-              p_alert_id: row.id,
-              p_urlscan_uuid: row.urlscan_uuid,
-              p_urlscan_evidence: serialiseRetrievalPending(
-                row.urlscan_uuid,
-                reputation,
-                nowIso,
-              ),
-              p_classification: null, // failure_streak++; retried next tick
-              p_set_triage_status: null,
-            });
-            if (persisted.error) {
-              throw new Error(
-                `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
-              );
-            }
-            stillPending++;
-          } catch (err) {
-            logger.error("clone-watch urlscan retrieve: row failed", {
-              alertId: row.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
-        }
 
-        return {
-          classified,
-          stillPending,
-          reputationFallback,
-          skippedNotOurSignal,
-          quotaExhausted,
-        };
-      });
+          return {
+            classified,
+            stillPending,
+            reputationFallback,
+            skippedNotOurSignal,
+            quotaExhausted,
+          };
+        },
+      );
 
       const {
         classified,

@@ -69,6 +69,10 @@ export const cloneWatchFeedPlatform = inngest.createFunction(
     // drains the whole worklist, so concurrent runs would only contend on the
     // same rows' FOR UPDATE locks.
     concurrency: { limit: 1 },
+    // Each run drains the WHOLE worklist, so a burst of weaponised events
+    // needs one run, not N (09-21: 5 runs, 3 found only already-fed rows).
+    // Debounce runs the latest event 2 min after the burst goes quiet.
+    debounce: { period: "2m" },
     // 4m: 3 boundaries + the 60 s in-step wall clock + slack (ADR-0019;
     // inngestFinishBudgets.test.ts).
     timeouts: { finish: "4m" },
