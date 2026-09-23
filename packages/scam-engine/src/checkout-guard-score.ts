@@ -21,6 +21,13 @@ export interface CheckoutGuardSignals {
    *  confidence tier — the old tiered scoring left a known scam domain at 15pts
    *  → SAFE (the "threat-list arm is inert" review finding). */
   scamUrlListed: boolean;
+  /** A VERIFIED first-party hit (First-party URL Reputation — today a
+   *  Weaponised clone-watch Platform Entity): our own scan saw this host
+   *  serving phishing. `label` is the module's source label, e.g. "Ask Arthur
+   *  Clone Watch (live impersonation of commbank.com.au)". Unlike
+   *  `scamUrlListed` this is decisive — the same weight the analyze verdict
+   *  gives it (a GSB-equivalent hit). Null when absent or the flag is off. */
+  firstPartyListed?: { label: string } | null;
   /** Registration-age band of the checkout domain, or null when age was not
    *  assessed (the route skips live WHOIS on clean / .au domains — see route). */
   domainAgeBand: DomainAgeBand | null;
@@ -53,6 +60,12 @@ const LEXICAL_POINTS: Record<SignalType, number> = {
 // pairs with the route's host-level (not registrable-domain) match.
 const SCAM_URL_LISTED_POINTS = 35;
 
+// A verified first-party hit is decisive on its own (HIGH_RISK), exactly as in
+// the analyze verdict: it is our own observation of live phishing on this host,
+// not a feed row, and it never comes from user reports (the module requires a
+// verified source in feed_sources).
+const FIRST_PARTY_LISTED_POINTS = 60;
+
 // Fresh registration is a strong composite signal. `unknown` is never treated
 // as safe (auDA withholds .au registration dates from every free source — see
 // whois-cached.ts) but is not over-penalised on its own.
@@ -80,6 +93,13 @@ export function scoreCheckoutGuard(
     raw += LEXICAL_POINTS[signals.lexical.signalType] ?? 0;
     reasons.push(
       `This web address closely resembles ${signals.lexical.brand} but is not an official ${signals.lexical.brand} domain.`,
+    );
+  }
+
+  if (signals.firstPartyListed) {
+    raw += FIRST_PARTY_LISTED_POINTS;
+    reasons.push(
+      `This site is flagged by ${signals.firstPartyListed.label} — our own scan observed it serving phishing.`,
     );
   }
 

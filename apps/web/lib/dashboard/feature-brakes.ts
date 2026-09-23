@@ -31,6 +31,7 @@ export const KNOWN_BRAKE_KEYS = [
   "bot_analyze",
   "charity_check",
   "clone_enforcement",
+  "clone_netcraft_auto",
   "clone_netcraft_issue",
   "clone_netcraft_resubmit",
   "document_check",
