@@ -22,6 +22,8 @@ interface StoredCloneDomain {
   result_url?: string | null;
   still_live_as_of?: string | null;
   risk_score?: number | null;
+  squat_status?: string | null;
+  registered_at?: string | null;
 }
 
 interface StoredTopRisk {
@@ -83,6 +85,8 @@ export function cloneDetectionsFromMetrics(
       resultUrl: d.result_url ?? null,
       // Older snapshots inferred liveness from vendor declines (including unavailable).
       stillLiveAsOf: d.lifecycle_state === "weaponised" ? (d.still_live_as_of ?? null) : null,
+      squatStatus: d.squat_status ?? null,
+      registeredAt: d.registered_at ?? null,
     })),
     topRisk: Array.isArray(c.top_risk)
       ? c.top_risk.map((t) => ({ domain: t.domain, riskScore: t.risk_score }))
