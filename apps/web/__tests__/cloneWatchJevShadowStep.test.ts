@@ -79,7 +79,7 @@ const invoke = async () => {
   return (out.results?.[0] ?? out) as unknown;
 };
 /** The batch's own boundaries — per-alert work no longer owns a step. */
-const BATCH_STEPS = ["check-brake", "classify-batch", "log-outcome"];
+const BATCH_STEPS = ["classify-batch", "log-outcome"];
 
 function query(result: unknown) {
   const chain: Record<string, unknown> = {
