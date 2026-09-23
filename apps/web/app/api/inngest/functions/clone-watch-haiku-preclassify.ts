@@ -325,6 +325,10 @@ export function alertsFromEvents(events: ReadonlyArray<{ data?: unknown }>): {
  *  guard test — exceeding it fails the entire app sync, not just this fn. */
 export const INNGEST_PLAN_MAX_BATCH_SIZE = 5;
 export const PRECLASSIFY_BATCH_SIZE = INNGEST_PLAN_MAX_BATCH_SIZE;
+/** Plan ceiling for batchEvents.timeout (Hobby: 30 s) — the second sync
+ *  rejection (#1191's resync: "cannot be longer than 30 seconds"). */
+export const INNGEST_PLAN_MAX_BATCH_TIMEOUT_S = 30;
+export const PRECLASSIFY_BATCH_TIMEOUT = "30s";
 
 // Jev ~300 ms/call; Haiku ~3 s — both well inside the budget per batch.
 const JEV_CONCURRENCY = 4;
@@ -348,7 +352,10 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     // the post-deploy resync 400'd with "cannot be larger than 5". A plan
     // upgrade can raise it; inngestBatchLimit.test.ts pins the ceiling.
     // ~26 alerts → ~6 runs, each one budgeted step.
-    batchEvents: { maxSize: PRECLASSIFY_BATCH_SIZE, timeout: "60s" },
+    batchEvents: {
+      maxSize: PRECLASSIFY_BATCH_SIZE,
+      timeout: PRECLASSIFY_BATCH_TIMEOUT,
+    },
     concurrency: { limit: 1 },
     // No `idempotency` — Inngest rejects it with batchEvents. The guarantee it
     // gave lives where it always really lived: the fan-out's event id
