@@ -154,3 +154,19 @@ describe("scoreCheckoutGuard", () => {
     expect(r.verdict).toBe("HIGH_RISK");
   });
 });
+
+// Review 2026-09-23: a verified first-party hit (our own scan saw live
+// phishing on this host) is decisive — the analyze verdict gives it GSB weight.
+describe("firstPartyListed", () => {
+  it("alone reaches HIGH_RISK and says why", () => {
+    const r = scoreCheckoutGuard(
+      signals({ firstPartyListed: { label: "Ask Arthur Clone Watch (live impersonation of commbank.com.au)" } }),
+    );
+    expect(r.verdict).toBe("HIGH_RISK");
+    expect(r.reasons.join(" ")).toContain("live impersonation of commbank.com.au");
+  });
+
+  it("absent / null changes nothing", () => {
+    expect(scoreCheckoutGuard(signals({ firstPartyListed: null })).verdict).toBe("SAFE");
+  });
+});

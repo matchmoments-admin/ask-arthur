@@ -259,11 +259,11 @@ export function mergeUrlReputation(
  * `/api/extension/url-check` — so their keys and verified-source predicate
  * cannot drift. Pinned per surface by apps/web/__tests__/
  * {analyzeFirstPartyUrls,extensionAnalyzeAdFirstParty,extensionUrlCheckFirstParty}
- * and analyze-core-first-party. NOT routed through here (known, not hidden):
- * `/api/extension/analyze-checkout`'s `scamUrlListed` is a host-presence
- * check over EVERY source (bulk feeds included, confidence ignored — see its
- * route comment), scored by checkout-guard-score; it therefore also counts
- * report-driven rows. The B2B/mobile lookup routes (`/api/v1/threats/*`,
+ * and analyze-core-first-party. `/api/extension/analyze-checkout` calls
+ * `checkFirstPartyUrlReputation` directly (same keys + predicate; it scores
+ * its own signals rather than merging GSB/VT) as its decisive
+ * `firstPartyListed` signal, beside a feed-only host-presence check
+ * (`source_type='feed'`, so report-driven rows never count there either). The B2B/mobile lookup routes (`/api/v1/threats/*`,
  * `/api/scam-urls/lookup`, `/api/mobile/threat-snapshot`) return rows, they
  * do not escalate a verdict. Never throws on the first-party half.
  */

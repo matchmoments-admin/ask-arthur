@@ -8,6 +8,7 @@ import {
   domainAgeBand,
 } from "@askarthur/scam-engine/whois-cached";
 import { scoreCheckoutGuard } from "@askarthur/scam-engine/checkout-guard-score";
+import { checkFirstPartyUrlReputation } from "@askarthur/scam-engine/first-party-url-reputation";
 import { lexicalMatch, brandNormalize } from "@askarthur/shopfront-glue";
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -96,21 +97,45 @@ export async function POST(req: NextRequest) {
     //     watchlist brands are covered by the lexical arm regardless.
     //     confidence_level is ignored — it is 'low' for ~all rows (bulk-feed
     //     default), so presence (not the meaningless tier) is the signal.
+    //     FEED rows only (source_type='feed'): user reports reach scam_urls via
+    //     upsert_scam_url with source_type 'text'/'image'/…, and four of them
+    //     score a row 'high' — counting those would let anyone who files a few
+    //     reports put +35 on a legitimate shop's checkout (review 2026-09-23).
+    //
+    // 4b'. First-party URL Reputation — the ONE verified-source check every
+    //     other surface uses (analyze, url-check, analyze-ad): a Weaponised
+    //     clone's Platform Entity, matched on the page URL's own keys (so a
+    //     /checkout path on a clone host-root row hits). Decisive, scored by
+    //     checkout-guard-score. Runs in parallel with the feed check; fail-open
+    //     inside the module (1.5 s bound). Gated like the analyze path.
     let scamUrlListed = false;
+    let firstPartyListed: { label: string } | null = null;
     const supabase = createServiceClient();
-    if (supabase) {
+    const feedCheck = (async () => {
+      if (!supabase) return false;
       const wantSub = norm.subdomain === "www" ? null : norm.subdomain;
       let q = supabase
         .from("scam_urls")
         .select("id")
         .eq("domain", domain)
-        .eq("is_active", true);
+        .eq("is_active", true)
+        .eq("source_type", "feed");
       q = wantSub
         ? q.eq("subdomain", wantSub)
         : q.or("subdomain.is.null,subdomain.eq.,subdomain.eq.www");
       const { data } = await q.limit(1).maybeSingle();
-      scamUrlListed = !!data;
-    }
+      return !!data;
+    })();
+    const firstPartyCheck = featureFlags.analyzeFirstPartyUrls
+      ? checkFirstPartyUrlReputation([parsed.data.url], {
+          source: "api/extension/analyze-checkout",
+          requestId: req.headers.get("x-request-id") ?? undefined,
+        })
+      : Promise.resolve([]);
+    const [feedHit, firstParty] = await Promise.all([feedCheck, firstPartyCheck]);
+    scamUrlListed = feedHit;
+    const hit = firstParty.find((r) => r.isMalicious);
+    if (hit) firstPartyListed = { label: hit.sources[0] ?? "Ask Arthur" };
 
     // 4c. Domain registration age — assessed ONLY when the domain already looks
     //     suspicious (a lookalike or a threat-list hit) and is non-.au. A clean
@@ -119,7 +144,8 @@ export async function POST(req: NextRequest) {
     //     so a first-seen legit domain never caches) on every checkout page load.
     //     .au registration dates are always withheld anyway, so skip those too.
     let ageBand: DomainAgeBand | null = null;
-    const alreadySuspicious = lexical !== null || scamUrlListed;
+    const alreadySuspicious =
+      lexical !== null || scamUrlListed || firstPartyListed !== null;
     if (alreadySuspicious && !domain.endsWith(".au")) {
       const { createdDate } = await getDomainCreatedDate(domain);
       ageBand = domainAgeBand(domainAgeDays(createdDate));
@@ -150,6 +176,7 @@ export async function POST(req: NextRequest) {
     const scored = scoreCheckoutGuard({
       lexical,
       scamUrlListed,
+      firstPartyListed,
       domainAgeBand: ageBand,
       brandOnPageMismatch,
     });
@@ -183,6 +210,7 @@ export async function POST(req: NextRequest) {
         domain,
         has_lexical: !!lexical,
         scam_url_listed: scamUrlListed,
+        first_party_listed: firstPartyListed !== null,
         age_band: ageBand,
       });
       void axiom.flush().catch(() => {});

@@ -95,6 +95,11 @@ const MIN_CONFIDENCE = WORKLIST_MIN_CONFIDENCE;
 
 // ── Weaponised RE-submission lane (v250) ────────────────────────────────────
 const RESUBMIT_BRAKE = "clone_netcraft_resubmit";
+// The auto lane's operator kill-switch (review 2026-09-23: it was the one
+// outbound clone-watch Lane without one). Same fail-closed read as resubmit —
+// an unreadable brake counts as engaged, because this Lane reports third-party
+// URLs to an external vendor in Ask Arthur's name.
+const AUTO_BRAKE = "clone_netcraft_auto";
 const RESUBMIT_DEFAULT_CAP = 10;
 const RESUBMIT_MIN_AGE_DAYS = 30; // matches the issue reporter's window
 const RESUBMIT_COOLDOWN_DAYS = 14;
@@ -183,6 +188,16 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         }
 
         if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+        // Validation (test) runs submit nothing, so they are not gated.
+        const autoBraked = isTest
+          ? false
+          : await step.run("auto-check-brake", () =>
+              isFeatureBrakedOrUnknown(AUTO_BRAKE),
+            );
+        if (autoBraked) {
+          return { skipped: true, reason: `feature_brakes.${AUTO_BRAKE} engaged` };
+        }
 
         const candidates = await step.run("load-candidates", async () => {
           const { data, error } = await sb.rpc(

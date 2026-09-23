@@ -98,6 +98,7 @@ export const LANES = {
     feature: "shopfront_clone_netcraft_auto",
     provider: "netcraft",
     operation: "bulk_submit",
+    brake: "clone_netcraft_auto",
   },
   "clone-watch-enrich-attribution": {
     feature: "shopfront_clone_enrich",
