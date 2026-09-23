@@ -21,7 +21,7 @@ import {
 /**
  * Clone-Watch urlscan — Stage 2 of 2: RETRIEVE.
  *
- * Batched cron (every 3h). Pulls urlscan results that were submitted by
+ * Batched cron (5x/day at :10 — 03/09/12/15/21 UTC). Pulls urlscan results that were submitted by
  * `clone-watch-urlscan-submit` at least MIN_AGE_MINUTES ago — by which point
  * the free-tier render is actually finished, fixing the 0%-retrieval bug that
  * killed the old in-run 90s poll.
@@ -106,12 +106,9 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         return (data as RetrieveRow[] | null) ?? [];
       });
 
-      // Drain the durable event queue even when no scans need retrieval.
-      // v307 persists classification and lifecycle in the same transaction.
-
       // Retrieve + classify the whole batch inside ONE step instead of one step
       // per row. Inngest bills per step execution, so a 40-row batch was ~40
-      // executions × 8 runs/day for this fn alone; collapsing to a single step
+      // executions × 8 runs/day (the cadence then) for this fn alone; collapsing to a single step
       // cuts that ~20×. Safe because every write is an idempotent, edge-guarded
       // RPC — a batch-step retry re-runs already-processed rows without double-
       // advancing lifecycle or re-emitting weaponised events (apply_verdict only
@@ -153,7 +150,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
               // unhealthy — neither is evidence about this URL. Persisting a null
               // classification here would bump urlscan_failure_streak, and three
               // strikes drop the row out of BOTH worklists permanently. This lane
-              // runs 8x/day, so a single rate-limited window could strand a whole
+              // runs 5x/day, so a single rate-limited window could strand a whole
               // batch.
               //
               // A 429 is global to the API key, so the rest of the batch would 429
@@ -294,6 +291,10 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       // is picked up here. send + stamp happen in one step: on retry the re-query
       // returns the still-unstamped rows, the send dedupes on the id key, and the
       // stamp is the completion marker → idempotent, no double-send, no drop.
+      // Deliberately NOT skipped when the retrieve worklist was empty: this
+      // step drains the durable queue on every tick. It can trust persisted
+      // state because v307 writes classification and lifecycle in the same
+      // transaction.
       await step.run("emit-weaponised", async () => {
         const { data, error } = await sb
           .from("shopfront_clone_alerts")

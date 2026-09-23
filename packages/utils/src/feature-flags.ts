@@ -676,21 +676,23 @@ export const featureFlags = {
    *  from brand self-registration so the matcher change ships dark first. */
   brandDynamicWatchlist: readBoolEnv("FF_BRAND_DYNAMIC_WATCHLIST"),
 
-  /** Layer 2 — Netcraft community submission. Server-side only. Gates the
-   *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
-   *  master shopfrontCloneOutreach flag so the brand-notification path can
-   *  ship before Netcraft API access is provisioned. Default OFF until
-   *  NETCRAFT_REPORT_API_KEY is set in Vercel. */
+  /** Layer 2 — Netcraft community submission. Server-side only. Since the
+   *  per-candidate shopfront-clone-submit-netcraft lane was deleted
+   *  (2026-09-23) its ONLY reader is shopfront-clone-netcraft-auto, where it
+   *  is the second of three gates on BOTH the auto lane and the /resubmit
+   *  lane (with shopfrontCloneNetcraftAuto and shopfrontCloneOutreach — see
+   *  clone-watch-netcraft-auto.ts). Independent of shopfrontCloneOutreach so
+   *  the brand-notification path can run with Netcraft reporting off. */
   shopfrontCloneSubmitNetcraft: readBoolEnv(
     "FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT",
   ),
 
   /** Auto-report high-confidence branded clones to Netcraft WITHOUT waiting
-   *  for manual triage. Gates the clone-watch-netcraft-auto producer cron,
-   *  which emits one shopfront/clone.netcraft-auto.v1 per gated candidate
-   *  (preclassifier is_clone AND confidence ≥ threshold, branded, not in the
-   *  FP denylist, not already submitted); the existing submit-netcraft worker
-   *  (dedup + denylist + rate-limit) does the submission. Default OFF — flip
+   *  for manual triage. Gates the auto lane of shopfront-clone-netcraft-auto,
+   *  which reads its gated worklist (preclassifier is_clone AND confidence ≥
+   *  threshold, branded, not in the FP denylist, not already submitted) and
+   *  submits it in ONE Netcraft bulk request (lib/clone-watch/netcraft-report.ts);
+   *  also requires shopfrontCloneSubmitNetcraft + shopfrontCloneOutreach. Default OFF — flip
    *  only after the dry-run count is reviewed. Netcraft re-verifies before any
    *  blocklisting, so good-faith over-reporting of likely clones is safe. */
   shopfrontCloneNetcraftAuto: readBoolEnv("FF_SHOPFRONT_CLONE_NETCRAFT_AUTO"),

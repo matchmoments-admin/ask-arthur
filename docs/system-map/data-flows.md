@@ -537,9 +537,11 @@ Admin visits /admin/clone-watch — eyeballs screenshot chips, clicks FP / TP / 
      └─ Return { ok, alert, eventEmitted, enqueuedInline }
                        │
                        ▼
-Inngest fan-out from shopfront/clone.triaged.v1 (idempotency key event.data.alertId):
-  ├─ shopfront-clone-submit-netcraft (if FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT)
-  │    └─ POST Netcraft v3 Report API → submitted_to.netcraft.submission_id
+Inngest consumer of shopfront/clone.triaged.v1 (idempotency key event.data.alertId):
+  (The per-candidate shopfront-clone-submit-netcraft consumer was DELETED 2026-09-23 —
+   0 runs in 30 days. Netcraft reporting is the shopfront-clone-netcraft-auto cron's bulk
+   submission, gated FF_SHOPFRONT_CLONE_NETCRAFT_AUTO + FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT
+   + FF_SHOPFRONT_CLONE_OUTREACH; see docs/inngest-brakes.md.)
   │
   └─ shopfront-clone-notify-brand (REDUNDANT SAFETY NET for the email path; load-bearing for manual)
      ├─ load brand_contact_directory (eq legitimate_domain)

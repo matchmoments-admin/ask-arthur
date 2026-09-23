@@ -81,6 +81,8 @@ lifecycle_state='weaponised'`, the same predicate the issue reporter has
   revisited every ~3.7 days, not the 24h `CADENCE_HOURS` advertises, so
   `takedown_at` and the TTD KPI ran that stale. A second run doubles throughput;
   `UUID_LIMIT` stays 12 because 60 hit the finish budget on 2026-07-10.
+  _(Superseded by v316: one budgeted fetch step made `UUID_LIMIT` 24 safe, and
+  unchanged verdicts back off to 72 h.)_
 
 ### Expected steady state
 
@@ -411,7 +413,8 @@ engaged, cooldown, no DB) still write nothing on purpose: a disabled lane
 _should_ read as absent. Lanes with **no
 per-run cost row** (notify-brand, notify-weaponised, enforcement-plan/-execute,
 auto-triage, reemergence-monitor, enrich-attribution, report-summary, the
-three digests, scan-one, submit-netcraft) are deliberately NOT in the roster —
+three digests, scan-one) are deliberately NOT in the roster (the per-candidate
+submit-netcraft lane that used to be listed here was deleted 2026-09-23) —
 a predicate over rows that never exist would be a guard that reads as
 protection. Their hop is covered only by `unnotified_weaponised` in
 `retrieve_batch`; "every lane logs one outcome row per run" is the graduated
@@ -606,12 +609,12 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 - **~08:32 UTC** — urlscan auto-scans complete (~90s/row × concurrency 3). Most rows arrive in the dashboard with a classification + screenshot already attached.
 - **5-min triage pass** — operator opens `/admin/clone-watch`, eyeballs screenshots, marks FP / TP / Investigate. Auto-classified `parked_for_sale` + `unresolved` rows have already been moved to `needs_investigation` and dropped off the pending queue.
   - **On TP**: triage route inline-enqueues into `clone_alert_notification_queue` for `fraud_inbox` / `security_txt` brands (PR #488), stamps `submitted_to.brand_notification = {status:'skipped'}` for dashboard parity (PR-A 2026-05-28), then emits `shopfront/clone.triaged.v1` with bounded retry. On retry exhaustion the admin is Telegram-paged and the dashboard surfaces `eventEmitted:false` as a yellow toast (PR #487).
-  - When `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT=true` + `NETCRAFT_REPORT_API_KEY` set, `shopfront-clone-submit-netcraft` fires (~30 sec) as part of the fan-out.
+  - Triage no longer submits to Netcraft: the per-candidate `shopfront-clone-submit-netcraft` consumer was deleted 2026-09-23 (0 runs in 30 days). Netcraft reporting is the 13:00 UTC `shopfront-clone-netcraft-auto` bulk submission below, which `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT` now gates (with `FF_SHOPFRONT_CLONE_NETCRAFT_AUTO` + `FF_SHOPFRONT_CLONE_OUTREACH`).
 - **09:30 UTC** — `shopfront-clone-notify-brand-prepare` runs (daily batch builder). Groups queue rows by (brand, recipient), filters via 24h cooldown, caps each group at 50 candidates, fetches `urlscan_evidence` per alert (link + screenshot), renders React Email, freezes subject + html on the queue, transitions to `pending`. Posts ONE summary Telegram pointing the admin at `/admin/clone-watch#approvals`. When `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND=true`, dispatches via Resend on the same tick instead of waiting for admin click.
 - **Admin clicks Send** at `/admin/clone-watch#approvals` → `POST /api/admin/clone-watch/batches/[batchId]/send`. Pre-checks (FF + brake + RESEND_FROM_EMAIL), cross-validates recipient against `brand_contact_directory.brand` PK, re-checks STOP suppression, Resend send with `idempotencyKey: clone-watch-send:{batchId}`, transitions batch, records send (stamps `last_notified_at` + `submitted_to.brand_notification.status='sent'`).
-- **11:00 UTC** — urlscan re-scan cron (`shopfront-clone-urlscan-rescan`) catches up to 50 stale rows (60-day window). Catches the parked → activated transition.
+- **~~11:00 UTC — urlscan re-scan cron (`shopfront-clone-urlscan-rescan`)~~ (GONE since v178)** — no function with that id is registered. The parked → activated re-scan is `shopfront-clone-lifecycle-recheck` (see `docs/inngest-brakes.md`).
 - **10:00 + 22:00 UTC** — `shopfront-clone-netcraft-reconcile` (v217, gated `FF_CLONE_LIFECYCLE_RECONCILE`; second daily run added v284 — see § Submission precision) reads the PER-URL truth from `GET /submission/{uuid}/urls` and advances each submitted clone's `lifecycle_state` by its own `url_state` (`malicious→taken_down` + witnessed `takedown_at`; `no threats`/`unavailable→declined`). This is the single Netcraft verdict source.
-- **12:00 UTC** — `shopfront-clone-urlscan-retrieve` (`0 */3`) lands the day's urlscan verdicts. This is the evidence the next step reads, which is why it must precede it.
+- **12:10 UTC** — `shopfront-clone-urlscan-retrieve` (`10 3,9,12,15,21 * * *`) lands the day's urlscan verdicts. This is the evidence the next step reads, which is why it must precede it.
 - **13:00 UTC** — `shopfront-clone-netcraft-auto` (gated `FF_SHOPFRONT_CLONE_NETCRAFT_AUTO`) bulk-submits to Netcraft. **v284: requires urlscan `likely_phishing` OR `lifecycle_state='weaponised'`** — lexical classifier confidence alone is not evidence (see § Submission precision). Ran at 09:30 until 2026-08-23, i.e. 2.5h _before_ the verdict above existed. Expect ~1–2 URLs/day, not ~25; `DAILY_CAP` 50 is a ceiling, not a target.
 - **11:00 UTC** — `shopfront-clone-netcraft-issue` (v215/v216, gated `FF_CLONE_NETCRAFT_ISSUE`) files a false-negative `report_issue` on branded `no threats` clones (dry-run until `NETCRAFT_ISSUE_DRY_RUN=false`).
 - **~~Every 30 min — Netcraft takedown poll~~ (RETIRED)** — the submission-level rollup poll (`shopfront-clone-poll-netcraft`) is **dark** (cron removed; it stamped rollup `malicious` onto all 50 URLs in a batch when 1 was malicious). Its role is replaced by the per-URL reconciler above; do NOT re-enable it. `submitted_to.netcraft.{state,takedown_at}` is now written by the reconciler.
@@ -1507,7 +1510,7 @@ One row per (classifier, probability bucket) over the alerts BOTH classifiers sc
 - `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts` — the Inngest function (cron `30 8 * * *` + `shopfront/nrd.manual-trigger.v1` event handler)
 - `apps/web/app/clone-watch/page.tsx` — the public surface (now includes Phase A.3 aggregate impact block when `FF_SHOPFRONT_CLONE_OUTREACH=true`)
 - `apps/web/app/admin/clone-watch/page.tsx` — the operator dashboard
-- `apps/web/app/api/inngest/functions/clone-watch-*.ts` — 7 Inngest functions: `submit-netcraft`, `notify-brand`, `notify-brand-prepare` (daily 09:30 UTC batch builder), `poll-netcraft`, `weekly-digest`, `urlscan`, `urlscan-rescan`
+- `apps/web/app/api/inngest/functions/clone-watch-*.ts` — the clone-watch Inngest functions (list them with `ls`; the per-function brakes live in [`docs/inngest-brakes.md`](../inngest-brakes.md)). The original seven named here (`submit-netcraft`, `notify-brand`, `notify-brand-prepare`, `poll-netcraft`, `weekly-digest`, `urlscan`, `urlscan-rescan`) are no longer the set: `submit-netcraft` (2026-09-23) and `poll-netcraft` (#1069) are deleted, and `urlscan` / `urlscan-rescan` became `urlscan-submit` / `urlscan-retrieve` / `urlscan-scan-one` (v178)
 - `apps/web/app/api/admin/clone-watch/batches/[batchId]/send/route.ts` + `.../reject/route.ts` — admin-approval endpoints powering `/admin/clone-watch#approvals`
 - `apps/web/app/api/admin/clone-watch/scamwatch-export/route.ts` — CSV export for Scamwatch manual upload (PR #484; auto-submit tracked in [#485](https://github.com/matchmoments-admin/ask-arthur/issues/485))
 - Open issues: [#409](https://github.com/matchmoments-admin/ask-arthur/issues/409) v3 matcher word-boundary fix · [#426](https://github.com/matchmoments-admin/ask-arthur/issues/426) Netcraft observability · [#427](https://github.com/matchmoments-admin/ask-arthur/issues/427) TOAST sibling-table · [#428](https://github.com/matchmoments-admin/ask-arthur/issues/428) handler tests · [#429](https://github.com/matchmoments-admin/ask-arthur/issues/429) stale-queue dashboard · [#430](https://github.com/matchmoments-admin/ask-arthur/issues/430) Phase C inbound handler · [#434](https://github.com/matchmoments-admin/ask-arthur/issues/434) urlscan evidence audit trail
