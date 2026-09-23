@@ -52,12 +52,14 @@ vi.mock("@askarthur/utils/axiom-logger", () => ({
   getLogger: () => ({ warn: vi.fn(), flush: async () => {} }),
 }));
 vi.mock("@vercel/functions", () => ({ waitUntil: () => {} }));
+vi.mock("@/lib/adminAuth", () => ({ requireAdmin: async () => {} }));
 vi.mock("resend", () => ({
   Resend: class {
     emails = { send: mocks.resendSend };
   },
 }));
 
+import { POST as adminEnforcementSend } from "@/app/api/admin/clone-watch/enforcement/send/route";
 import { cloneWatchEnforcementExecute } from "@/app/api/inngest/functions/clone-watch-enforcement-execute";
 import { onwardAutoReport } from "@/app/api/inngest/functions/onward-auto-report";
 import { casePlans } from "@/app/api/inngest/functions/clone-watch-enforcement-plan";
@@ -202,6 +204,9 @@ describe("shopfront-clone-enforcement-execute", () => {
     ]);
     expect(mocks.send).toHaveBeenCalledWith([
       {
+        // Deterministic per ledger row: a retried fire-events step is deduped
+        // by Inngest instead of queueing a second send of the same row.
+        id: "onward-log-0",
         name: "report.onward.openphish",
         data: {
           log_id: "log-0",
@@ -229,6 +234,34 @@ describe("shopfront-clone-enforcement-execute", () => {
     );
     expect(queued).toHaveLength(2);
     expect(queued.map(([row]) => row.provider).sort()).toEqual(["apwg", "openphish"]);
+  });
+
+  it("awaits every enforcement.queued row before the step returns (the cap reads them)", async () => {
+    enableAll();
+    rpcScript();
+    let landed = 0;
+    // A slow insert for the counted rows only; everything else resolves at once,
+    // so a fire-and-forget write would still be pending when the run returns.
+    mocks.logCost.mockImplementation((row: { operation: string }) =>
+      row.operation === "enforcement.queued"
+        ? new Promise<void>((r) => setTimeout(() => { landed++; r(); }, 30))
+        : Promise.resolve(),
+    );
+    await invoke(cloneWatchEnforcementExecute);
+    expect(landed).toBe(2);
+  });
+
+  it("fails CLOSED when the shared-cap counter errors — no worklist read, no enqueue", async () => {
+    enableAll();
+    rpcScript();
+    const base = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) =>
+      name === "count_todays_takedown_submissions"
+        ? { data: null, error: { message: "statement timeout" } }
+        : base(name, args),
+    );
+    await expect(invoke(cloneWatchEnforcementExecute)).rejects.toThrow(/count_todays_takedown_submissions/);
+    expect(mocks.rpc.mock.calls.map(([n]) => n)).not.toContain("enqueue_onward_url_reports");
   });
 
   it("enqueues only destinations whose worker flag is on", async () => {
@@ -264,6 +297,40 @@ describe("shopfront-clone-enforcement-execute", () => {
   });
 });
 
+// ── the human admin send shares the cap, and fails closed the same way ─────
+describe("admin clone-enforcement send — shared daily cap", () => {
+  it("refuses (503) when the counter errors instead of reading it as 0 used", async () => {
+    mocks.flags.cloneEnforcement = true;
+    mocks.from.mockImplementation((table: string) =>
+      query({
+        data:
+          table === "shopfront_takedown_attempts"
+            ? {
+                id: 1,
+                clone_alert_id: 10,
+                attempt_type: "registrar_abuse",
+                channel_autonomy: "human_required",
+                case_status: "queued",
+              }
+            : {
+                candidate_url: "https://evil.click/",
+                candidate_domain: "evil.click",
+                target_brand_normalized: null,
+                attribution: { whois: { registrarAbuseEmail: "abuse@registrar.example" } },
+              },
+        error: null,
+      }),
+    );
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: "statement timeout" } });
+    const res = await adminEnforcementSend(
+      new Request("http://x", { method: "POST", body: JSON.stringify({ caseId: 1, confirm: true }) }),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "daily_cap_unavailable" });
+    expect(mocks.resendSend).not.toHaveBeenCalled();
+  });
+});
+
 // ── the shared worker sends a clone subject ─────────────────────────────────
 describe("runUrlBlocklistOnward — clone_alert subject", () => {
   const config = {
@@ -279,10 +346,16 @@ describe("runUrlBlocklistOnward — clone_alert subject", () => {
       step: { run: (_id: string, f: () => unknown) => f() },
     }) as unknown as OnwardStepCtx;
 
-  function withAlert(alert: Record<string, unknown> | null) {
+  function withAlert(
+    alert: Record<string, unknown> | null,
+    claimed: unknown[] | null = [{ id: "log-1" }],
+  ) {
     const updates: unknown[] = [];
     mocks.from.mockImplementation((table: string) => {
-      const chain = query({ data: table === "shopfront_clone_alerts" ? alert : null, error: null });
+      // onward_report_log: the queued→sending claim returns the claimed row.
+      const data =
+        table === "shopfront_clone_alerts" ? alert : table === "onward_report_log" ? claimed : null;
+      const chain = query({ data, error: null });
       chain.update = (patch: unknown) => {
         updates.push({ table, patch });
         return chain;
@@ -348,6 +421,52 @@ describe("runUrlBlocklistOnward — clone_alert subject", () => {
     expect(updates).toContainEqual({
       table: "onward_report_log",
       patch: expect.objectContaining({ status: "skipped", status_reason: "clone_not_weaponised:taken_down" }),
+    });
+  });
+
+  it("claims the ledger row queued→sending before sending, and sends nothing if another run holds it", async () => {
+    const weaponised = {
+      id: 10,
+      candidate_url: "https://evil.click/",
+      candidate_domain: "evil.click",
+      target_brand_normalized: null,
+      lifecycle_state: "weaponised",
+    };
+    let updates = withAlert(weaponised);
+    await runUrlBlocklistOnward(
+      ctx({ log_id: "l", scam_report_id: null, clone_alert_id: 10, destination_key: OPENPHISH_INTAKE_EMAIL }),
+      config,
+    );
+    expect(updates[0]).toEqual({ table: "onward_report_log", patch: { status: "sending" } });
+
+    vi.clearAllMocks();
+    updates = withAlert(weaponised, []); // already sending / sent: nothing claimed
+    const out = await runUrlBlocklistOnward(
+      ctx({ log_id: "l", scam_report_id: null, clone_alert_id: 10, destination_key: OPENPHISH_INTAKE_EMAIL }),
+      config,
+    );
+    expect(out).toMatchObject({ ok: true, skipped: "not_queued" });
+    expect(mocks.resendSend).not.toHaveBeenCalled();
+  });
+
+  it("marks the row failed (not stuck 'sending') when the send step finally throws", async () => {
+    const updates = withAlert({
+      id: 10,
+      candidate_url: "https://evil.click/",
+      candidate_domain: "evil.click",
+      target_brand_normalized: null,
+      lifecycle_state: "weaponised",
+    });
+    mocks.resendSend.mockResolvedValue({ data: null, error: { message: "blocked" } });
+    await expect(
+      runUrlBlocklistOnward(
+        ctx({ log_id: "l", scam_report_id: null, clone_alert_id: 10, destination_key: OPENPHISH_INTAKE_EMAIL }),
+        config,
+      ),
+    ).rejects.toThrow("Resend rejected");
+    expect(updates).toContainEqual({
+      table: "onward_report_log",
+      patch: expect.objectContaining({ status: "failed", status_reason: "send_failed" }),
     });
   });
 

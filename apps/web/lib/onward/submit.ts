@@ -206,13 +206,14 @@ export async function submitOnwardReports(
       // row is NOT re-fired (its event already emitted — avoid a double send).
       let status = existing.status as string;
       if (existing.status === "failed") {
+        // Back to 'queued' BEFORE the event: the URL-blocklist worker claims
+        // queued→sending, so an event that outran this write would find
+        // nothing to claim. fireEvent re-marks 'failed' if the send throws.
+        await supabase
+          .from("onward_report_log")
+          .update({ status: "queued" })
+          .eq("id", existing.id);
         status = await fireEvent(existing.id, sel);
-        if (status === "queued") {
-          await supabase
-            .from("onward_report_log")
-            .update({ status: "queued" })
-            .eq("id", existing.id);
-        }
       }
       results.push({
         destination: sel.destination,

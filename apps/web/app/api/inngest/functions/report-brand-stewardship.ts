@@ -19,7 +19,7 @@ import {
 } from "@/lib/clone-watch/clone-cohort";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 import { aggregateClonesByDomain } from "@/lib/clone-watch/clone-metrics";
-import { priorMonthStart } from "@/lib/clone-watch/month-window";
+import { monthWindow, priorMonthStart } from "@/lib/clone-watch/month-window";
 import {
   ledgerCloneMetrics,
   MONTHLY_STORE_WRITTEN_EVENT,
@@ -64,7 +64,7 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
  * starvation; ADR-0019 amendment). A cancelled run gets no retry and no error,
  * and nothing re-fired it. #1072 raised the budget to 8m the next day; this
  * rewrite also removes the alert refold step. Re-fire August by hand:
- * `report/brand-stewardship.manual-trigger.v1` { periodMonth: "2026-08-01" }.
+ * `report/brand-stewardship.manual-trigger.v1` { periodMonth: "2026-08" } (or "2026-08-01").
  */
 
 const ONWARD_LOG_FETCH_LIMIT = 5000;
@@ -289,6 +289,21 @@ export function aggregateRedditByBrand(
 /** Moved to lib/clone-watch/month-window.ts; re-exported for existing importers. */
 export { priorMonthStart } from "@/lib/clone-watch/month-window";
 
+/**
+ * The reporting window. A manual `periodMonth` accepts BOTH `YYYY-MM` (what
+ * clone-watch/report-summary.manual-trigger.v1 takes) and `YYYY-MM-01` (what
+ * the store-written event carries) — `monthWindow` normalises either, and
+ * throws on anything else rather than computing an Invalid Date. Defaults to
+ * the prior calendar month. Pure; exported for tests.
+ */
+export function stewardshipWindow(
+  periodMonth?: string,
+  now: Date = new Date(),
+): { startIso: string; endIso: string } {
+  const w = monthWindow(periodMonth ?? priorMonthStart(now).toISOString().slice(0, 7));
+  return { startIso: w.startIso, endIso: w.endIso };
+}
+
 // ── Clone-watch detections (the lookalike-domain + hosting/registrar source) ──
 
 /** `.in("id", …)` chunk for the member-alert read. */
@@ -330,7 +345,7 @@ export {
 export const STEWARDSHIP_TRIGGERS = [
   { event: MONTHLY_STORE_WRITTEN_EVENT }, // { periodMonth: "YYYY-MM-01", … }
   // Manual re-run (ops / pre-launch shadow review). Optional event.data.
-  // periodMonth ("YYYY-MM-01") overrides the window. The month's store must
+  // periodMonth ("YYYY-MM" or "YYYY-MM-01") overrides the window. The month's store must
   // already be written (clone-watch/report-summary.manual-trigger.v1) or the
   // clone section is empty — the Telegram digest says so.
   { event: "report/brand-stewardship.manual-trigger.v1" },
@@ -364,15 +379,9 @@ export const reportBrandStewardship = inngest.createFunction(
       // Compute the reporting window inside a step so it's memoised across
       // Inngest replays (deterministic). Defaults to the prior calendar month;
       // a manual periodMonth override targets a specific month.
-      const period = await step.run("compute-period", async () => {
-        const start = periodOverride
-          ? new Date(`${periodOverride}T00:00:00Z`)
-          : priorMonthStart(new Date());
-        const end = new Date(
-          Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
-        );
-        return { startIso: start.toISOString(), endIso: end.toISOString() };
-      });
+      const period = await step.run("compute-period", async () =>
+        stewardshipWindow(periodOverride),
+      );
       const periodMonth = period.startIso.slice(0, 10); // YYYY-MM-01
 
       const logRows = await step.run("fetch-onward-log", async () => {
@@ -587,7 +596,9 @@ export const reportBrandStewardship = inngest.createFunction(
             brandCategory: row.inferred_target_domain
               ? (categories.get(row.inferred_target_domain) ?? null)
               : null,
-            ...attributionRiskInputs(row.attribution),
+            ...attributionRiskInputs(row.attribution, {
+              firstSeenAt: row.first_seen_at ?? null,
+            }),
             nowMs,
           }).score;
         }

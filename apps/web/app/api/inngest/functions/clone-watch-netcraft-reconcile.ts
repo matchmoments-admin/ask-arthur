@@ -1,5 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -120,11 +120,19 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
       const groups = await step.run("load-worklist", async () => {
-        const { data } = await sb.rpc("list_clone_alerts_for_netcraft_reconcile", {
+        const { data, error } = await sb.rpc("list_clone_alerts_for_netcraft_reconcile", {
           p_max_age_days: MAX_AGE_DAYS,
           p_uuid_limit: UUID_LIMIT,
           p_cadence_hours: CADENCE_HOURS,
         });
+        // A worklist read failure is a failure, not a quiet day (it used to
+        // fall through to the nothing_pending Outcome Row).
+        if (error) {
+          await recordLaneError("shopfront-clone-netcraft-reconcile", error.message, {
+            stage: "load_worklist",
+          });
+          throw new Error(`list_clone_alerts_for_netcraft_reconcile: ${error.message}`);
+        }
         return (
           (data as Array<{ netcraft_uuid: string; alerts: unknown }> | null) ?? []
         )

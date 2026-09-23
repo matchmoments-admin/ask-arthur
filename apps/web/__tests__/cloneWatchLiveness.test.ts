@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyDnsLookups,
+  classifyHostLookups,
   isCandidateLive,
   probeLivenessDetailed,
   probeLivenessVerdict,
@@ -258,6 +259,60 @@ describe("classifyDnsLookups (only absence proves deadness)", () => {
     // confirmed against NS rather than read as deadness.
     expect(classifyDnsLookups({ records: [] }, () => ({ records: ["ns1.x"] }))).toBe(
       false,
+    );
+  });
+});
+
+// ── ENODATA is NODATA, not NXDOMAIN (PR B, 2026-09-23) ──────────────────────
+// c-ares reports "the name exists but has no record of this type" as ENODATA.
+// It was in the absent-set, so a delegated name with no A and a subdomain with
+// no NS read as GONE — lifecycle deadness must be NXDOMAIN-class only.
+describe("classifyDnsLookups — ENODATA proves the name exists", () => {
+  const abort = () => {
+    throw new Error("NS lookup should not have run");
+  };
+  it("ENODATA on A → not gone, without querying NS", () => {
+    expect(classifyDnsLookups({ errorCode: "ENODATA" }, abort)).toBe(false);
+  });
+  it("ENODATA on NS → not gone", () => {
+    expect(
+      classifyDnsLookups({ errorCode: "ENOTFOUND" }, () => ({ errorCode: "ENODATA" })),
+    ).toBe(false);
+  });
+});
+
+// "Does this name resolve to a host?" — the scanning / re-emergence question.
+// A delegated zone with NS but no A/AAAA answers urlscan "400 DNS Error"
+// (prod: sucway.net, apple.co.mw, amazom.yoga) and is not a re-emergence.
+describe("classifyHostLookups (A or AAAA present)", () => {
+  const abort = () => {
+    throw new Error("AAAA lookup should not have run");
+  };
+  it("an A record → a host, without querying AAAA", () => {
+    expect(classifyHostLookups({ records: ["1.2.3.4"] }, abort)).toBe(true);
+  });
+  it("AAAA only → a host", () => {
+    expect(classifyHostLookups({ errorCode: "ENODATA" }, () => ({ records: ["::1"] }))).toBe(
+      true,
+    );
+  });
+  it.each([
+    [{ errorCode: "ENODATA" }, { errorCode: "ENODATA" }],
+    [{ errorCode: "ENOTFOUND" }, { errorCode: "ENOTFOUND" }],
+    [{ records: [] }, { errorCode: "ENODATA" }],
+  ])("no A and no AAAA answered → no host (%j, %j)", (a, aaaa) => {
+    expect(classifyHostLookups(a, () => aaaa)).toBe(false);
+  });
+  it.each(["SERVFAIL", "REFUSED", "ETIMEOUT"])(
+    "%s on either lookup is inconclusive",
+    (code) => {
+      expect(classifyHostLookups({ errorCode: code }, () => ({ errorCode: "ENODATA" }))).toBeNull();
+      expect(classifyHostLookups({ errorCode: "ENODATA" }, () => ({ errorCode: code }))).toBeNull();
+    },
+  );
+  it("a failed A lookup still accepts an AAAA answer", () => {
+    expect(classifyHostLookups({ errorCode: "SERVFAIL" }, () => ({ records: ["::1"] }))).toBe(
+      true,
     );
   });
 });

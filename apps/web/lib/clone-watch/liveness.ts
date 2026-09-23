@@ -21,10 +21,10 @@ import { Resolver } from "node:dns/promises";
  * 2026-07-26, producing exactly one filing.
  *
  * The rule now: **only NXDOMAIN counts as dead.** Everything else is `true`
- * (proved serving) or `null` (inconclusive). This mirrors `domainResolves()` in
- * clone-watch-reemergence-monitor.ts, which already returns `boolean | null`
- * for the same reason — "skip this round rather than risk a false reopen".
- * Vercel egress IPs are routinely blocked by phishing kits, so a refused
+ * (proved serving) or `null` (inconclusive) — "skip this round rather than
+ * risk a false verdict". Two DNS verdicts live here, one per question:
+ * `isDomainGone` (lifecycle: NXDOMAIN only) and `resolvesToHost` (scanning and
+ * re-emergence: an A/AAAA record). Vercel egress IPs are routinely blocked by phishing kits, so a refused
  * connect or a timeout is indistinguishable from deadness from where we sit;
  * DNS is the only honest test we control.
  *
@@ -43,7 +43,7 @@ export type LivenessReason =
   | "http" // got an HTTP response over https
   | "tls" // TLS handshake failed; TCP connect proved the host up
   | "tls_http_fallback" // https TLS failed, http:// answered
-  | "nxdomain" // no A and no NS record — genuinely gone
+  | "nxdomain" // NXDOMAIN on A and NS — genuinely gone
   | "timeout" // request aborted at the deadline
   | "refused" // connection refused / reset, but DNS resolves
   | "other"; // unclassified transport error, DNS resolves
@@ -87,35 +87,44 @@ function isTlsError(code: string): boolean {
 export type DnsLookup = { records: string[] } | { errorCode: string };
 
 /**
- * Resolver error codes that actually prove the name does not exist. Everything
- * else — SERVFAIL, REFUSED, timeouts, connection errors — means our resolver had
- * a bad day, which is not a fact about the domain.
+ * Resolver error codes that actually prove the name does not exist (NXDOMAIN
+ * class). Everything else — SERVFAIL, REFUSED, timeouts, connection errors —
+ * means our resolver had a bad day, which is not a fact about the domain.
+ *
+ * ENODATA is NOT here (PR B, 2026-09-23): c-ares raises it for DNS NODATA —
+ * the name EXISTS but has no record of the queried type. It used to be, so a
+ * delegated zone with no A and a subdomain with no NS both read as "gone".
  */
-const NAME_ABSENT_CODES = new Set(["ENOTFOUND", "NOTFOUND", "ENODATA", "NXDOMAIN"]);
+const NAME_ABSENT_CODES = new Set(["ENOTFOUND", "NOTFOUND", "NXDOMAIN"]);
+/** The name exists; it just has no record of this type. */
+const NO_DATA_CODE = "ENODATA";
 
 /** True when this lookup proves the name is absent (as opposed to unreachable). */
 function provesAbsent(l: DnsLookup): boolean {
   return "errorCode" in l && NAME_ABSENT_CODES.has(l.errorCode);
 }
 
+/** True when this lookup proves the name exists without records of its type. */
+function isNoData(l: DnsLookup): boolean {
+  return "errorCode" in l && l.errorCode === NO_DATA_CODE;
+}
+
 /**
  * Decide deadness from an A lookup and an NS lookup. Pure, so the three-valued
- * logic is unit-testable without a live resolver.
+ * logic is unit-testable without a live resolver. This is the LIFECYCLE
+ * question ("is this domain gone?") — see {@link classifyHostLookups} for the
+ * scanning question ("does it point at a host?").
  *
- *   false — records exist, or NS exists: the name is there.
- *   true  — BOTH lookups proved absence. The only honest "gone".
+ *   false — A or NS records exist, or either lookup answered NODATA: the name
+ *           is there.
+ *   true  — BOTH lookups proved absence (NXDOMAIN class). The only honest "gone".
  *   null  — any lookup failed for a reason that is not absence. Prove nothing.
  *
- * `ns` is lazy so the caller can skip the second query when A already answered.
+ * `ns` is lazy so the caller can skip the second query when A already decided.
  *
- * THE BUG THIS FIXES. Both lookups used to be `.catch(() => [] as string[])`,
- * which flattened every failure mode into an empty array — so SERVFAIL, REFUSED
- * and resolver timeouts all returned "gone". That is the exact conflation the
- * module header's 2026-07-26 rewrite was written to remove, surviving one layer
- * below the fetch-error classification that rewrite did fix. It went unnoticed
- * because the injectable `resolveGone` seam meant no test ever drove the real
- * resolver path — every liveness test supplies its own verdict. Live today via
- * the Netcraft issue reporter, which gates filings on `live !== false`.
+ * History: both lookups used to be `.catch(() => [] as string[])`, flattening
+ * SERVFAIL/REFUSED/timeouts into "gone" (PR 7); then ENODATA sat in the absent
+ * set, so NODATA read as "gone" too (PR B). Only NXDOMAIN proves deadness.
  */
 export function classifyDnsLookups(
   a: DnsLookup,
@@ -123,15 +132,43 @@ export function classifyDnsLookups(
 ): boolean | null {
   if ("records" in a) {
     if (a.records.length > 0) return false;
-    // Answered, but empty. Not proof of absence on its own — fall through to NS,
-    // exactly as the pre-fix code did.
+    // Answered, but empty. Not proof of absence on its own — confirm via NS.
+  } else if (isNoData(a)) {
+    return false;
   } else if (!provesAbsent(a)) {
     return null;
   }
 
   const nsResult = ns();
   if ("records" in nsResult) return nsResult.records.length === 0;
+  if (isNoData(nsResult)) return false;
   return provesAbsent(nsResult) ? true : null;
+}
+
+/**
+ * Does the name point at a host — an A or AAAA record? Pure. This is the
+ * SCANNING / RE-EMERGENCE question, deliberately stricter than "not gone": a
+ * zone still delegated (NS present) with its A removed cannot be rendered by
+ * urlscan ("400 DNS Error" — prod sucway.net, apple.co.mw, amazom.yoga) and is
+ * not a taken-down clone coming back.
+ *
+ *   true  — an A or AAAA record exists.
+ *   false — both lookups answered with no address (NODATA, NXDOMAIN or empty).
+ *   null  — a lookup failed for a reason that proves nothing.
+ *
+ * `aaaa` is lazy: skipped when A already has records.
+ */
+export function classifyHostLookups(
+  a: DnsLookup,
+  aaaa: () => DnsLookup,
+): boolean | null {
+  const hasAddress = (l: DnsLookup) => "records" in l && l.records.length > 0;
+  const answeredNoAddress = (l: DnsLookup) =>
+    ("records" in l && l.records.length === 0) || isNoData(l) || provesAbsent(l);
+  if (hasAddress(a)) return true;
+  const v6 = aaaa();
+  if (hasAddress(v6)) return true;
+  return answeredNoAddress(a) && answeredNoAddress(v6) ? false : null;
 }
 
 /** Run one resolver query, capturing the error code instead of discarding it. */
@@ -144,29 +181,45 @@ async function lookup(fn: () => Promise<string[]>): Promise<DnsLookup> {
   }
 }
 
-/** True when the domain has neither an A nor an NS record — the only signal
- *  that honestly means "gone". Inconclusive resolver errors read as `null`,
- *  matching clone-watch-reemergence-monitor.ts's domainResolves(). */
-/** DNS-only deadness: true = no A and no NS (NXDOMAIN-class), false =
- *  resolves, null = the resolver proved nothing. Cheap (~ms, 4 s cap) — the
- *  precheck urlscan submits use before spending a scan on a dead name. */
-export async function isDomainGone(hostname: string): Promise<boolean | null> {
-  return domainIsGone(hostname);
+function resolver(): Resolver {
+  return new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });
 }
 
-async function domainIsGone(hostname: string): Promise<boolean | null> {
+/**
+ * DNS-only deadness — the LIFECYCLE verdict: true = NXDOMAIN-class (the name
+ * does not exist), false = the name exists, null = the resolver proved
+ * nothing. Cheap (~ms, 4 s cap). The NS query runs only when A proved absence
+ * or answered empty.
+ */
+export async function isDomainGone(hostname: string): Promise<boolean | null> {
   if (!hostname) return null;
-  const r = new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });
+  const r = resolver();
   try {
     const a = await lookup(() => r.resolve4(hostname));
-    // Short-circuit exactly as before: skip the NS query when A already answered
-    // with records, or when A failed for a reason that proves nothing.
-    if ("records" in a && a.records.length > 0) return false;
-    if ("errorCode" in a && !provesAbsent(a)) return null;
-    const ns = await lookup(() => r.resolveNs(hostname));
-    return classifyDnsLookups(a, () => ns);
+    const needNs = ("records" in a && a.records.length === 0) || provesAbsent(a);
+    const ns = needNs ? await lookup(() => r.resolveNs(hostname)) : null;
+    return classifyDnsLookups(a, () => ns ?? { errorCode: "UNKNOWN" });
   } catch {
     return null; // resolver itself failed — prove nothing
+  }
+}
+
+/**
+ * Does `hostname` resolve to a host (A or AAAA)? true / false / null as
+ * {@link classifyHostLookups}. The precheck urlscan submits use before spending
+ * a scan, and the re-emergence monitor's "is it back?" test. Cheap (~ms, 4 s
+ * cap). The AAAA query runs only when A has no records.
+ */
+export async function resolvesToHost(hostname: string): Promise<boolean | null> {
+  if (!hostname) return null;
+  const r = resolver();
+  try {
+    const a = await lookup(() => r.resolve4(hostname));
+    const needAaaa = !("records" in a && a.records.length > 0);
+    const aaaa = needAaaa ? await lookup(() => r.resolve6(hostname)) : null;
+    return classifyHostLookups(a, () => aaaa ?? { errorCode: "UNKNOWN" });
+  } catch {
+    return null;
   }
 }
 
@@ -258,7 +311,7 @@ export async function probeLivenessVerdict(
 
     // Everything else (timeout, ENOTFOUND, unknown) could be a dead name.
     // DNS is the only check that may return `false`.
-    const resolveGone = deps.resolveGone ?? domainIsGone;
+    const resolveGone = deps.resolveGone ?? isDomainGone;
     const gone = await resolveGone(hostnameOf(url));
     if (gone === true) return { live: false, reason: "nxdomain" };
 

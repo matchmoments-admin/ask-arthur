@@ -4,8 +4,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
-import { isDomainGone } from "@/lib/clone-watch/liveness";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { resolvesToHost } from "@/lib/clone-watch/liveness";
+import { recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 
 /**
  * Clone-Watch — takedown re-emergence monitor (Wave 1).
@@ -31,14 +31,6 @@ interface ReemergenceRow {
   channel: string;
 }
 
-/** Resolves = true, gone = false, resolver proved nothing = null — via the
- *  ONE DNS check (liveness.ts). The local copy this replaced caught every
- *  lookup error per-call, so a resolver TIMEOUT read as "not resolving" and
- *  its own `null` branch was unreachable. */
-async function domainResolves(domain: string): Promise<boolean | null> {
-  const gone = await isDomainGone(domain);
-  return gone === null ? null : !gone;
-}
 
 // inngest-finish-budget: 52 boundaries — 2 static + 1 per-case recheck step
 // x BATCH_LIMIT (50). See #1074 for the batching fold.
@@ -68,10 +60,17 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
       const cases = await step.run("load-actioned", async () => {
-        const { data } = await sb.rpc("list_takedown_cases_for_reemergence", {
+        const { data, error } = await sb.rpc("list_takedown_cases_for_reemergence", {
           p_limit: BATCH_LIMIT,
           p_cadence_hours: CADENCE_HOURS,
         });
+        // A worklist read failure is a failure, not a quiet day.
+        if (error) {
+          await recordLaneError("shopfront-clone-reemergence-monitor", error.message, {
+            stage: "load_actioned",
+          });
+          throw new Error(`list_takedown_cases_for_reemergence: ${error.message}`);
+        }
         return (data as ReemergenceRow[] | null) ?? [];
       });
 
@@ -91,7 +90,11 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
 
       for (const c of cases) {
         const didReemerge = await step.run(`recheck-${c.case_id}`, async () => {
-          const resolves = await domainResolves(c.candidate_domain);
+          // Re-emerged = the name points at a host again (A/AAAA), via the ONE
+          // DNS Module (liveness.ts). "Not NXDOMAIN" is not enough: a zone
+          // still delegated with its A removed is exactly what a takedown
+          // leaves behind, and it is not a clone coming back.
+          const resolves = await resolvesToHost(c.candidate_domain);
           // Inconclusive: leave the case unstamped so the next cadence retries,
           // rather than recording a "checked, not re-emerged" we cannot prove.
           if (resolves === null) return false;

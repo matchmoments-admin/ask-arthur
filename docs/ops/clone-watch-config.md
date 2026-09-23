@@ -641,10 +641,47 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 > `declined` — post-v284 "decline rate" is structurally unmeasurable for the
 > weaponised cohort; the success signal to watch is takedown conversions.
 
+> **v320 + PR B "correctness" (2026-09-23) — DNS, send safety, error visibility.**
+>
+> - **Two DNS verdicts, one Module (`liveness.ts`).** `isDomainGone` is the LIFECYCLE verdict and
+>   now means NXDOMAIN only — `ENODATA` (DNS NODATA: the name exists, no record of that type) no
+>   longer counts as absence. `resolvesToHost` (A or AAAA present) is the SCANNING verdict: the
+>   urlscan precheck in `submitCloneCandidate` skips a name with no A/AAAA (a zone still delegated
+>   with its A removed drew urlscan's "400 DNS Error" under the old NS-based check — sucway.net,
+>   apple.co.mw, amazom.yoga) and stamps `status 400, error dns_no_host_precheck` (3 rows from
+>   before this change carry the old `dns_nxdomain_precheck`). The re-emergence monitor calls a
+>   domain re-emerged only when it points at a host again.
+> - **Onward sends cannot double-fire.** Every URL-blocklist event carries `id: onward-<ledger row
+id>` (Inngest dedups a retried `fire-events` step), and `runUrlBlocklistOnward` claims the row
+>   `queued → sending` in its own step before sending — a second event for the same row returns
+>   `skipped: not_queued`. A send that exhausts its retries marks the row `failed` (`send_failed`)
+>   instead of leaving it `sending`; a resubmit re-drives it (`lib/onward/submit.ts` re-queues
+>   BEFORE firing).
+> - **The shared daily cap (`CLONE_SUBMISSION_DAILY_CAP`) fails CLOSED** — a
+>   `count_todays_takedown_submissions` error throws `shopfront-clone-enforcement-execute` instead
+>   of reading as "0 used" — and counts only the sends under our one email identity
+>   (`clone_enforcement` `enforcement.queued` + `enforcement.reported`). Netcraft is deliberately
+>   OUT: it has its own caps (auto 50/day in its worklist RPC, `NETCRAFT_RESUBMIT_DAILY_CAP`,
+>   `count_todays_netcraft_issues`), and the old term counted the deleted
+>   `shopfront_clone_submit_netcraft` lane. `enforcement.queued` rows are now AWAITED
+>   (`logEnforcementEventAsync`) so the counter cannot miss them.
+> - **A worklist read failure is a failure, not a quiet day.** netcraft-auto (both sub-lanes),
+>   netcraft-reconcile and the re-emergence monitor now `recordLaneError(lane, err, {stage})` and
+>   throw (Inngest retries) instead of writing a quiet Outcome Row over an unread worklist.
+> - **v320 `record_netcraft_url_verdicts`:** `unchanged_reads` increments only when the stored
+>   read is > 1 h old, so a retried apply step no longer double-counts toward the 72 h backoff.
+> - **v320 `project_clone_to_platform_entity`** (SQL twin of `readAttribution`): list-valued
+>   registrar → first entry; unparseable `createdDate` / `enriched_at` → NULL instead of raising
+>   inside the trigger (which rolled back the enrichment/lifecycle write); a `createdDate` > 1 year
+>   before `first_seen_at` is a parent-zone date → unknown (also in `readAttribution` when the
+>   caller passes `firstSeenAt`); a sole-source row whose alert is `weaponised` again goes back to
+>   `high` + active; a retracted Platform Entity is not projected onto.
+
 > **v317 + PR 4 of the deepening plan (2026-09-23) — spend scans on live names only.**
 > `submitCloneCandidate` (urlscan-submit AND lifecycle-recheck) DNS-prechecks the domain via
 > `isDomainGone` (liveness.ts): a PROVED-gone name (no A, no NS) skips urlscan and Safe
-> Browsing/VirusTotal and is stamped `status 400, error dns_nxdomain_precheck` — the same 400
+> Browsing/VirusTotal and is stamped `status 400, error dns_nxdomain_precheck` (superseded by
+> v320's `resolvesToHost` / `dns_no_host_precheck`, above) — the same 400
 > the v277 dead-domain cadence keys on. Inconclusive resolver answers still scan. v317: a
 > recheck-pool row rechecked ≥ 8 times backs off to weekly (514 of 2,087 at apply time).
 > urlscan-retrieve now uses `budgetedStep` (was the #1142 spanningBudget constructor bug) and

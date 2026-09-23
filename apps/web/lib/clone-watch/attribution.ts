@@ -13,6 +13,10 @@
  * it is tolerant of anything jsonb can hold (null, strings, numbers-as-ASN,
  * the legacy flat keys) because it reads a column, not a TS value.
  *
+ * SQL twin: `project_clone_to_platform_entity` (supabase/migration-v320-*.sql)
+ * reads the same `whois` block onto scam_urls — list-valued registrar → first
+ * entry, parent-zone createdDate → unknown. Change the two together.
+ *
  * Pure: no I/O. `abuseChannels()` is the takedown view of the same data — the
  * registrar/host levers a brand or operator can pull — using the curated abuse
  * pages in lib/email/registrar-abuse.ts with ICANN as the universal fallback.
@@ -81,6 +85,34 @@ const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
 
+/** What the caller knows about the alert beyond its attribution column. */
+export interface AttributionContext {
+  /** The alert's `first_seen_at`. Enables the parent-zone createdDate guard. */
+  firstSeenAt?: string | null;
+}
+
+/**
+ * A createdDate more than a calendar year before the alert was first seen is
+ * the PARENT zone's registration, not this domain's (prod: appley.eu.cc →
+ * 1997, the date of eu.cc) — unknown, not "a 29-year-old domain". Same cut as
+ * the SQL twin: `created < (first_seen_at - interval '1 year')::date`.
+ */
+function plausibleCreatedDate(
+  created: string | null,
+  firstSeenAt: string | null | undefined,
+): string | null {
+  if (!created || !firstSeenAt) return created;
+  const createdMs = Date.parse(`${created.slice(0, 10)}T00:00:00Z`);
+  const seen = new Date(firstSeenAt);
+  if (Number.isNaN(createdMs) || Number.isNaN(seen.getTime())) return created;
+  const cutMs = Date.UTC(
+    seen.getUTCFullYear() - 1,
+    seen.getUTCMonth(),
+    seen.getUTCDate(),
+  );
+  return createdMs < cutMs ? null : created;
+}
+
 /**
  * Normalise the stored jsonb. The `CloneAttribution` parameter type documents
  * what the writer produces; `unknown` is accepted because callers read a jsonb
@@ -89,6 +121,7 @@ const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null)
  */
 export function readAttribution(
   raw: CloneAttribution | Obj | null | undefined | unknown,
+  context: AttributionContext = {},
 ): AttributionView {
   if (!raw || typeof raw !== "object") return EMPTY_ATTRIBUTION;
   const a = obj(raw);
@@ -101,7 +134,7 @@ export function readAttribution(
     registrarIanaId: str(whois.registrarIanaId),
     registrarAbuseEmail:
       firstStr(whois.registrarAbuseEmail) ?? firstStr(a.registrar_abuse_email),
-    createdDate: str(whois.createdDate),
+    createdDate: plausibleCreatedDate(str(whois.createdDate), context.firstSeenAt),
     nameServers: strList(whois.nameServers),
     statuses: strList(whois.statuses),
     registrantCountry: str(whois.registrantCountry),
@@ -159,13 +192,16 @@ export function abuseChannels(view: AttributionView): AbuseChannel[] {
 /** The attribution inputs of `computeWeaponisationRisk` (weaponisation-risk.ts),
  *  so every caller scores from the same read — recheck ranking and the
  *  stewardship ledger used to hand-destructure them separately. */
-export function attributionRiskInputs(raw: unknown): {
+export function attributionRiskInputs(
+  raw: unknown,
+  context: AttributionContext = {},
+): {
   whoisCreatedDate: string | null;
   ipAbuseConfidenceScore: number | null;
   auAbnStatus: string | null;
   auNameMatches: boolean | null;
 } {
-  const v = readAttribution(raw);
+  const v = readAttribution(raw, context);
   return {
     whoisCreatedDate: v.createdDate,
     ipAbuseConfidenceScore: v.ipAbuseScore,

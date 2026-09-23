@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_ATTRIBUTION,
   abuseChannels,
+  attributionRiskInputs,
   readAttribution,
 } from "@/lib/clone-watch/attribution";
 
@@ -51,6 +52,33 @@ describe("readAttribution", () => {
 
   it("blank strings are null, not empty recipients", () => {
     expect(readAttribution({ whois: { registrarAbuseEmail: "  " } }).registrarAbuseEmail).toBeNull();
+  });
+});
+
+// v320 twin rule (project_clone_to_platform_entity): a createdDate more than a
+// year before the alert's first_seen_at is the PARENT zone's date — prod
+// appley.eu.cc reported 1997 (eu.cc) — so it reads as unknown, or the
+// weaponisation-risk scorer credits a days-old squat with a 29-year-old domain.
+describe("readAttribution — implausible createdDate", () => {
+  const raw = { whois: { createdDate: "1997-05-01" } };
+  it("is unknown when >1 year before first_seen_at", () => {
+    expect(readAttribution(raw, { firstSeenAt: "2026-09-01T00:00:00Z" }).createdDate).toBeNull();
+    expect(
+      attributionRiskInputs(raw, { firstSeenAt: "2026-09-01T00:00:00Z" }).whoisCreatedDate,
+    ).toBeNull();
+  });
+  it("is kept inside the year, and when first_seen_at is unknown", () => {
+    const recent = { whois: { createdDate: "2026-08-30" } };
+    expect(readAttribution(recent, { firstSeenAt: "2026-09-01T00:00:00Z" }).createdDate).toBe(
+      "2026-08-30",
+    );
+    expect(readAttribution(raw).createdDate).toBe("1997-05-01");
+    expect(readAttribution(raw, { firstSeenAt: null }).createdDate).toBe("1997-05-01");
+  });
+  it("uses the same calendar-year cut as the SQL twin", () => {
+    // (first_seen_at - interval '1 year')::date = 2025-09-01
+    expect(readAttribution({ whois: { createdDate: "2025-09-01" } }, { firstSeenAt: "2026-09-01T10:00:00Z" }).createdDate).toBe("2025-09-01");
+    expect(readAttribution({ whois: { createdDate: "2025-08-31" } }, { firstSeenAt: "2026-09-01T10:00:00Z" }).createdDate).toBeNull();
   });
 });
 
