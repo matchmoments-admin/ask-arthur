@@ -4,7 +4,7 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
+import { logEnforcementEventAsync } from "@/lib/clone-watch/enforcement-telemetry";
 import { enabledUrlBlocklistDestinations } from "@/lib/onward/destinations";
 import {
   enqueueUrlBlocklistReports,
@@ -35,9 +35,13 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
  *    destinations are enqueued, so turning an intake's flag off stops it for
  *    every producer at once.
  *  - Bounded by the SHARED daily cap (CLONE_SUBMISSION_DAILY_CAP) counted
- *    across this path, the human admin send and Netcraft submit
- *    (count_todays_takedown_submissions). Each enqueued row records
- *    `enforcement.queued`, which that counter reads (v318).
+ *    across this path and the human admin send — every report that goes out
+ *    under our one email sending identity (count_todays_takedown_submissions,
+ *    v320). Netcraft is NOT in it: it is an API with its own reporter standing
+ *    and its own caps (auto lane 50/day in its worklist RPC, resubmit lane
+ *    NETCRAFT_RESUBMIT_DAILY_CAP, issues count_todays_netcraft_issues). Each
+ *    enqueued row records `enforcement.queued` (awaited), which the counter
+ *    reads. A counter error FAILS CLOSED: the run throws, nothing is enqueued.
  *  - Worklist = list_clone_alerts_pending_onward (v318): lifecycle_state
  *    'weaponised' within the last 14 days, not yet reported to a destination
  *    by alert OR by URL — the same predicate the insert conflicts on, so a
@@ -104,8 +108,14 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
       // Shared daily cap. One alert becomes one send PER destination, so the
       // remaining budget buys floor(remaining / destinations) alerts.
       const alertBudget = await step.run("check-cap", async () => {
-        const { data } = await sb.rpc("count_todays_takedown_submissions");
-        const used = typeof data === "number" ? data : 0;
+        const { data, error } = await sb.rpc("count_todays_takedown_submissions");
+        // Fail CLOSED: an unreadable counter is not "0 used today".
+        if (error || typeof data !== "number") {
+          throw new Error(
+            `count_todays_takedown_submissions: ${error?.message ?? "no count returned"}`,
+          );
+        }
+        const used = data;
         const remaining = Math.max(0, dailyCap() - used);
         return Math.floor(remaining / destinations.length);
       });
@@ -155,12 +165,13 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
 
         // One `enforcement.queued` per enqueued row — the durable audit trail
         // and what the shared daily cap counts. Inside a step so a replay does
-        // not double-count against the cap.
+        // not double-count against the cap, and AWAITED so the rows exist
+        // before the step completes (fire-and-forget could lose them).
         await step.run("record-queued", async () => {
           const byId = new Map(pending.map((a) => [a.clone_alert_id, a]));
           for (const row of fresh) {
             const alert = row.clone_alert_id != null ? byId.get(row.clone_alert_id) : undefined;
-            logEnforcementEvent("queued", {
+            await logEnforcementEventAsync("queued", {
               alertId: row.clone_alert_id ?? 0,
               domain: alert?.candidate_domain ?? "",
               brand: alert?.target_brand_normalized ?? null,

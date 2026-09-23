@@ -2,7 +2,7 @@ import { waitUntil } from "@vercel/functions";
 
 import { getLogger } from "@askarthur/utils/axiom-logger";
 
-import { logCost } from "@/lib/cost-telemetry";
+import { logCost, logCostAsync, type CostEvent } from "@/lib/cost-telemetry";
 
 /**
  * Observability sink for the enforcement / reported-takedown flow.
@@ -27,7 +27,8 @@ import { logCost } from "@/lib/cost-telemetry";
  * this — they stay on the sampled fn-lifecycle signals from withAxiomLogging.
  * Only the low-volume, high-value enforcement transitions land here.
  *
- * Fire-and-forget; never throws (observability must never break enforcement).
+ * `logEnforcementEvent` is fire-and-forget; `logEnforcementEventAsync` awaits
+ * the cost_telemetry insert for rows a counter reads. Neither throws.
  */
 
 export type EnforcementEvent =
@@ -58,31 +59,62 @@ export interface EnforcementEventFields {
   extra?: Record<string, unknown>;
 }
 
+function costEventFor(
+  event: EnforcementEvent,
+  fields: EnforcementEventFields,
+): CostEvent {
+  const { extra, ...core } = fields;
+  return {
+    feature: "clone_enforcement",
+    provider: fields.channel,
+    operation: `enforcement.${event}`,
+    units: 1,
+    unitCostUsd: 0,
+    requestId: fields.runId ?? null,
+    metadata: { event, ...core, ...(extra ?? {}) },
+  };
+}
+
+/** Always-ship Axiom event (rare + audit-critical → never sampled away). */
+function shipAxiom(event: EnforcementEvent, fields: EnforcementEventFields): void {
+  const { extra, ...core } = fields;
+  const log = getLogger({
+    source: "inngest",
+    requestId: fields.runId,
+    feature: "clone_enforcement",
+  });
+  log.warn(`enforcement.${event}`, { event, ...core, ...(extra ?? {}) });
+  waitUntil(log.flush());
+}
+
 export function logEnforcementEvent(
   event: EnforcementEvent,
   fields: EnforcementEventFields,
 ): void {
-  const { extra, ...core } = fields;
   try {
     // 1. Durable audit trail (reuses cost_telemetry — timestamped, per-channel).
-    logCost({
-      feature: "clone_enforcement",
-      provider: fields.channel,
-      operation: `enforcement.${event}`,
-      units: 1,
-      unitCostUsd: 0,
-      requestId: fields.runId ?? null,
-      metadata: { event, ...core, ...(extra ?? {}) },
-    });
+    logCost(costEventFor(event, fields));
+    // 2. Always-ship Axiom event.
+    shipAxiom(event, fields);
+  } catch {
+    // Observability must never break the enforcement path.
+  }
+}
 
-    // 2. Always-ship Axiom event (rare + audit-critical → never sampled away).
-    const log = getLogger({
-      source: "inngest",
-      requestId: fields.runId,
-      feature: "clone_enforcement",
-    });
-    log.warn(`enforcement.${event}`, { event, ...core, ...(extra ?? {}) });
-    waitUntil(log.flush());
+/**
+ * Awaited variant, for rows something downstream COUNTS. `enforcement.queued`
+ * is what count_todays_takedown_submissions reads for the shared daily cap; a
+ * fire-and-forget insert can be lost when the Inngest step returns (or the run
+ * is cancelled) before `waitUntil` drains it, and the cap then under-counts.
+ * Never throws (logCostAsync swallows an insert failure as a warn).
+ */
+export async function logEnforcementEventAsync(
+  event: EnforcementEvent,
+  fields: EnforcementEventFields,
+): Promise<void> {
+  await logCostAsync(costEventFor(event, fields));
+  try {
+    shipAxiom(event, fields);
   } catch {
     // Observability must never break the enforcement path.
   }

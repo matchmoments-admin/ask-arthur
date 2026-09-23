@@ -116,13 +116,6 @@ function resubmitCap(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : RESUBMIT_DEFAULT_CAP;
 }
 
-
-
-
-
-
-
-
 export const cloneWatchNetcraftAuto = inngest.createFunction(
   {
     id: "shopfront-clone-netcraft-auto",
@@ -197,15 +190,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             { p_min_confidence: MIN_CONFIDENCE, p_daily_cap: DAILY_CAP },
           );
           if (error) {
-            // A failed worklist read is NOT "no candidates": record it as a
-            // Lane error so the digest shows a failure, not a quiet day.
-            logger.error("netcraft-auto: candidate fetch failed", {
-              error: error.message,
-            });
+            // A failed worklist read is a FAILURE, not a quiet day: record the
+            // Lane error (the digest shows it) and throw so Inngest retries.
+            // Returning [] here also wrote a quiet Outcome Row on top of it.
             await recordLaneError("shopfront-clone-netcraft-auto/auto", error.message, {
               stage: "load_candidates",
             });
-            return [] as NetcraftAutoCandidate[];
+            throw new Error(`list_clone_alerts_pending_netcraft_auto: ${error.message}`);
           }
           return (data as NetcraftAutoCandidate[] | null) ?? [];
         });
@@ -295,10 +286,9 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           };
         }
 
-        // Mark every alert in the batch submitted (atomic per-alert JSONB merge,
-        // same RPC the per-candidate worker uses) with the batch uuid.
-        // Ledger + lifecycle through the Netcraft report Module (one
-        // recording path for every lane that submits).
+        // Mark every alert in the batch submitted with the batch uuid — ledger
+        // + lifecycle through the Netcraft report Module (one recording path
+        // for every lane that submits).
         const marked = await step.run("persist-submissions", () =>
           recordAutoSubmission(
             sb,
@@ -406,10 +396,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             },
           );
           if (error) {
-            logger.error("netcraft-resubmit: candidate fetch failed", {
-              error: error.message,
+            // Same rule as the auto lane: a worklist read failure is a failure.
+            await recordLaneError("shopfront-clone-netcraft-auto/resubmit", error.message, {
+              stage: "load_candidates",
             });
-            return [] as NetcraftResubmitCandidate[];
+            throw new Error(
+              `list_clone_alerts_pending_netcraft_resubmit: ${error.message}`,
+            );
           }
           // The RPC has no brand column to filter on, so the v176 FP-brand
           // denylist is applied here exactly as the issue reporter does it —

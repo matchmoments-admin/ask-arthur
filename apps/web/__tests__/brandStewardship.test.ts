@@ -6,6 +6,7 @@ import {
   deriveBrandKey,
   matchKnownBrand,
   priorMonthStart,
+  stewardshipWindow,
   topRiskUnactioned,
   type CloneAlertRow,
   type CloneDetail,
@@ -399,6 +400,34 @@ describe("matchKnownBrand", () => {
     it("behaves identically to before when no resolver is passed", () => {
       expect(matchKnownBrand("Commonwealth Bank of Australia", withEmail)).toBeNull();
     });
+  });
+});
+
+// report-summary's manual trigger takes "YYYY-MM", this one documented
+// "YYYY-MM-01" and fed the raw string to `new Date(\`${x}T00:00:00Z\`)`.
+// Measured on Node 22: "YYYY-MM" happens to parse (the ES date-time format
+// allows it), but a mid-month date built a PARTIAL window labelled as the
+// month, and a malformed value surfaced as a RangeError from toISOString().
+// Both now go through monthWindow — the one month normaliser.
+describe("stewardshipWindow (manual periodMonth override)", () => {
+  it("normalises a mid-month date to the whole month", () => {
+    expect(stewardshipWindow("2026-08-15").startIso).toBe("2026-08-01T00:00:00.000Z");
+  });
+  it("accepts YYYY-MM and YYYY-MM-01 as the same month", () => {
+    const expected = {
+      startIso: "2026-08-01T00:00:00.000Z",
+      endIso: "2026-09-01T00:00:00.000Z",
+    };
+    expect(stewardshipWindow("2026-08")).toEqual(expected);
+    expect(stewardshipWindow("2026-08-01")).toEqual(expected);
+  });
+  it("defaults to the prior calendar month", () => {
+    const w = stewardshipWindow(undefined, new Date("2026-03-15T00:00:00Z"));
+    expect(w.startIso).toBe("2026-02-01T00:00:00.000Z");
+    expect(w.endIso).toBe("2026-03-01T00:00:00.000Z");
+  });
+  it("rejects a malformed month instead of computing an Invalid Date", () => {
+    expect(() => stewardshipWindow("August")).toThrow(/invalid month/);
   });
 });
 

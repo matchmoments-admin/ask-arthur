@@ -95,9 +95,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "no_abuse_recipient" }, { status: 422 });
   }
 
-  // Shared daily cap — same guard as the auto path.
-  const { data: usedRaw } = await sb.rpc("count_todays_takedown_submissions");
-  const used = typeof usedRaw === "number" ? usedRaw : 0;
+  // Shared daily cap — same guard as the auto path, and like it FAIL CLOSED:
+  // an unreadable counter is not "0 used today".
+  const { data: usedRaw, error: capErr } = await sb.rpc("count_todays_takedown_submissions");
+  if (capErr || typeof usedRaw !== "number") {
+    return NextResponse.json({ error: "daily_cap_unavailable" }, { status: 503 });
+  }
+  const used = usedRaw;
   const cap = Number.parseInt(process.env.CLONE_SUBMISSION_DAILY_CAP ?? "", 10);
   const dailyCap = Number.isFinite(cap) && cap > 0 ? cap : DEFAULT_DAILY_CAP;
   if (used >= dailyCap) {

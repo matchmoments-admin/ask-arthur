@@ -166,7 +166,9 @@ export function toCloneDetail(
   // Fall back to the attribution dossier's hosting block when the live urlscan
   // render didn't capture server info (e.g. a clone enriched before its scan
   // completed). Belt-and-suspenders so a clone shows whatever hosting we have.
-  const attr = readAttribution(row.attribution);
+  const attr = readAttribution(row.attribution, {
+    firstSeenAt: row.first_seen_at ?? null,
+  });
   const attrHosting = attr.hosting;
   const stillLiveAsOf =
     row.lifecycle_state === "weaponised"

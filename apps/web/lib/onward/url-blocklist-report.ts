@@ -110,6 +110,12 @@ export async function runUrlBlocklistOnward(
     return { ok: true, skipped: "flag_disabled" };
   }
 
+  // Atomic claim (queued → sending). Only one run can move the row, so a
+  // duplicate event — a producer retry, a manual re-fire — cannot send the same
+  // ledger row twice. Memoised as a step: this run's own retries keep the claim.
+  const claimed = await step.run("claim", () => claimLog(data.log_id));
+  if (!claimed) return { ok: true, skipped: "not_queued" };
+
   if (data.clone_alert_id != null) {
     return runCloneSubject(ctx, config, data.clone_alert_id);
   }
@@ -229,6 +235,9 @@ async function sendAndRecord(
   } catch (err) {
     // Surface the failure to the daily health digest (the onward workers
     // otherwise fail silently — ultrareview F6). Diagnostic row, $0 cost.
+    // step.run only throws here once its retries are exhausted, so this is the
+    // final outcome: record it, or the claimed row would sit 'sending' forever.
+    await markLog(logId, "failed", "send_failed");
     await emitOnwardError(config, subject, "send_failed");
     throw err;
   }
@@ -360,11 +369,18 @@ export async function enqueueUrlBlocklistReports(
   return (data as EnqueuedUrlReport[] | null) ?? [];
 }
 
-/** The report.onward.<destination> event for each freshly-enqueued row. */
+/**
+ * The report.onward.<destination> event for each freshly-enqueued row. The
+ * event id is deterministic per ledger row, so a retried `fire-events` step
+ * (the send succeeded, the step did not record it) is deduplicated by Inngest
+ * instead of queueing a second send of the same row. The worker's
+ * queued→sending claim is the second, durable line of the same defence.
+ */
 export function onwardEventsFor(
   rows: EnqueuedUrlReport[],
-): Array<{ name: string; data: UrlBlocklistOnwardEventData }> {
+): Array<{ id: string; name: string; data: UrlBlocklistOnwardEventData }> {
   return rows.map((r) => ({
+    id: `onward-${r.id}`,
     name: `report.onward.${r.destination}`,
     data: {
       log_id: r.id,
@@ -406,6 +422,20 @@ async function emitOnwardError(
       error: String(err),
     });
   }
+}
+
+/** queued → sending, atomically. True only for the run that moved the row. */
+async function claimLog(logId: string): Promise<boolean> {
+  const sb = createServiceClient();
+  if (!sb) throw new Error("Supabase service client unavailable");
+  const { data, error } = await sb
+    .from("onward_report_log")
+    .update({ status: "sending" })
+    .eq("id", logId)
+    .eq("status", "queued")
+    .select("id");
+  if (error) throw new Error(`onward claim failed: ${error.message}`);
+  return Array.isArray(data) && data.length > 0;
 }
 
 async function markLog(

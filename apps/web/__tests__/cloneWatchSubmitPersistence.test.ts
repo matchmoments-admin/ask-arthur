@@ -1,16 +1,16 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ rpc: vi.fn(), reputation: vi.fn(), submit: vi.fn(), gone: vi.fn() }));
+const m = vi.hoisted(() => ({ rpc: vi.fn(), reputation: vi.fn(), submit: vi.fn(), host: vi.fn() }));
 vi.mock("@askarthur/supabase/server", () => ({ createServiceClient: () => ({ rpc: m.rpc }) }));
 vi.mock("@askarthur/scam-engine", () => ({ checkURLReputation: m.reputation }));
 vi.mock("@askarthur/scam-engine/urlscan", () => ({ submitURLScanWithDetails: m.submit }));
-vi.mock("@/lib/clone-watch/liveness", () => ({ isDomainGone: m.gone }));
+vi.mock("@/lib/clone-watch/liveness", () => ({ resolvesToHost: m.host }));
 import { DNS_PRECHECK_ERROR, submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 const candidate = { id: 1, candidate_url: "https://clone.example", candidate_domain: "clone.example" };
 beforeEach(() => {
  vi.clearAllMocks();
  m.reputation.mockResolvedValue([{ isMalicious: false, sources: [] }]);
  m.rpc.mockResolvedValue({ error: { message: "write failed" } });
- m.gone.mockResolvedValue(false);
+ m.host.mockResolvedValue(true);
 });
 it("does not report success when recording a successful external submission fails", async () => {
  m.submit.mockResolvedValue({ ok: true, uuid: "scan-1" });
@@ -35,13 +35,16 @@ it("leaves the database untouched on quota exhaustion", async () => {
  expect(m.rpc).not.toHaveBeenCalled();
 });
 
-// DNS precheck (2026-09-23): a PROVED-gone name costs no urlscan and no
-// reputation call, and is stamped exactly like urlscan's no-DNS 400 so the v277
-// dead-domain cadence applies unchanged.
-it("skips urlscan + reputation for a proved-gone domain and stamps a 400", async () => {
- m.gone.mockResolvedValue(true);
+// DNS precheck (2026-09-23; PR B): a name with no A/AAAA costs no urlscan and
+// no reputation call, and is stamped exactly like urlscan's no-DNS 400 so the
+// v277 dead-domain cadence applies unchanged. The gate is "points at a host",
+// not "not NXDOMAIN": a zone with NS but no A (prod sucway.net, apple.co.mw,
+// amazom.yoga) still drew urlscan's "400 DNS Error" under the old check.
+it("skips urlscan + reputation for a name with no host and stamps a 400", async () => {
+ m.host.mockResolvedValue(false);
  m.rpc.mockResolvedValue({ error: null });
  const out = await submitCloneCandidate(candidate);
+ expect(DNS_PRECHECK_ERROR).toBe("dns_no_host_precheck");
  expect(out).toMatchObject({ kind: "submit_failed", error: DNS_PRECHECK_ERROR });
  expect(m.submit).not.toHaveBeenCalled();
  expect(m.reputation).not.toHaveBeenCalled();
@@ -49,7 +52,7 @@ it("skips urlscan + reputation for a proved-gone domain and stamps a 400", async
  expect(evidence).toMatchObject({ status: 400, error: DNS_PRECHECK_ERROR });
 });
 it("an inconclusive resolver answer still scans", async () => {
- m.gone.mockResolvedValue(null);
+ m.host.mockResolvedValue(null);
  m.rpc.mockResolvedValue({ error: null });
  m.submit.mockResolvedValue({ ok: true, uuid: "scan-2" });
  await submitCloneCandidate(candidate);
