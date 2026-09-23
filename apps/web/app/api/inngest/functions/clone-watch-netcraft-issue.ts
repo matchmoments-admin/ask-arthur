@@ -11,6 +11,10 @@ import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
+  deferNetcraftAlerts,
+  NETCRAFT_DEFERRAL,
+} from "@/lib/clone-watch/netcraft-deferral";
+import {
   probeLivenessDetailed,
   type LivenessVerdict,
 } from "@/lib/clone-watch/liveness";
@@ -94,10 +98,6 @@ const DEFAULT_DAILY_CAP = 20;
 // double-files). Same shape as urlscan-retrieve's BATCH_WALL_CLOCK_MS.
 const ISSUE_WALL_CLOCK_MS = 420_000;
 const MAX_AGE_DAYS = 30;
-// Bounded re-entry (v248): a deferred alert gets this many cooling-off rounds
-// before the RPC converts it to a terminal skip. 5 × 24h ≈ the 30-day worklist
-// window's useful life, so nothing loops forever and nothing is dropped early.
-const DEFER_MAX_ROUNDS = 5;
 // Fast-lane cooldown: collapses a weaponisation burst into one run.
 // 10 min, not 30: a skipped trigger is DROPPED, not queued, so the window is
 // also the worst-case latency a burst can add. The alert stays in the worklist
@@ -106,9 +106,16 @@ const DEFER_MAX_ROUNDS = 5;
 // +concurrency:1 already stop CONCURRENT runs; this stops rapid sequential ones
 // from spending the day's Netcraft GET budget re-reading the same uuids.
 const COOLDOWN_MS = 10 * 60 * 1000;
-const DEAD_RECHECK_MS = 72 * 3600 * 1000;
-const UNAVAILABLE_RECHECK_MS = 24 * 3600 * 1000;
-const TRANSIENT_RECHECK_MS = 24 * 3600 * 1000;
+// Bounded re-entry (v248): deferral intervals and the 5-round cap live in
+// netcraft-deferral.ts beside the resubmit lane's, so the two lanes' different
+// values are stated side by side. Rounds count per reason: exhaustion lands at
+// 5 × 72h ≈ 15 days (dead) or 5 × 24h ≈ 5 days (unavailable/transient), both
+// inside the worklist's 30-day submitted_at window.
+const {
+  deadRecheckMs: DEAD_RECHECK_MS,
+  unavailableRecheckMs: UNAVAILABLE_RECHECK_MS,
+  transientRecheckMs: TRANSIENT_RECHECK_MS,
+} = NETCRAFT_DEFERRAL.issue;
 // Autobrake: trip on this many permanent 4xx rejects in a run, OR >50% of live
 // POSTs rejected once there are at least AUTOBRAKE_MIN_LIVE_POSTS of them.
 // Transient (5xx/429/timeout) and not-yet-processed 400s never trip it
@@ -319,24 +326,14 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       };
 
       // v248 non-terminal deferral. Bumps rounds.<reason> and converges to a
-      // terminal skip past DEFER_MAX_ROUNDS, so the worklist still drains.
+      // terminal skip past the round cap, so the worklist still drains.
+      // Throws on RPC failure (the issue lane's policy).
       const bulkDefer = async (
         ids: number[],
         reason: string,
         recheckAfterMs: number,
       ) => {
-        if (ids.length === 0) return;
-        const { error } = await sb.rpc("defer_clone_alert_netcraft_issue", {
-          p_alert_ids: ids,
-          p_reason: reason,
-          p_recheck_after: new Date(Date.now() + recheckAfterMs).toISOString(),
-          p_max_rounds: DEFER_MAX_ROUNDS,
-        });
-        if (error) {
-          throw new Error(
-            `defer_clone_alert_netcraft_issue(${reason}) failed (${ids.length} alerts): ${error.message}`,
-          );
-        }
+        await deferNetcraftAlerts(sb, "issue", ids, reason, recheckAfterMs);
       };
 
       // Spanning budget: this loop awaits step.run per item, so it crosses

@@ -10,6 +10,10 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
+import {
+  deferNetcraftAlerts,
+  NETCRAFT_DEFERRAL,
+} from "@/lib/clone-watch/netcraft-deferral";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 import {
   buildNetcraftBulkBody,
@@ -109,9 +113,9 @@ const RESUBMIT_MAX_PER_ALERT = 3;
 // Without the over-fetch a batch containing dead rows can never fill the cap.
 const RESUBMIT_PROBE_MULTIPLIER = 3;
 // Proved-dead rows are deferred, not dropped: 5 rounds at 7 days each, then a
-// terminal skip (~35 days continuously NXDOMAIN). v248's shape.
-const RESUBMIT_DEAD_RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
-const RESUBMIT_DEAD_MAX_ROUNDS = 5;
+// terminal skip (~35 days continuously NXDOMAIN). v248's shape; the values live
+// in netcraft-deferral.ts beside the issue lane's.
+const RESUBMIT_DEAD_RECHECK_MS = NETCRAFT_DEFERRAL.resubmit.deadRecheckMs;
 
 function resubmitCap(): number {
   const raw = Number.parseInt(
@@ -482,29 +486,17 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         const deferred =
           isTest || deadRows.length === 0
             ? 0
-            : await step.run("resubmit-defer-dead", async () => {
-                const { data, error } = await sb.rpc(
-                  "defer_clone_alert_netcraft_resubmit",
-                  {
-                    p_alert_ids: deadRows.map((c) => c.id),
-                    p_reason: "dead_at_probe",
-                    p_recheck_after: new Date(
-                      Date.now() + RESUBMIT_DEAD_RECHECK_MS,
-                    ).toISOString(),
-                    p_max_rounds: RESUBMIT_DEAD_MAX_ROUNDS,
-                  },
-                );
-                if (error) {
-                  // Non-fatal: the batch's live rows are still worth filing.
-                  // Loud, though — a silent failure here IS the starvation.
-                  logger.warn("netcraft-resubmit: dead-row deferral failed", {
-                    error: error.message,
-                    alertIds: deadRows.map((c) => c.id),
-                  });
-                  return 0;
-                }
-                return typeof data === "number" ? data : 0;
-              });
+            : await step.run("resubmit-defer-dead", () =>
+                // Non-fatal on RPC failure (warns, returns 0): the batch's
+                // live rows are still worth filing.
+                deferNetcraftAlerts(
+                  sb,
+                  "resubmit",
+                  deadRows.map((c) => c.id),
+                  "dead_at_probe",
+                  RESUBMIT_DEAD_RECHECK_MS,
+                ),
+              );
 
         // The 24h budget bounds SUBMISSIONS; the over-fetch above only widened
         // what we probe. Defaults to the cap when the column is absent (an old
