@@ -69,3 +69,29 @@ Plans/decisions: `docs/plans/clone-watch-deepening-2026-09-23.md`,
 - Env-only changes need a PR with `[build]` in the commit (Vercel ignore-step).
 - Brand-facing labels: a "fallback for old rows" must test _field absent_, not _field unknown_ (the squat-table "Live site" overstatement).
 - Prod query tooling: `apps/web/scripts/_query.ts` (read) and `_apply-migration.ts` (untracked, main checkout).
+
+## 6. Round 2 — architecture + Inngest efficiency (2026-09-24, 00:00 UTC)
+
+`/improve-codebase-architecture` over the clone-watch pipeline plus an Inngest fleet audit
+(plan: `~/.claude/plans/linked-knitting-marble.md`). All merged unless marked.
+
+| PR | What |
+| --- | --- |
+| #1194 | **Paging bug:** the recheck lane counted a urlscan 429 as `submit_failed`, so a quota day paged `silent_zero`. One outcome→counter mapping (`submitCandidateBatch`) for submit + recheck; recheck rows gain `rate_limited`, both gain `unreached`; `riskBand()` exported |
+| #1195 | Netcraft dead-host deferral: one helper for the v248/v252 RPCs, each lane's values kept (issue 72h/throw, resubmit 7d/warn), RPC args pinned by test; the "5 × 24h" comment fixed |
+| #1196 | 5 flag-dark crons parked (enforcement-execute, reemergence, brand-register, weekly-digest, phone claimer — the last now a UTC restore note, dodging the 4 Oct DST shift onto 13:00); feedback-triage-refresh hourly → 6-hourly; brake reads folded (reddit-intel ×3, enrich-attribution); entity-enrichment reap folded into fetch. ≈ 34 runs + 25 steps/day |
+| #1197 | Cost-brake spend lists declared once (`apps/web/lib/cost-brakes.ts`) with a writer-exists test; 5 writerless tags dropped (0 prod rows each) |
+| #1198 | One declaration per Lane: `LANE_SHAPES.crons/flags` read by the Lane (`laneCrons`/`laneGate`) and the digest; `expectEvery` derived (`lib/cron-cadence.ts`); unreadable brakes → `brake_unknown`. **Reconcile window 26h → 18h** (one missed run now pages) |
+| #1199 | **OPEN — merge after the 08:30 UTC 09-24 batched run is verified.** Pre-classifier Module (`lib/clone-watch/preclassify-one.ts`, Jev + Haiku adapters); Haiku persist failure now writes an `_error` row; brake folded into `classify-batch` (3 → 2 steps) |
+
+Inngest resynced after #1196 and #1198: `{"message":"Successfully registered","modified":true}`.
+22:00 UTC 09-23 reconcile verified: 13 uuids, `unfetched=0`, `errors=0`.
+
+**Deferred with revive conditions:**
+- **Stewardship report assembly** (three brand-join rules in one 215-line step) — the key fork is
+  latent: 0/307 `known_brands` have a null `brand_key` and no month has a split report. Revive
+  after the 1 Oct frozen-store run is verified.
+- **Pre-classify pull instead of fan-out** — after #1199 has a clean week.
+- **enrich-attribution per-alert chunking** — a chunk retry replays paid lookups; needs an
+  idempotency read-back first.
+- **Housekeeping crons → Vercel / merging the staleness trio** — loses retries; low value.
