@@ -96,6 +96,11 @@ export interface CloneDetectionRow {
   screenshotUrl?: string | null;
   resultUrl?: string | null;
   stillLiveAsOf?: string | null;
+  /** Infrastructure view — held | parked | live | unknown (clone-metrics
+   *  squatStatus). Absent on ledger rows written before 2026-09-22. */
+  squatStatus?: string | null;
+  /** RDAP/WHOIS creation date (YYYY-MM-DD). Absent before 2026-09-23. */
+  registeredAt?: string | null;
 }
 
 export interface CloneDetections {

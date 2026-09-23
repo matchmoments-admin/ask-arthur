@@ -53,6 +53,9 @@ export interface CloneDetail {
    *  view a brand needs alongside the phishing verdict. See squatStatus().
    *  Optional: ledger rows persisted before v314 simply lack the key. */
   squat_status?: SquatStatus;
+  /** RDAP/WHOIS creation date — when the squat was registered. Optional:
+   *  ledger rows persisted before 2026-09-23 lack it. */
+  registered_at?: string | null;
 }
 
 /**
@@ -188,6 +191,7 @@ export function toCloneDetail(
     still_live_as_of: stillLiveAsOf,
     risk_score: riskScore,
     squat_status: squatStatus(row),
+    registered_at: attr.createdDate,
   };
 }
 

@@ -8,7 +8,24 @@ import {
   hostAbuseUrl,
   ICANN_COMPLAINT_URL,
 } from "@/lib/email/registrar-abuse";
+import {
+  SQUAT_LABEL,
+  formatRegistered,
+  squattingRows,
+  squattingSummary,
+  type SquatView,
+} from "@/lib/clone-watch/squatting";
 import ShareCharts, { type Slice } from "./ShareCharts";
+
+// Colour carries meaning only alongside the text label (never alone).
+const STATUS_STYLE: Record<SquatView, string> = {
+  phishing: "bg-red-50 text-red-700",
+  live: "bg-amber-50 text-amber-800",
+  parked: "bg-slate-100 text-slate-700",
+  registered: "bg-slate-50 text-slate-500",
+  held: "bg-emerald-50 text-emerald-800",
+  taken_down: "bg-teal-50 text-teal-800",
+};
 
 interface PageProps {
   params: Promise<{ token: string }>;
@@ -35,21 +52,6 @@ function toSlices(rec: Record<string, number> | undefined): Slice[] {
     .sort((a, b) => b.value - a.value);
 }
 
-function classLabel(c: string | null): string {
-  switch (c) {
-    case "likely_phishing":
-      return "Likely phishing";
-    case "parked_for_sale":
-      return "Parked for sale";
-    case "neutral":
-      return "Resolves";
-    case "unresolved":
-      return "Unresolved";
-    default:
-      return c ?? "—";
-  }
-}
-
 export default async function CloneReportPage({ params }: PageProps) {
   const { token } = await params;
   const report = await getCloneReportByToken(token);
@@ -59,6 +61,8 @@ export default async function CloneReportPage({ params }: PageProps) {
   const countrySlices = toSlices(clones.byCountry);
   const registrars = toSlices(clones.byRegistrar);
   const asns = toSlices(clones.byAsn);
+  const rows = squattingRows(clones.domains);
+  const summary = squattingSummary(rows);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -163,55 +167,86 @@ export default async function CloneReportPage({ params }: PageProps) {
           </section>
         )}
 
-        {/* Per-clone detail */}
+        {/* Who is squatting your brand — one row per lookalike, most urgent
+            first: what it is now, who registered it, when, where to report. */}
         <section className="mt-8">
           <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">
-            Lookalike domains &amp; where they&apos;re hosted
+            Who is squatting your brand
           </h2>
+          {summary.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-2" aria-label="Status summary">
+              {summary.map((s) => (
+                <li
+                  key={s.view}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLE[s.view]}`}
+                >
+                  {s.count} {s.label.toLowerCase()}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase text-slate-400">
                   <th className="py-2 pr-3 font-semibold">Domain</th>
                   <th className="py-2 pr-3 font-semibold">Status</th>
-                  <th className="py-2 pr-3 font-semibold">Hosting</th>
+                  <th className="py-2 pr-3 font-semibold">Registered</th>
                   <th className="py-2 pr-3 font-semibold">Registrar</th>
-                  <th className="py-2 font-semibold">Act</th>
+                  <th className="py-2 pr-3 font-semibold">Hosting</th>
+                  <th className="py-2 font-semibold">Report</th>
                 </tr>
               </thead>
               <tbody>
-                {clones.domains.map((c) => (
-                  <tr
-                    key={c.domain}
-                    className="border-b border-slate-100 align-top"
-                  >
-                    <td className="py-2 pr-3 font-mono text-[13px] text-[#1B2A4A]">
-                      {c.domain}
-                    </td>
-                    <td className="py-2 pr-3 text-slate-600">
-                      {classLabel(c.classification)}
-                    </td>
-                    <td className="py-2 pr-3 text-slate-600">
-                      {[c.ip, c.country, c.asn].filter(Boolean).join(" · ") ||
-                        "—"}
-                    </td>
-                    <td className="py-2 pr-3 text-slate-600">
-                      {c.registrar ?? "—"}
-                    </td>
-                    <td className="py-2">
-                      <a
-                        href={
-                          registrarAbuseUrl(c.registrar) ?? ICANN_COMPLAINT_URL
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-[#0F766E] hover:underline"
-                      >
-                        Report →
-                      </a>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((c) => {
+                  const form =
+                    registrarAbuseUrl(c.registrar) ?? ICANN_COMPLAINT_URL;
+                  return (
+                    <tr
+                      key={c.domain}
+                      className="border-b border-slate-100 align-top"
+                    >
+                      <td className="py-2 pr-3 font-mono text-[13px] text-[#1B2A4A]">
+                        {c.domain}
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span
+                          className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[c.view]}`}
+                        >
+                          {SQUAT_LABEL[c.view]}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap text-slate-600">
+                        {formatRegistered(c.registeredAt) ?? "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-slate-600">
+                        {c.registrar ?? "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-slate-600">
+                        {[c.ip, c.country, c.asn].filter(Boolean).join(" · ") ||
+                          "—"}
+                      </td>
+                      <td className="py-2 whitespace-nowrap">
+                        {c.abuseEmail && (
+                          <a
+                            href={`mailto:${c.abuseEmail}?subject=${encodeURIComponent(`Abuse report: ${c.domain} impersonating ${brandName}`)}`}
+                            className="block font-semibold text-[#0F766E] hover:underline"
+                          >
+                            Email abuse →
+                          </a>
+                        )}
+                        <a
+                          href={form}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block font-semibold text-[#0F766E] hover:underline"
+                        >
+                          Abuse form →
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -222,6 +257,17 @@ export default async function CloneReportPage({ params }: PageProps) {
               list available on request.
             </p>
           )}
+          <p className="mt-3 text-xs leading-relaxed text-slate-400">
+            Status: <strong>Live phishing</strong> = our scan saw credential or
+            payment-harvesting content; <strong>Blocklisted</strong> = Netcraft
+            classified it malicious (browser blocklists act on this);{" "}
+            <strong>Suspended by registrar</strong> = the registry placed it on
+            hold; <strong>Parked / for sale</strong> = on a parking or
+            aftermarket nameserver. Registrant identities are redacted by
+            privacy services, so the registrar is the accountable party.
+            Coverage is newly registered generic-TLD domains; <code>.au</code>{" "}
+            registrations are not yet included.
+          </p>
         </section>
 
         <p className="mt-10 border-t border-slate-200 pt-6 text-xs leading-relaxed text-slate-500">
