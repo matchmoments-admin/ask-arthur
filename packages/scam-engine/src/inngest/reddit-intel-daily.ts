@@ -667,10 +667,11 @@ export const redditIntelDaily = inngest.createFunction(
     // hold one of the account's five slots across all three retries with no
     // ceiling at all.
     //
-    // inngest-finish-budget: 10 boundaries — 10 static step.run sites x 30s
-    // queue wait = 300s; inline 280s classify (CLASSIFY_TIMEOUT_MS) + 240s
+    // inngest-finish-budget: 9 boundaries — 9 static step.run sites x 30s
+    // queue wait = 270s; inline 280s classify (CLASSIFY_TIMEOUT_MS) + 240s
     // write-takes (TAKE_TIMEOUT_MS, in reddit-intel/take-writer.ts) = 520s;
-    // the remaining eight steps are single statements; 60s slack = 880s.
+    // the remaining seven steps are single statements; 60s slack = 850s.
+    // (Was 10; the check-cost-brake step became an un-stepped read.)
     // Declared 16m (960s) rather than 15m so the budget is not sitting on its
     // own floor — a finish tuned to the exact worst case CANCELS healthy runs,
     // and a cancellation gets no retry, no error and no telemetry (#1069).
@@ -693,8 +694,11 @@ export const redditIntelDaily = inngest.createFunction(
     // $10). Returning early here prevents continued Sonnet/Voyage burn
     // until the brake expires (24h later). Operator overrides via DELETE
     // FROM feature_brakes WHERE feature='reddit_intel'.
-    const braked = await step.run("check-cost-brake", isRedditIntelBraked);
-    if (braked) {
+    // Un-stepped brake read (ADR-0019: single-query bookkeeping rides outside
+    // a step, precedent feed-items-embed.ts). It was its own step — one
+    // Inngest step per run for a cheap idempotent SELECT. A replay re-reads
+    // it, so a brake set mid-run stops the remaining steps: the brake's intent.
+    if (await isRedditIntelBraked()) {
       return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 

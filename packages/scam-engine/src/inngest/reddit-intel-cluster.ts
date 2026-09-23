@@ -778,9 +778,9 @@ export const redditIntelCluster = inngest.createFunction(
     // ADR-0019's circuit breaker. Until #1130 this function had none, so with
     // retries: 3 a hung run could hold its slot for three attempts.
     //
-    // inngest-finish-budget: 7 boundaries — 7 static step.run sites × 30 s
-    // queue wait = 210 s; inline 240 s cluster-batch + 240 s
-    // name-pending-themes = 480 s; 60 s slack = 750 s. Declared 13m (780 s).
+    // inngest-finish-budget: 6 boundaries — 6 static step.run sites × 30 s
+    // queue wait = 180 s; inline 240 s cluster-batch + 240 s
+    // name-pending-themes = 480 s; 60 s slack = 720 s. Declared 13m (780 s).
     // Raising either _WALL_CLOCK_MS without raising this goes red in
     // inngestFinishBudgets.test.ts. retries: 3 sits outside the formula —
     // acceptable because cluster-batch is idempotent (#520 H5) and the
@@ -804,8 +804,11 @@ export const redditIntelCluster = inngest.createFunction(
         return { skipped: true, reason: "redditIntelIngest flag off" };
       }
 
-      const braked = await step.run("check-cost-brake", isRedditIntelBraked);
-      if (braked) {
+      // Un-stepped brake read (ADR-0019: single-query bookkeeping rides outside
+      // a step, precedent feed-items-embed.ts). It was its own step — one
+      // Inngest step per run for a cheap idempotent SELECT. A replay re-reads
+      // it, so a brake set mid-run stops the remaining steps: the brake's intent.
+      if (await isRedditIntelBraked()) {
         return { paused: true, reason: "feature_brakes.reddit_intel is set" };
       }
 

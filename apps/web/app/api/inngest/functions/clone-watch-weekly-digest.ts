@@ -39,13 +39,14 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     timeouts: { finish: "6m" },
     concurrency: { limit: 1 },
   },
-  // Two triggers: cron + manual-trigger event for ad-hoc rerun.
-  // Sun 10:00 UTC — deconflicted from the daily feedback-digest cron
-  // (0 9 * * *, every morning including Sundays). Closes ultrareview M3.
-  [
-    { cron: "0 10 * * 0" },
-    { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
-  ],
+  // Manual-trigger only (no cron). FF_SHOPFRONT_CLONE_WEEKLY_DIGEST is dark
+  // in prod, so the weekly tick just burned an execution to early-return
+  // (fleet audit 2026-09-16). Invoke on demand via the
+  // `shopfront/clone.weekly-digest.manual-trigger.v1` event. **At launch,
+  // restore by re-adding `{ cron: "0 10 * * 0" }`** alongside this event
+  // trigger — Sun 10:00 UTC, deconflicted from the daily feedback-digest cron
+  // (0 9 * * *) per ultrareview M3; laneHealth's 8d expectEvery assumes it.
+  { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
   withAxiomLogging(
     { fnId: "shopfront-clone-weekly-digest" },
     async ({ step }) => {

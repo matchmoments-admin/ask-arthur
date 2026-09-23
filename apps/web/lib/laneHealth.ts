@@ -240,6 +240,9 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-reemergence-monitor": {
     expectEvery: 26 * H, // daily 06:45
+    // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
+    // gate turns on without the cron restored, the lane pages `absent` — by
+    // design; clone-watch-config.md "Flipping a PARKED lane ON".
     enabled: () =>
       featureFlags.cloneEnforcement && featureFlags.cloneReemergenceMonitor,
     consecutive: 1,
@@ -248,6 +251,9 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-weekly-digest": {
     expectEvery: 8 * 24 * H, // Sundays 10:00
+    // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
+    // gate turns on without the cron restored, the lane pages `absent` — by
+    // design; clone-watch-config.md "Flipping a PARKED lane ON".
     enabled: () =>
       featureFlags.shopfrontCloneOutreach && featureFlags.shopfrontCloneWeeklyDigest,
     consecutive: 1,
@@ -256,6 +262,9 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-enforcement-execute": {
     expectEvery: 4 * 3_600_000, // every 3h at :15
+    // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
+    // gate turns on without the cron restored, the lane pages `absent` — by
+    // design; clone-watch-config.md "Flipping a PARKED lane ON".
     enabled: () =>
       featureFlags.cloneEnforcement && featureFlags.cloneEnforceAutoBlocklist,
     consecutive: 1,

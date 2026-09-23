@@ -1,5 +1,5 @@
-// Feedback triage MV refresh — runs every 30 min (relaxed */5 → */15 #524 →
-// */30 PR-C) so the /admin/feedback page reflects new disagreements. The
+// Feedback triage MV refresh — runs every 6h (relaxed */5 → */15 #524 →
+// */30 PR-C → hourly → 6-hourly) so the /admin/feedback page reflects new disagreements. The
 // materialised view is defined in migration-v94 (WHERE created_at > now()-30d
 // AND user_says <> 'correct'); this function calls the SECURITY DEFINER RPC
 // that wraps REFRESH MATERIALIZED VIEW CONCURRENTLY.
@@ -33,9 +33,13 @@ export const feedbackTriageRefresh = inngest.createFunction(
   // from cron cadence), so hourly freshness is ample — no data loss, just halved
   // tick volume (1,440 → 720 runs/mo).
   // :50, not :00 (#1069): the top of the hour is the fleet's worst
-  // concurrency pileup; this hourly change-guarded refresh does not care
-  // which minute it runs.
-  { cron: "50 * * * *" },
+  // concurrency pileup; this change-guarded refresh does not care which
+  // minute it runs.
+  // Hourly → every 6h (2026-09-24): the fleet audit (2026-09-16) measured
+  // 168/168 hourly ticks as change-guard no-ops. The only readers are the
+  // admin triage pages, so ≤6h staleness only delays an operator seeing a new
+  // disagreement; 24 → 4 executions/day.
+  { cron: "50 */6 * * *" },
   withAxiomLogging({ fnId: "feedback-triage-refresh" }, async ({ step }) => {
     const supabase = createServiceClient();
     if (!supabase) {
