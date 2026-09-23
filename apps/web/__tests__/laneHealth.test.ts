@@ -518,9 +518,11 @@ describe("classifyLaneHealth", () => {
   });
 });
 
-// A flag-off Lane writes nothing by design; `enabled()` keeps it from paging
-// "absent" every day, and it pages the moment the flag is on and rows stop.
-describe("classifyLaneHealth — enabled() gate", () => {
+// A flag-off Lane writes nothing by design; its declared `flags` keep it from
+// paging "absent" every day, and it pages the moment the flags are on and rows
+// stop. The SAME declaration gates the Lane body (laneGate), so the two cannot
+// disagree.
+describe("classifyLaneHealth — flag gate", () => {
   it("skips a disabled lane, flags it absent once enabled", async () => {
     const { featureFlags } = await import("@askarthur/utils/feature-flags");
     const flags = featureFlags as unknown as Record<string, boolean>;
@@ -548,15 +550,16 @@ describe("classifyLaneHealth — enabled() gate", () => {
 // shapes; this pins that every lane's expectEvery fits its window.
 describe("laneFetchPlan", () => {
   it("covers every finite expectEvery (and every absence watch) with a wide-enough window", async () => {
-    const { laneFetchPlan, LANE_SHAPES: shapes, ABSENCE_WATCHES: watches } = await import("@/lib/laneHealth");
+    const { laneFetchPlan, laneExpectEvery, LANE_SHAPES: shapes, ABSENCE_WATCHES: watches } = await import("@/lib/laneHealth");
     const plan = laneFetchPlan();
     const windowFor = (feature: string) =>
       Math.max(0, ...plan.filter((g) => g.features.includes(feature)).map((g) => g.windowMs));
-    for (const [lane, shape] of Object.entries(shapes)) {
-      const feature = LANES[lane as keyof typeof LANES].feature;
+    for (const lane of Object.keys(shapes) as Array<keyof typeof LANES>) {
+      const feature = LANES[lane].feature;
+      const every = laneExpectEvery(lane);
       expect(windowFor(feature), `${lane} is not fetched`).toBeGreaterThan(0);
-      if (Number.isFinite(shape.expectEvery)) {
-        expect(windowFor(feature), `${lane}: window < expectEvery`).toBeGreaterThanOrEqual(shape.expectEvery);
+      if (Number.isFinite(every)) {
+        expect(windowFor(feature), `${lane}: window < expectEvery`).toBeGreaterThanOrEqual(every);
       }
     }
     for (const w of watches) expect(windowFor(w.feature)).toBeGreaterThanOrEqual(w.expectEvery);
@@ -577,5 +580,89 @@ describe("classifyLaneHealth — brake before absence", () => {
       (x) => x.lane === "shopfront-clone-lifecycle-recheck",
     );
     expect(p?.kind).toBe("braked");
+  });
+});
+
+// One declaration per Lane (architecture review 2026-09-24, #1): the schedule,
+// the health window and the flag gate are read from LANE_SHAPES by both the
+// Lane and the digest instead of being typed twice.
+describe("Lane declaration", () => {
+  it("every Lane resolves a health window (explicit, or derived from its crons)", async () => {
+    const { laneExpectEvery, LANE_SHAPES: shapes } = await import("@/lib/laneHealth");
+    for (const lane of Object.keys(shapes) as Array<keyof typeof LANES>) {
+      expect(() => laneExpectEvery(lane), lane).not.toThrow();
+      expect(laneExpectEvery(lane), lane).toBeGreaterThan(0);
+    }
+  });
+
+  it("a cron-driven window covers at least one full gap between runs", async () => {
+    const { laneExpectEvery, LANE_SHAPES: shapes } = await import("@/lib/laneHealth");
+    const { cronMaxGapMs } = await import("@/lib/cron-cadence");
+    for (const [lane, shape] of Object.entries(shapes)) {
+      if (!shape.crons || shape.expectEvery !== undefined) continue;
+      expect(laneExpectEvery(lane as keyof typeof LANES), lane).toBeGreaterThan(
+        cronMaxGapMs(shape.crons),
+      );
+    }
+  });
+
+  it("laneGate names the first flag that is off", async () => {
+    const { laneGate } = await import("@/lib/laneHealth");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
+    const flags = featureFlags as unknown as Record<string, boolean>;
+    const saved = { o: flags.shopfrontCloneOutreach, i: flags.cloneNetcraftIssue };
+    try {
+      flags.shopfrontCloneOutreach = true;
+      flags.cloneNetcraftIssue = true;
+      expect(laneGate("shopfront-clone-netcraft-issue")).toEqual({ ok: true });
+      flags.cloneNetcraftIssue = false;
+      expect(laneGate("shopfront-clone-netcraft-issue")).toEqual({
+        ok: false,
+        reason: "cloneNetcraftIssue disabled",
+      });
+    } finally {
+      flags.shopfrontCloneOutreach = saved.o;
+      flags.cloneNetcraftIssue = saved.i;
+    }
+  });
+
+  it("laneCrons refuses an event-driven Lane", async () => {
+    const { laneCrons } = await import("@/lib/laneHealth");
+    expect(() => laneCrons("shopfront-clone-feed-platform")).toThrow();
+    expect(laneCrons("shopfront-clone-netcraft-reconcile")).toEqual([
+      { cron: "0 10 * * *" },
+      { cron: "0 22 * * *" },
+    ]);
+  });
+});
+
+describe("classifyLaneHealth — unreadable brakes", () => {
+  it("reports brake_unknown once instead of silently judging every lane unbraked", () => {
+    const problems = classifyLaneHealth(healthyRows(), { now: NOW, brakes: "unreadable" });
+    expect(problems).toEqual([
+      expect.objectContaining({ lane: "feature_brakes", kind: "brake_unknown" }),
+    ]);
+  });
+});
+
+// The one roster Lane that cannot read LANE_SHAPES: it lives in scam-engine,
+// which must not import apps/web. Parity is enforced here instead.
+describe("Lane declaration — scam-engine Lanes", () => {
+  it("shopfront-nrd-daily-ingest's cron and flag match its LANE_SHAPES entry", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { LANE_SHAPES: shapes } = await import("@/lib/laneHealth");
+    const src = readFileSync(
+      new URL(
+        "../../../packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const crons = [...src.matchAll(/\bcron:\s*"([^"]+)"/g)].map((m) => m[1]);
+    const shape = shapes["shopfront-nrd-daily-ingest"];
+    expect(crons).toEqual(shape.crons);
+    for (const flag of shape.flags ?? []) {
+      expect(src, `gate on ${flag}`).toContain(`!featureFlags.${flag}`);
+    }
   });
 });

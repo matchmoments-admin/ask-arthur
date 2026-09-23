@@ -11,7 +11,8 @@ import {
   onwardEventsFor,
   type UrlReportRequest,
 } from "@/lib/onward/url-blocklist-report";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch enforcement — EXECUTE step: a PRODUCER into the onward ledger.
@@ -50,7 +51,7 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
  *    (F8) and honours ONWARD_CANARY_RECIPIENT.
  */
 
-const BRAKE = "clone_enforcement";
+const BRAKE = LANES["shopfront-clone-enforcement-execute"].brake;
 const SEND_BATCH_LIMIT = 25;
 const DEFAULT_DAILY_CAP = 50;
 
@@ -84,18 +85,16 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
   // scheduled tick just burned 8 executions/day to early-return (fleet audit
   // 2026-09-16: 56/56 dark). Invoke on demand via the
   // `shopfront/clone.enforcement-execute.manual-trigger.v1` event. **At launch,
-  // restore the sweep by re-adding `{ cron: "15 */3 * * *" }`** alongside this
-  // event trigger — laneHealth's 4h expectEvery for this lane assumes it.
+  // restore the sweep by re-adding
+  // `...laneCrons("shopfront-clone-enforcement-execute")`** (every 3h at :15,
+  // declared in LANE_SHAPES) alongside this event trigger.
   { event: "shopfront/clone.enforcement-execute.manual-trigger.v1" },
   withAxiomLogging(
     { fnId: "shopfront-clone-enforcement-execute" },
     async ({ step, runId }) => {
-      if (!featureFlags.cloneEnforcement) {
-        return { skipped: true, reason: "FF_CLONE_ENFORCEMENT disabled" };
-      }
-      if (!featureFlags.cloneEnforceAutoBlocklist) {
-        return { skipped: true, reason: "FF_CLONE_ENFORCE_AUTO_BLOCKLIST disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-enforcement-execute");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
       const destinations = enabledUrlBlocklistDestinations(featureFlags);
       if (destinations.length === 0) {
         return { skipped: true, reason: "no_enabled_destinations" };

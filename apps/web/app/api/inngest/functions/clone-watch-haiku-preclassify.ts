@@ -24,6 +24,7 @@ import {
   CLONE_TACTIC_VALUES,
   RISK_INDICATOR_VALUES,
 } from "@/lib/clone-watch/preclassify-vocabulary";
+import { laneGate } from "@/lib/laneHealth";
 
 /**
  * PR-D2 (#498) — Haiku pre-classifier for clone-watch candidates.
@@ -370,9 +371,9 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
   withAxiomLogging(
     { fnId: "shopfront-clone-haiku-preclassify" },
     async ({ events, step }) => {
-      if (!featureFlags.shopfrontClonePreclassify) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_PRECLASSIFY disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-haiku-preclassify");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 

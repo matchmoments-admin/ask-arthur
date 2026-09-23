@@ -567,10 +567,27 @@ burning Inngest runs): `shopfront-clone-enforcement-execute` (restore `15 */3 * 
 (restore `45 6 * * *`; `FF_CLONE_ENFORCEMENT` + `FF_CLONE_REEMERGENCE_MONITOR`) and
 `shopfront-clone-weekly-digest` (restore `0 10 * * 0`; `FF_SHOPFRONT_CLONE_WEEKLY_DIGEST`).
 Flipping the flag alone does **nothing on a schedule**, and the health digest will then page
-the lane as `absent` (its `laneHealth` `enabled()` gate turns on, but no Outcome Row arrives).
-The flip is: (1) a PR re-adding the `{ cron: … }` trigger named in the function's own comment,
-with `[build]` in the commit; (2) after deploy, `curl -X PUT https://askarthur.au/api/inngest`
-and read the body; (3) then the env flag.
+the lane as `absent` (its `LANE_SHAPES` `flags` turn on, but no Outcome Row arrives).
+The flip is: (1) a PR re-adding `...laneCrons("<lane id>")` to the function's trigger array (the
+schedule itself stays declared once, in `LANE_SHAPES.crons` — do not re-type it), with `[build]`
+in the commit; (2) after deploy, `curl -X PUT https://askarthur.au/api/inngest` and read the
+body; (3) then the env flag.
+
+### One declaration per Lane (2026-09-24)
+
+Each roster Lane's **cron schedule**, **flag gate** and **brake key** are declared once:
+`LANE_SHAPES[lane].crons` / `.flags` in `apps/web/lib/laneHealth.ts`, and
+`LANES[lane].brake` in `packages/scam-engine/src/lane-outcome.ts`. The Lane's
+`createFunction` reads `laneCrons(lane)`, its body calls `laneGate(lane)` (skip reason
+`"<flagKey> disabled"`), and the health digest reads the same entries — so the digest can no
+longer skip a Lane that is running, or expect one on a schedule it doesn't have. The health
+window (`expectEvery`) is derived from the crons by `lib/cron-cadence.ts` (sub-daily: 1.5× the
+longest gap; daily: +2h; weekly: +24h); only event-driven and monthly Lanes declare it. The
+twice-daily reconcile's window tightened 26h → 18h as a result (one missed run now pages, like
+every other sub-daily Lane). `shopfront-nrd-daily-ingest` lives in scam-engine and cannot import
+laneHealth; `laneHealth.test.ts` pins its cron and flag to the roster instead. An unreadable
+`feature_brakes` read is now reported as a `brake_unknown` lane problem rather than read as
+"not braked".
 
 ### Pre-flip checklist for a matcher-change PR
 

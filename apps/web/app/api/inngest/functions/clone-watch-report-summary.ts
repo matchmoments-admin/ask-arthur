@@ -23,6 +23,7 @@ import {
   type StoreWriteStatus,
 } from "@/lib/clone-watch/monthly-brand-store";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneCrons } from "@/lib/laneHealth";
 
 const MANUAL_TRIGGER_EVENT = "clone-watch/report-summary.manual-trigger.v1";
 
@@ -91,7 +92,8 @@ export const cloneWatchReportSummary = inngest.createFunction(
     retries: 2,
   },
   [
-    { cron: "0 11 1 * *" }, // 1st of month, 11:00 UTC (after the 10:00 internal digest)
+    // 1st of month, 11:00 UTC (after the 10:00 internal digest)
+    ...laneCrons("clone-watch-report-summary"),
     { event: MANUAL_TRIGGER_EVENT }, // { periodMonth?: "YYYY-MM", republish?: true }
   ],
   withAxiomLogging(

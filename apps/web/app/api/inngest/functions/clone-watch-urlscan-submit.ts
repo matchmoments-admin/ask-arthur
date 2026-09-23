@@ -3,13 +3,13 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import {
   submitCandidateBatch,
   type CloneCandidate,
 } from "@/lib/clone-watch/urlscan-submit-one";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch urlscan — Stage 1 of 2: SUBMIT.
@@ -94,15 +94,15 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     timeouts: { finish: "10m" },
   },
   [
-    { cron: "0 9 * * *" },
+    ...laneCrons("shopfront-clone-urlscan-submit"),
     { event: "shopfront/clone.urlscan-submit.manual-trigger.v1" },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-urlscan-submit" },
     async ({ step }) => {
-      if (!featureFlags.shopfrontCloneUrlscan) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-urlscan-submit");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
       if (!process.env.URLSCAN_API_KEY) {
         return { skipped: true, reason: "URLSCAN_API_KEY not set" };
       }

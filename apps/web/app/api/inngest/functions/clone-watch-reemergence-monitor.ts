@@ -1,11 +1,11 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { resolvesToHost } from "@/lib/clone-watch/liveness";
 import { recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch — takedown re-emergence monitor (Wave 1).
@@ -46,18 +46,16 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
   // FF_CLONE_REEMERGENCE_MONITOR are dark in prod, so a scheduled tick just
   // burned an execution to early-return (fleet audit 2026-09-16). Invoke on
   // demand via the `shopfront/clone.reemergence.manual-trigger.v1` event.
-  // **At launch, restore the sweep by re-adding `{ cron: "45 6 * * *" }`**
-  // alongside this event trigger — laneHealth's 26h expectEvery assumes it.
+  // **At launch, restore the sweep by re-adding
+  // `...laneCrons("shopfront-clone-reemergence-monitor")`** (its schedule is
+  // declared in LANE_SHAPES) alongside this event trigger.
   { event: "shopfront/clone.reemergence.manual-trigger.v1" },
   withAxiomLogging(
     { fnId: "shopfront-clone-reemergence-monitor" },
     async ({ step, runId }) => {
-      if (!featureFlags.cloneEnforcement) {
-        return { skipped: true, reason: "FF_CLONE_ENFORCEMENT disabled" };
-      }
-      if (!featureFlags.cloneReemergenceMonitor) {
-        return { skipped: true, reason: "FF_CLONE_REEMERGENCE_MONITOR disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-reemergence-monitor");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
 
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };

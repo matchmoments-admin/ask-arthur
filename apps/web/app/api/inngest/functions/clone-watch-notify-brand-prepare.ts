@@ -19,6 +19,7 @@ import {
 } from "@/lib/clone-watch/urlscan-evidence";
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Daily batch builder for clone-watch brand notifications.
@@ -115,7 +116,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     timeouts: { finish: "36m" },
   },
   [
-    { cron: "30 9 * * *" },
+    ...laneCrons("shopfront-clone-notify-brand-prepare"),
     { event: "shopfront/clone.notify-brand-prepare.manual-trigger.v1" },
   ],
   withAxiomLogging({ fnId: "shopfront-clone-notify-brand-prepare" }, async ({ step }) => {
@@ -123,15 +124,9 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       autoSend: featureFlags.shopfrontCloneNotifyBrandAutoSend,
     });
 
-    if (!featureFlags.shopfrontCloneOutreach) {
-      return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
-    }
-    if (!featureFlags.shopfrontCloneNotifyBrand) {
-      return {
-        skipped: true,
-        reason: "FF_SHOPFRONT_CLONE_NOTIFY_BRAND disabled",
-      };
-    }
+    // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+    const gate = laneGate("shopfront-clone-notify-brand-prepare");
+    if (!gate.ok) return { skipped: true, reason: gate.reason };
 
     const sb = createServiceClient();
     if (!sb) return { skipped: true, reason: "supabase_unavailable" };
