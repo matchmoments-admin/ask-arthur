@@ -19,7 +19,17 @@ vi.mock("@askarthur/supabase/paginate", () => ({ fetchAllRows: mocks.pages }));
 vi.mock("@askarthur/scam-engine/cost-log", () => ({ isFeatureBraked: async () => false, isFeatureBrakedOrUnknown: async () => false, logCost: mocks.log }));
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: new Proxy({}, { get: () => true }) }));
 vi.mock("@askarthur/scam-engine/urlscan", () => ({ retrieveURLScanDetailed: vi.fn() }));
-vi.mock("@/lib/clone-watch/urlscan-submit-one", () => ({ submitCloneCandidate: mocks.submit }));
+// The lanes call submitCandidateBatch; route its per-row submit through the mock
+// so the REAL outcome → counter mapping runs under these assertions.
+vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/clone-watch/urlscan-submit-one")>();
+  return {
+    ...actual,
+    submitCloneCandidate: mocks.submit,
+    submitCandidateBatch: (...[c, b, o]: Parameters<typeof actual.submitCandidateBatch>) =>
+      actual.submitCandidateBatch(c, b, { ...o, submitOne: mocks.submit }),
+  };
+});
 vi.mock("@/lib/cost-telemetry", () => ({ logCost: mocks.log, logCostAsync: mocks.log }));
 
 import { cloneWatchUrlscanRetrieve } from "@/app/api/inngest/functions/clone-watch-urlscan-retrieve";
@@ -76,6 +86,12 @@ describe("worker recovery", () => {
     mocks.submit.mockResolvedValue({ kind: "rate_limited" });
     await invoke(cloneWatchLifecycleRecheck);
     expect(mocks.rpc.mock.calls.some(([name]) => name === "mark_clone_alert_rechecked")).toBe(false);
+    // …and it is counted as quota, not a failure (2026-09-24: this lane used to
+    // fold 429s into submit_failed, which paged the digest as silent_zero).
+    expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
+      feature: "shopfront_clone_recheck",
+      metadata: expect.objectContaining({ rechecked: 0, submit_failed: 0, rate_limited: 1 }),
+    }));
   });
   // #1127 stamped only successes. A row urlscan refuses (400, no DNS) then kept
   // its stale last_rechecked_at, stayed at the head of the staleness-ordered

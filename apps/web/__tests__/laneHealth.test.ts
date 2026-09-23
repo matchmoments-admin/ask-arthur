@@ -230,6 +230,42 @@ describe("classifyLaneHealth", () => {
     expect(classifyLaneHealth(allFailed, { now: NOW })).toHaveLength(1);
   });
 
+  // 2026-09-24: the recheck lane used to count a urlscan 429 as submit_failed
+  // and leave it out of `rechecked`, so a quota day paged as silent_zero. Quota
+  // is not a broken lane — the submit lane already excluded it.
+  it("an all-rate-limited recheck run is NOT silent_zero (quota, not breakage)", () => {
+    const quotaRun = {
+      pool: 200,
+      rechecked: 0,
+      submitted: 0,
+      submit_failed: 0,
+      rate_limited: 50,
+    };
+    const rows = [
+      ...without("recheck_batch"),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 1, 0, quotaRun),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 7, 0, quotaRun),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
+  });
+
+  it("a mostly-rate-limited recheck run is NOT silent_zero", () => {
+    const mostlyQuota = {
+      pool: 200,
+      rechecked: 5, // dns-skipped rows are still "looked at"
+      submitted: 0,
+      submit_failed: 0,
+      dns_skipped: 5,
+      rate_limited: 45,
+    };
+    const rows = [
+      ...without("recheck_batch"),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 1, 5, mostlyQuota),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 7, 5, mostlyQuota),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
+  });
+
   it("a single quiet recheck run is NOT a page (consecutive=2)", () => {
     const rows = healthyRows();
     rows[0] = outcomeRow("shopfront-clone-lifecycle-recheck", 1, 0, {

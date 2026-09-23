@@ -7,8 +7,11 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCostAsync } from "@/lib/cost-telemetry";
-import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
-import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
+import {
+  computeWeaponisationRisk,
+  riskBand,
+} from "@/lib/clone-watch/weaponisation-risk";
+import { submitCandidateBatch } from "@/lib/clone-watch/urlscan-submit-one";
 import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 
 /**
@@ -287,64 +290,39 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         step,
         "submit-batch",
         RECHECK_SUBMIT_WALL_CLOCK_MS,
-        async (budget) => {
-          let submitted = 0;
-          let submitFailed = 0;
-          let dnsSkipped = 0;
-          let reputationHits = 0;
-          // Every row the loop LOOKED AT, except a 429. The cadence stamp
-          // (mark_clone_alert_rechecked) records "we looked", not "it worked":
-          // a submit that urlscan refused with a 400 (no DNS) is exactly the
-          // row v277's 168h dead-domain cadence exists to park, and that cadence
-          // keys on last_rechecked_at. #1127 stamped only successes, so every
-          // failed row kept its stale stamp, stayed at the head of the
-          // staleness-ordered worklist, and was re-attempted 4×/day — within a
-          // week the same 50 dead domains were the whole batch and the live
-          // tail went unrechecked (worklist-gate-starvation rule). A 429 is the
-          // one exception: quota exhaustion says nothing about the URL, and
-          // leaving it unstamped means the next run retries it as soon as the
-          // quota is back (v224).
-          const attemptedIds: number[] = [];
-          for (const c of candidates) {
-            if (budget.expired()) break;
-            try {
-              const outcome = await submitCloneCandidate({
-                id: c.id,
-                candidate_url: c.candidate_url,
-                candidate_domain: c.candidate_domain,
-              });
-              if (outcome.reputationMalicious) reputationHits++;
-              if (
-                outcome.kind === "submitted" ||
-                outcome.kind === "reputation_classified"
-              ) {
-                submitted++;
-                attemptedIds.push(c.id);
-              } else if (outcome.kind === "rate_limited") {
-                submitFailed++;
-              } else if (outcome.kind === "dns_no_host") {
-                // Stamped like a failure (v277's dead cadence needs the
-                // last_rechecked_at stamp) but counted apart: no urlscan call.
-                dnsSkipped++;
-                attemptedIds.push(c.id);
-              } else {
-                submitFailed++;
-                attemptedIds.push(c.id);
-              }
-            } catch (err) {
-              submitFailed++;
-              attemptedIds.push(c.id);
+        // attemptedIds is every row the loop LOOKED AT, except a 429. The
+        // cadence stamp (mark_clone_alert_rechecked) records "we looked", not
+        // "it worked": a submit that urlscan refused with a 400 (no DNS) is
+        // exactly the row v277's 168h dead-domain cadence exists to park, and
+        // that cadence keys on last_rechecked_at. #1127 stamped only successes,
+        // so every failed row kept its stale stamp, stayed at the head of the
+        // staleness-ordered worklist, and was re-attempted 4×/day — within a
+        // week the same 50 dead domains were the whole batch and the live tail
+        // went unrechecked (worklist-gate-starvation rule). A 429 is the one
+        // exception: quota exhaustion says nothing about the URL, and leaving
+        // it unstamped means the next run retries it as soon as the quota is
+        // back (v224). It is counted as rate_limited, NOT submit_failed — this
+        // lane used to fold it into failures, so a quota day paged the health
+        // digest as silent_zero (2026-09-24). The mapping now lives in ONE
+        // place, shared with the daily submit lane.
+        async (budget) =>
+          submitCandidateBatch(candidates, budget, {
+            onRowError: (alertId, err) =>
               logger.error("clone-watch recheck: submit failed", {
-                alertId: c.id,
+                alertId,
                 error: err instanceof Error ? err.message : String(err),
-              });
-            }
-          }
-          return { submitted, submitFailed, dnsSkipped, reputationHits, attemptedIds };
-        },
+              }),
+          }),
       );
-      const { submitted, submitFailed, dnsSkipped, reputationHits, attemptedIds } =
-        submitBatch;
+      const {
+        submitted,
+        submitFailed,
+        rateLimited,
+        dnsSkipped,
+        reputationHits,
+        attemptedIds,
+        unreached,
+      } = submitBatch;
 
       // Mark every attempted candidate rechecked (bump recheck_count +
       // last_rechecked_at) so it drops out of the cadence window — 6h for a
@@ -393,6 +371,8 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             submitted,
             submit_failed: submitFailed,
             dns_skipped: dnsSkipped,
+            rate_limited: rateLimited,
+            unreached,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
               .length,
             monitoring: candidates.filter(
@@ -401,10 +381,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             top_score: risks[risks.length - 1] ?? null,
             median_score: risks[Math.floor(risks.length / 2)] ?? null,
             bands: {
-              critical: candidates.filter((c) => c.risk >= 70).length,
-              elevated: candidates.filter((c) => c.risk >= 40 && c.risk < 70)
+              critical: candidates.filter((c) => riskBand(c.risk) === "critical")
                 .length,
-              low: candidates.filter((c) => c.risk < 40).length,
+              elevated: candidates.filter((c) => riskBand(c.risk) === "elevated")
+                .length,
+              low: candidates.filter((c) => riskBand(c.risk) === "low").length,
             },
           },
         );
@@ -418,6 +399,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             submitted,
             submit_failed: submitFailed,
             dns_skipped: dnsSkipped,
+            rate_limited: rateLimited,
             reputation_hits: reputationHits,
           },
         });
