@@ -128,6 +128,12 @@ export const LANES = {
     operation: "execute_batch",
     brake: "clone_enforcement",
   },
+  "shopfront-clone-haiku-preclassify": {
+    feature: "shopfront_clone_preclassify",
+    provider: "internal",
+    operation: "batch",
+    brake: "shopfront_clone_outreach",
+  },
   "clone-watch-report-summary": {
     feature: "clone_watch_report_summary",
     provider: "internal",
@@ -241,6 +247,12 @@ export interface LaneOutcome {
     reason?: "nothing_pending";
     candidates: number;
     enqueued: number;
+  };
+  "shopfront-clone-haiku-preclassify": {
+    reason?: "braked";
+    alerts: number;
+    classified: number;
+    failed: number;
   };
   "clone-watch-report-summary": {
     reason?: "frozen" | "no_clones";

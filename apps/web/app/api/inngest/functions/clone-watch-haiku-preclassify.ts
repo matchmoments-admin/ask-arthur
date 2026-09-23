@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { mapWithConcurrency } from "@askarthur/utils/concurrency";
+import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
@@ -142,258 +145,286 @@ const ClassificationOutputSchema = z.object({
 
 export type ClassificationOutput = z.infer<typeof ClassificationOutputSchema>;
 
+type Sb = NonNullable<ReturnType<typeof createServiceClient>>;
+type PreclassifyInput = ReturnType<typeof parseCloneWatchPreclassifyRequestedData>;
+
+/** One alert's outcome inside a batch. */
+export type AlertResult =
+  | {
+      alertId: number;
+      ok: true;
+      is_clone: boolean;
+      confidence: number;
+      clone_tactic: string;
+      attack_intent: string;
+      /** primary = Jev wrote the gate row; ok/error/off = Haiku wrote it and
+       *  the Jev shadow tail succeeded / failed / was disabled. */
+      jev: "primary" | "ok" | "error" | "off";
+    }
+  | { alertId: number; ok: false; error: string };
+
+/**
+ * Classify ONE alert — the whole per-alert contract, unchanged from the
+ * one-run-per-alert era: Jev primary (ADR-0026) writes both sibling rows + one
+ * cost row; the Haiku rollback path (FF_CLONE_WATCH_JEV_PRIMARY off) calls
+ * Claude, persists via the v157 UPSERT, writes its cost row, then the Jev
+ * shadow tail (fail-soft). Throws on a vendor or persist failure AFTER writing
+ * its `_error` row, exactly as before; the batch catches per alert. No step
+ * boundaries in here — the batch owns them.
+ */
+export async function classifyAlert(
+  sb: Sb,
+  data: PreclassifyInput,
+): Promise<AlertResult> {
+  if (featureFlags.cloneWatchJevPrimary) {
+    const out = await classifyPrimaryWithJev({
+      sb,
+      alertId: data.alertId,
+      input: data,
+      requestId: `clone-watch-preclassify:${data.alertId}`,
+    });
+    return {
+      alertId: data.alertId,
+      ok: true,
+      is_clone: out.is_clone,
+      confidence: out.confidence,
+      clone_tactic: out.clone_tactic,
+      attack_intent: out.attack_intent,
+      jev: "primary",
+    };
+  }
+
+  // The same three fields the Jev shadow lane sees — built by ONE function
+  // so "identical input" is structural, not a claim (v311).
+  const userMessage = JSON.stringify(buildJevState(data));
+  let callResult;
+  try {
+    callResult = await callClaudeJson({
+      model: "HAIKU_4_5",
+      system: SYSTEM_PROMPT,
+      // `candidate_domain` / `candidate_url` are attacker-chosen registry
+      // strings: JSON.stringify stops break-out, the sandwich handles
+      // instruction-shaped text inside a value.
+      user: userMessage,
+      schema: ClassificationOutputSchema,
+      maxTokens: 256,
+      cacheSystem: true,
+      useToolUse: true,
+      toolName: "submit_classification",
+      requestId: `clone-watch-preclassify:${data.alertId}`,
+    });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    // $0 `_error` row BEFORE re-throwing — the health digest's only signal of
+    // a degraded Anthropic endpoint (local-ultrareview F5). Awaited.
+    await logCostAsync({
+      feature: "shopfront_clone_preclassify_error",
+      provider: "anthropic",
+      operation: "classify_error",
+      units: 0,
+      unitCostUsd: 0,
+      requestId: `clone-watch-preclassify:${data.alertId}`,
+      metadata: {
+        alert_id: data.alertId,
+        brand: data.brand,
+        error_message: errorMessage.slice(0, 500),
+        model_id: "claude-haiku-4-5-20251001",
+        prompt_version: PROMPT_VERSION,
+      },
+    });
+    throw err;
+  }
+  const classification = callResult.result;
+
+  const { error } = await sb.rpc("record_clone_watch_classification", {
+    p_alert_id: data.alertId,
+    p_brand: data.brand,
+    p_candidate_domain: data.candidateDomain,
+    p_is_clone: classification.is_clone,
+    p_confidence: classification.confidence,
+    p_clone_tactic: classification.clone_tactic,
+    p_attack_intent: classification.attack_intent,
+    p_risk_indicators: classification.risk_indicators,
+    p_reason: classification.reason,
+    p_model_id: callResult.modelId,
+    p_prompt_version: PROMPT_VERSION,
+    p_input_tokens: callResult.usage.inputTokens,
+    p_output_tokens: callResult.usage.outputTokens,
+  });
+  if (error) {
+    throw new Error(`record_clone_watch_classification: ${error.message}`);
+  }
+  const totalTokens =
+    callResult.usage.inputTokens + callResult.usage.outputTokens;
+  await logCostAsync({
+    feature: "shopfront_clone_preclassify",
+    provider: "anthropic",
+    operation: callResult.cacheHit ? "classify_cache_hit" : "classify",
+    units: totalTokens,
+    unitCostUsd: totalTokens > 0 ? callResult.estimatedCostUsd / totalTokens : 0,
+    requestId: `clone-watch-preclassify:${data.alertId}`,
+    metadata: {
+      alert_id: data.alertId,
+      brand: data.brand,
+      is_clone: classification.is_clone,
+      confidence: classification.confidence,
+      clone_tactic: classification.clone_tactic,
+      attack_intent: classification.attack_intent,
+      prompt_version: PROMPT_VERSION,
+      model_id: callResult.modelId,
+      cache_hit: callResult.cacheHit,
+      estimated_cost_usd: callResult.estimatedCostUsd,
+    },
+  });
+
+  // Jev SHADOW LANE (v311) — after Haiku's row + cost row, identical input,
+  // read by nothing downstream; fail-soft + UPSERT-idempotent.
+  const jev = featureFlags.cloneWatchJevShadow
+    ? await classifyOneWithJev({
+        sb,
+        alertId: data.alertId,
+        input: data,
+        source: "live",
+        requestId: `clone-watch-preclassify-jev:${data.alertId}`,
+      })
+    : ({ kind: "off" } as const);
+
+  return {
+    alertId: data.alertId,
+    ok: true,
+    is_clone: classification.is_clone,
+    confidence: classification.confidence,
+    clone_tactic: classification.clone_tactic,
+    attack_intent: classification.attack_intent,
+    jev: jev.kind === "ok" ? "ok" : jev.kind === "error" ? "error" : "off",
+  };
+}
+
+/** Parse + dedupe a batch's events: one entry per alertId (Inngest dedupes
+ *  event ids at ingest; this covers two ids for one alert in one batch).
+ *  Unparseable events are counted, never thrown — one bad payload must not
+ *  fail the other 49. Pure; exported for tests. */
+export function alertsFromEvents(events: ReadonlyArray<{ data?: unknown }>): {
+  alerts: PreclassifyInput[];
+  invalid: number;
+} {
+  const byId = new Map<number, PreclassifyInput>();
+  let invalid = 0;
+  for (const e of events) {
+    try {
+      const d = parseCloneWatchPreclassifyRequestedData(e.data);
+      if (!byId.has(d.alertId)) byId.set(d.alertId, d);
+    } catch {
+      invalid++;
+    }
+  }
+  return { alerts: [...byId.values()], invalid };
+}
+
+// Jev ~300 ms/call; Haiku ~3 s — both well inside the budget at 50 alerts.
+const JEV_CONCURRENCY = 4;
+const HAIKU_CONCURRENCY = 2;
+// 50 × Haiku 3 s / 2 in flight ≈ 75 s worst realistic; 200 s leaves room for a
+// slow vendor. Alerts the budget can't reach are left for tomorrow's re-fan.
+const BATCH_WALL_CLOCK_MS = 200_000;
+
+// inngest-finish-budget: 4 boundaries — check-brake, classify-batch (budgeted
+// 200 s), log-outcome, log-outcome-braked (exclusive).
 export const cloneWatchHaikuPreclassify = inngest.createFunction(
   {
     id: "shopfront-clone-haiku-preclassify",
-    name: "Clone-Watch: Haiku pre-classifier",
+    name: "Clone-Watch: pre-classifier (Jev primary, batched)",
     retries: 2,
-    concurrency: { limit: 3 },
-    // Idempotency keyed on the EVENT id, not event.data.alertId. The daily
-    // fan-out now stamps the event id with the run date
-    // (`clone-watch-preclassify:<alertId>:<YYYY-MM-DD>`), so a row that did NOT
-    // get a classification row on its first attempt (FF was off, cost-brake
-    // engaged, supabase blip, or retries exhausted) is re-fanned with a FRESH
-    // id on the next daily run and gets another chance — instead of being
-    // PERMANENTLY stranded by an alertId-keyed idempotency record (verified
-    // 2026-05-29: 6 rows from the 05-27 batch were stuck unclassified for ~2
-    // days under the old key). Re-spend is prevented at the source: the
-    // `list_clone_alerts_pending_preclassify` selector excludes any alert that
-    // already has a classifications row, so only genuinely-pending alerts are
-    // ever re-fanned. The record_clone_watch_classification UPSERT remains the
-    // belt-and-braces write-idempotency guard.
-    idempotency: "event.id",
-    // 10m, not 2m. The real work is one ~3s Haiku call — but each step
-    // boundary queues for one of the account's 5 Hobby-plan concurrency slots,
-    // and under morning contention that wait measured ~30–60s per boundary
-    // (#1061, 2026-09-02: 44 of 51 runs were CANCELLED at exactly start+2m; a
-    // cancellation gets no retries and no error telemetry, so the loss was
-    // silent). The finish timeout stays finite as the ADR-0019 circuit
-    // breaker, but must budget for queue waits: steps × 60s worst-case, plus
-    // headroom. Guarded by inngestFinishBudgets.test.ts.
-    timeouts: { finish: "10m" },
+    // ONE run per daily batch (2026-09-23; plan
+    // docs/plans/preclassify-batch-events-2026-09-23.md). Was one run per alert
+    // at concurrency 3: ~26 runs holding 3 of the account's 5 slots at 08:31.
+    // Up to 50 events per run, flushed 60 s after the first arrives.
+    batchEvents: { maxSize: 50, timeout: "60s" },
+    concurrency: { limit: 1 },
+    // No `idempotency` — Inngest rejects it with batchEvents. The guarantee it
+    // gave lives where it always really lived: the fan-out's event id
+    // `clone-watch-preclassify:<alertId>:<YYYY-MM-DD>` is deduplicated by
+    // Inngest at ingest (24 h), alertsFromEvents dedupes within a batch, and
+    // record_clone_watch_classification is an UPSERT. The daily selector
+    // excludes alerts that already have a classification row, so a failed
+    // alert is re-fanned tomorrow with a fresh id (the existing backstop).
+    timeouts: { finish: "8m" },
   },
   { event: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT },
   withAxiomLogging(
     { fnId: "shopfront-clone-haiku-preclassify" },
-    async ({ event, step }) => {
-      const data = parseCloneWatchPreclassifyRequestedData(event.data);
-
+    async ({ events, step }) => {
       if (!featureFlags.shopfrontClonePreclassify) {
-        return {
-          skipped: true,
-          reason: "FF_SHOPFRONT_CLONE_PRECLASSIFY disabled",
-        };
+        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_PRECLASSIFY disabled" };
       }
-
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      // The same three fields the Jev shadow lane sees — built by ONE function
-      // so "identical input" is structural, not a claim (v311).
-      const userMessage = JSON.stringify(buildJevState(data));
+      const { alerts, invalid } = alertsFromEvents(events);
 
-      // ADR-0026 (2026-09-22): Jev IS the pre-classifier. One step, one
-      // vendor call, both sibling rows, one cost row — see
-      // lib/clone-watch/jev-classify-one.ts. Not fail-soft: a vendor or
-      // persist failure logs the `_error` row and throws, so Inngest retries
-      // and the daily selector re-fans tomorrow, exactly as the Haiku path
-      // below always behaved. Flip FF_CLONE_WATCH_JEV_PRIMARY off to roll
-      // back to Haiku (+ the Jev shadow tail) with no other change.
-      if (featureFlags.cloneWatchJevPrimary) {
-        const out = await step.run("classify-jev", async () => {
-          if (await isPreclassifyBraked()) return { braked: true as const };
-          return classifyPrimaryWithJev({
-            sb,
-            alertId: data.alertId,
-            input: data,
-            requestId: `clone-watch-preclassify:${data.alertId}`,
-          });
-        });
-        if ("braked" in out) {
-          return { skipped: true, reason: "cost_brake_engaged" };
-        }
-        logger.info("clone-watch preclassify: done (jev primary)", {
-          alertId: data.alertId,
-          brand: data.brand,
-          ...out,
-        });
-        return {
-          ok: true,
-          alertId: data.alertId,
-          is_clone: out.is_clone,
-          confidence: out.confidence,
-          clone_tactic: out.clone_tactic,
-          attack_intent: out.attack_intent,
-          jev: "primary" as const,
-        };
-      }
-
-      // Call Haiku with tool-use forced JSON output (matches the pattern
-      // proven on Reddit Intel). Cache the system prompt (default) so
-      // repeat calls within the cache TTL hit at ~10x lower cost.
-      //
-      // The cost-brake check (`shopfront_clone_outreach`, the shared brake
-      // across all clone-watch sub-features) rides INSIDE this step rather than
-      // owning its own: each step boundary costs one account-concurrency queue
-      // wait (~30–60s under contention, #1069), and a single-row SELECT does not
-      // earn that. The brake still gates the Claude call — it just shares the
-      // step. A braked run returns a sentinel instead of the call result.
-      //
-      // Error path (local-ultrareview F5): emit a $0 `_error` cost-telemetry
-      // row BEFORE re-throwing so Inngest's retry+failure surface in the
-      // health-digest aggregator (matches `reddit-intel-error` pattern).
-      // Without this row, a degraded Anthropic endpoint produces invisible
-      // failures — the only signal is the absence of clone_watch_classifications
-      // rows, which the operator wouldn't notice for hours. Awaited (not
-      // fire-and-forget): a cancelled run kills deferred promises, which is
-      // exactly when the error row matters most.
-      const callOutcome = await step.run("classify-haiku", async () => {
-        if (await isPreclassifyBraked()) return { braked: true as const };
-
-        try {
-          const call = await callClaudeJson({
-            model: "HAIKU_4_5",
-            system: SYSTEM_PROMPT,
-            user: userMessage,
-            // The removed `userIsTrusted: true` said "structured envelope, not
-            // raw user text". The envelope's SHAPE is ours; its CONTENTS are
-            // not. `candidate_domain` and `candidate_url` come from the whoisds
-            // newly-registered-domain feed — strings an attacker chose and paid
-            // to register, which is as untrusted as input gets. JSON.stringify
-            // escapes quotes and control characters, so the JSON cannot be
-            // broken out of; it does nothing about instruction-shaped text
-            // inside a value. The sandwich is what handles that.
-            schema: ClassificationOutputSchema,
-            maxTokens: 256,
-            cacheSystem: true,
-            useToolUse: true,
-            toolName: "submit_classification",
-            requestId: `clone-watch-preclassify:${data.alertId}`,
-          });
-          return { braked: false as const, call };
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          await logCostAsync({
-            feature: "shopfront_clone_preclassify_error",
-            provider: "anthropic",
-            operation: "classify_error",
-            units: 0,
-            unitCostUsd: 0,
-            requestId: `clone-watch-preclassify:${data.alertId}`,
-            metadata: {
-              alert_id: data.alertId,
-              brand: data.brand,
-              error_message: errorMessage.slice(0, 500),
-              model_id: "claude-haiku-4-5-20251001",
-              prompt_version: PROMPT_VERSION,
-            },
-          });
-          throw err; // Re-throw so Inngest applies retries:2 + finally fails the run
-        }
-      });
-
-      if (callOutcome.braked) {
+      // One brake read per batch (fail-closed: a paid vendor call).
+      const braked = await step.run("check-brake", () => isPreclassifyBraked());
+      if (braked) {
+        await step.run("log-outcome-braked", () =>
+          recordLaneOutcome("shopfront-clone-haiku-preclassify", 0, {
+            reason: "braked",
+            alerts: alerts.length,
+            classified: 0,
+            failed: 0,
+          }),
+        );
         return { skipped: true, reason: "cost_brake_engaged" };
       }
-      const callResult = callOutcome.call;
-      const classification = callResult.result;
 
-      // Persist via the v157 idempotent UPSERT RPC. Cost telemetry rides the
-      // same step (fold, #1069): a dedicated log-cost step cost one more
-      // concurrency-queue wait per run and was the FIRST thing a finish-cancel
-      // chopped — 58% of cost rows were lost on 2026-09-01. The insert is
-      // awaited after a successful RPC; a step retry after the RPC succeeded can
-      // duplicate one telemetry row (rare crash window), which beats silently
-      // losing the majority. units = total token count so the dashboard slices
-      // by tokens/day cleanly; estimatedCostUsd already accounts for cache hits.
-      const jev = await step.run("persist", async () => {
-        const { error } = await sb.rpc("record_clone_watch_classification", {
-          p_alert_id: data.alertId,
-          p_brand: data.brand,
-          p_candidate_domain: data.candidateDomain,
-          p_is_clone: classification.is_clone,
-          p_confidence: classification.confidence,
-          p_clone_tactic: classification.clone_tactic,
-          p_attack_intent: classification.attack_intent,
-          p_risk_indicators: classification.risk_indicators,
-          p_reason: classification.reason,
-          p_model_id: callResult.modelId,
-          p_prompt_version: PROMPT_VERSION,
-          p_input_tokens: callResult.usage.inputTokens,
-          p_output_tokens: callResult.usage.outputTokens,
-        });
-        if (error) {
-          throw new Error(
-            `record_clone_watch_classification: ${error.message}`,
-          );
-        }
-        const totalTokens =
-          callResult.usage.inputTokens + callResult.usage.outputTokens;
-        await logCostAsync({
-          feature: "shopfront_clone_preclassify",
-          provider: "anthropic",
-          operation: callResult.cacheHit ? "classify_cache_hit" : "classify",
-          units: totalTokens,
-          unitCostUsd:
-            totalTokens > 0 ? callResult.estimatedCostUsd / totalTokens : 0,
-          requestId: `clone-watch-preclassify:${data.alertId}`,
-          metadata: {
-            alert_id: data.alertId,
-            brand: data.brand,
-            is_clone: classification.is_clone,
-            confidence: classification.confidence,
-            clone_tactic: classification.clone_tactic,
-            attack_intent: classification.attack_intent,
-            prompt_version: PROMPT_VERSION,
-            model_id: callResult.modelId,
-            cache_hit: callResult.cacheHit,
-            estimated_cost_usd: callResult.estimatedCostUsd,
-          },
-        });
+      const results = await budgetedStep(
+        step,
+        "classify-batch",
+        BATCH_WALL_CLOCK_MS,
+        async (budget) => {
+          const out: AlertResult[] = [];
+          const width = featureFlags.cloneWatchJevPrimary
+            ? JEV_CONCURRENCY
+            : HAIKU_CONCURRENCY;
+          await mapWithConcurrency(alerts, width, async (a) => {
+            if (budget.expired()) return; // unreached → tomorrow's re-fan
+            try {
+              out.push(await classifyAlert(sb, a));
+            } catch (err) {
+              // Its `_error` row is already written (classifyAlert /
+              // classifyPrimaryWithJev); the others carry on.
+              out.push({
+                alertId: a.alertId,
+                ok: false,
+                error: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+              });
+            }
+          });
+          return out;
+        },
+      );
 
-        // Jev SHADOW LANE (v311) — folded into this step rather than a
-        // fourth boundary: under morning contention every boundary queues
-        // 30–60 s for one of the account's 5 slots (#1069), and the Jev body
-        // is fail-soft + UPSERT-idempotent, so a retry of this step re-asking
-        // Jev costs $0.00005 and changes nothing. Runs AFTER Haiku's row +
-        // cost row are written, on the identical input, and is read by
-        // nothing downstream — it exists to be measured by
-        // clone_watch_jev_calibration().
-        if (!featureFlags.cloneWatchJevShadow) return { kind: "off" as const };
-        return classifyOneWithJev({
-          sb,
-          alertId: data.alertId,
-          input: data,
-          source: "live",
-          requestId: `clone-watch-preclassify-jev:${data.alertId}`,
-        });
+      const classified = results.filter((r) => r.ok).length;
+      const failed = results.length - classified;
+      const unreached = alerts.length - results.length;
+      await step.run("log-outcome", () =>
+        recordLaneOutcome("shopfront-clone-haiku-preclassify", classified, {
+          alerts: alerts.length,
+          classified,
+          failed,
+          unreached,
+          invalid,
+          mode: featureFlags.cloneWatchJevPrimary ? "jev" : "haiku",
+        }),
+      );
+      logger.info("clone-watch preclassify: batch done", {
+        events: events.length,
+        alerts: alerts.length,
+        classified,
+        failed,
+        unreached,
+        invalid,
       });
-
-      // (The Jev shadow lane rides at the tail of `persist` — see that step.)
-
-      logger.info("clone-watch preclassify: done", {
-        alertId: data.alertId,
-        brand: data.brand,
-        is_clone: classification.is_clone,
-        confidence: classification.confidence,
-        clone_tactic: classification.clone_tactic,
-        input_tokens: callResult.usage.inputTokens,
-        output_tokens: callResult.usage.outputTokens,
-        cost_usd: callResult.estimatedCostUsd,
-        jev: jev.kind,
-        jev_is_clone_p: jev.kind === "ok" ? jev.isCloneP : undefined,
-        jev_reason: jev.kind === "error" ? jev.reason : undefined,
-      });
-
-      return {
-        ok: true,
-        alertId: data.alertId,
-        is_clone: classification.is_clone,
-        confidence: classification.confidence,
-        clone_tactic: classification.clone_tactic,
-        attack_intent: classification.attack_intent,
-        jev: jev.kind,
-      };
+      return { ok: true, alerts: alerts.length, classified, failed, unreached, results };
     },
   ),
 );

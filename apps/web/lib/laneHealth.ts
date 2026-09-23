@@ -257,6 +257,16 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     shape: "(absence only)",
     silentZero: () => false,
   },
+  "shopfront-clone-haiku-preclassify": {
+    // Event-driven (the daily fan-out), so absence is watched by the
+    // ABSENCE_WATCHES `classify` stream below, which proves vendor calls
+    // happen. This row judges the BATCH: alerts in, nothing classified.
+    expectEvery: Number.POSITIVE_INFINITY,
+    enabled: () => featureFlags.shopfrontClonePreclassify,
+    consecutive: 1,
+    shape: "alerts>0 ∧ classified=0",
+    silentZero: (o) => n(o, "alerts") > 0 && n(o, "classified") === 0,
+  },
   "clone-watch-report-summary": {
     // Monthly (1st, 11:00). Absence is THE signal for a monthly Lane: the
     // 2026-09-01 stewardship run was finish-cancelled with no retry and no
