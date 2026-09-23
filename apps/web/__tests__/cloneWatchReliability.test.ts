@@ -98,6 +98,25 @@ describe("worker recovery", () => {
       metadata: expect.objectContaining({ rechecked: 2, submitted: 1, submit_failed: 1 }),
     }));
   });
+  // 2026-09-24: a DNS-precheck skip is counted apart from real failures (the
+  // saving was invisible inside submit_failed) but still stamped — v277's
+  // dead-domain cadence keys on last_rechecked_at.
+  it("counts a DNS no-host skip as dns_skipped, not submit_failed, and still stamps it", async () => {
+    const candidates = [1, 2].map(id => ({ id, candidate_url: `https://c${id}.example`, candidate_domain: `c${id}.example`, lifecycle_state: "declined", last_rechecked_at: null }));
+    mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? candidates : null, error: null }));
+    mocks.submit
+      .mockResolvedValueOnce({ kind: "dns_no_host", error: "dns_no_host_precheck" })
+      .mockResolvedValueOnce({ kind: "submitted" });
+    await invoke(cloneWatchLifecycleRecheck);
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked").map(([, args]) => args)).toEqual([
+      { p_alert_id: 1 },
+      { p_alert_id: 2 },
+    ]);
+    expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
+      feature: "shopfront_clone_recheck",
+      metadata: expect.objectContaining({ rechecked: 2, submitted: 1, submit_failed: 0, dns_skipped: 1 }),
+    }));
+  });
   it("marks a submission that threw as rechecked", async () => {
     mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? [{ id: 9, lifecycle_state: "declined" }] : null, error: null }));
     mocks.submit.mockRejectedValueOnce(new Error("record scan failure failed: boom"));

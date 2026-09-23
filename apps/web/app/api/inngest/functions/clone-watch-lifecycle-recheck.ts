@@ -290,6 +290,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         async (budget) => {
           let submitted = 0;
           let submitFailed = 0;
+          let dnsSkipped = 0;
           let reputationHits = 0;
           // Every row the loop LOOKED AT, except a 429. The cadence stamp
           // (mark_clone_alert_rechecked) records "we looked", not "it worked":
@@ -321,6 +322,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
                 attemptedIds.push(c.id);
               } else if (outcome.kind === "rate_limited") {
                 submitFailed++;
+              } else if (outcome.kind === "dns_no_host") {
+                // Stamped like a failure (v277's dead cadence needs the
+                // last_rechecked_at stamp) but counted apart: no urlscan call.
+                dnsSkipped++;
+                attemptedIds.push(c.id);
               } else {
                 submitFailed++;
                 attemptedIds.push(c.id);
@@ -334,10 +340,10 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
               });
             }
           }
-          return { submitted, submitFailed, reputationHits, attemptedIds };
+          return { submitted, submitFailed, dnsSkipped, reputationHits, attemptedIds };
         },
       );
-      const { submitted, submitFailed, reputationHits, attemptedIds } =
+      const { submitted, submitFailed, dnsSkipped, reputationHits, attemptedIds } =
         submitBatch;
 
       // Mark every attempted candidate rechecked (bump recheck_count +
@@ -386,6 +392,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             pool: pool.length,
             submitted,
             submit_failed: submitFailed,
+            dns_skipped: dnsSkipped,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
               .length,
             monitoring: candidates.filter(
@@ -410,6 +417,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           metadata: {
             submitted,
             submit_failed: submitFailed,
+            dns_skipped: dnsSkipped,
             reputation_hits: reputationHits,
           },
         });

@@ -197,6 +197,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
           let submitted = 0;
           let submitFailed = 0;
           let rateLimited = 0;
+          let dnsSkipped = 0;
           let reputationHits = 0;
           for (const row of candidates) {
             if (budget.expired()) break;
@@ -214,6 +215,8 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
                 // this it was folded into submitFailed and left no DB trace, so
                 // "has urlscan ever rate-limited us?" had no answer anywhere.
                 rateLimited++;
+              } else if (outcome.kind === "dns_no_host") {
+                dnsSkipped++;
               } else {
                 submitFailed++;
               }
@@ -225,10 +228,11 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
               });
             }
           }
-          return { submitted, submitFailed, rateLimited, reputationHits };
+          return { submitted, submitFailed, rateLimited, dnsSkipped, reputationHits };
         },
       );
-      const { submitted, submitFailed, rateLimited, reputationHits } = batch;
+      const { submitted, submitFailed, rateLimited, dnsSkipped, reputationHits } =
+        batch;
 
       await step.run("log-cost", async () => {
         // Awaited (#1069): the Aug 31 submit run was finish-cancelled after the
@@ -240,6 +244,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
           {
             submitted,
             submit_failed: submitFailed,
+            dns_skipped: dnsSkipped,
             rate_limited: rateLimited,
             reputation_hits: reputationHits,
             dormant_retired: dormant,

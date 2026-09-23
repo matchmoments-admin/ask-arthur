@@ -170,11 +170,17 @@ export interface LaneOutcome {
     rechecked: number;
     submitted: number;
     submit_failed: number;
+    /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
+     *  absent on quiet runs and rows written before it existed. */
+    dns_skipped?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
     submitted: number;
     submit_failed: number;
+    /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
+     *  absent on quiet runs and rows written before it existed. */
+    dns_skipped?: number;
     rate_limited: number;
     dormant_retired: number;
   };

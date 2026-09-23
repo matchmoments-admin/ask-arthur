@@ -32,6 +32,10 @@ export interface SubmitOutcome {
     // 429'd?" was unanswerable — the guard below returns before any DB write, so
     // the row carries no trace either.
     | "rate_limited"
+    // DNS precheck proved the name points at no host: urlscan + reputation
+    // were NOT called (the saving). Stamped like urlscan's 400 so the v277
+    // dead-domain cadence applies; counted apart from real submit failures.
+    | "dns_no_host"
     | "submit_failed"
     | "no_client";
   reputationMalicious: boolean;
@@ -81,7 +85,7 @@ export async function submitCloneCandidate(
     });
     if (error) throw new Error(`record dns precheck failed: ${error.message}`);
     return {
-      kind: "submit_failed",
+      kind: "dns_no_host",
       reputationMalicious: false,
       error: DNS_PRECHECK_ERROR,
     };
