@@ -15,7 +15,7 @@ day is ~8 s of vendor time wrapped in 26 runs × 2–3 step boundaries.
 
 ## Change
 
-1. **Trigger:** `batchEvents: { maxSize: 50, timeout: "60s" }` on
+1. **Trigger:** `batchEvents: { maxSize: 5, timeout: "60s" }` (the Inngest plan ceiling — 50 was rejected at sync, see #1190 hotfix) on
    `shopfront/clone.preclassify-requested.v1`; `concurrency: 1`.
 2. **Duplicate protection:** drop `idempotency: "event.id"` (Inngest rejects it with
    `batchEvents`). Protection is preserved where it actually lives:
