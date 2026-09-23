@@ -7,6 +7,7 @@ import {
   recordAlertDelivery,
 } from "@/lib/alerting/deliveryLog";
 import { readNumberEnv, type NumberEnvResult } from "@/lib/env-coerce";
+import { brakeSpend } from "@/lib/cost-brakes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -181,41 +182,18 @@ export async function GET(req: Request) {
   // a $5 burst on enrichment alone should pause enrichment even if total
   // spend is nowhere near the $2 Telegram threshold.
   //
-  // Reddit Intel uses the same pattern: aggregate today's spend across
-  // reddit-intel-classify + reddit-intel-embed + reddit-intel-name-themes +
-  // competitor-intel-extract (Arthur's Watch Phase 2, shares this brake)
-  // (excluding reddit-intel-error which is $0 diagnostic). If sum exceeds
-  // REDDIT_INTEL_CAP_USD, brake the whole pipeline for 24h.
+  // WHICH features count toward each brake is declared once, in
+  // lib/cost-brakes.ts (BRAKE_SPEND_FEATURES) — costBrakeRegistry.test.ts
+  // fails if a listed feature has no writer. This file owns only the caps
+  // and what happens when one is exceeded.
   const vulnEnrichThresholdUsd = envReads.VULN_AU_ENRICHMENT_CAP_USD.value;
-  const vulnEnrichCost =
-    top.find((t) => t.feature === "vuln_au_enrichment")?.cost ?? 0;
+  const vulnEnrichCost = brakeSpend(top, "vuln_au_enrichment");
 
-  // Every reddit-intel-* Claude tag must be in this list or the cap that
-  // names the feature does not govern its spend. Two were missing until
-  // 2026-08-10: `-classify-retry` (a retry re-sends the whole 40-post batch,
-  // so it is the most expensive row this feature produces — $0.49 across 3
-  // rows) and `-weekly-synthesis` ($0.20). Both are live Claude spend that
-  // REDDIT_INTEL_CAP_USD was supposed to bound and did not.
-  //
-  // `reddit-intel-truncated` is deliberately EXCLUDED: it is a $0 diagnostic
-  // marker, so summing it changes nothing, and leaving it out keeps this
-  // list meaning "things that cost money".
+  // Reddit Intel: aggregate today's spend across every reddit-intel-* Claude
+  // tag + competitor-intel-extract. Over REDDIT_INTEL_CAP_USD, brake the
+  // whole pipeline for 24h.
   const redditIntelThresholdUsd = envReads.REDDIT_INTEL_CAP_USD.value;
-  const redditIntelCost = top
-    .filter(
-      (t) =>
-        t.feature === "reddit-intel-classify" ||
-        t.feature === "reddit-intel-classify-retry" ||
-        t.feature === "reddit-intel-embed" ||
-        t.feature === "reddit-intel-name-themes" ||
-        t.feature === "reddit-intel-weekly-synthesis" ||
-        // Arthur's Take stage-2 generation. Without this line the tag is
-        // unmetered and REDDIT_INTEL_CAP_USD cannot see the spend at all —
-        // the take-writer's own comment claiming it is capped would be false.
-        t.feature === "reddit-intel-take" ||
-        t.feature === "competitor-intel-extract",
-    )
-    .reduce((sum, t) => sum + t.cost, 0);
+  const redditIntelCost = brakeSpend(top, "reddit_intel");
 
   // Phone Footprint runs Vonage NI v2 ($0.04) + CAMARA SIM Swap ($0.04) +
   // CAMARA Device Swap ($0.04) per paid-tier refresh = ~$0.12/lookup. Vonage
@@ -224,10 +202,7 @@ export async function GET(req: Request) {
   // feature='phone_footprint') for the brake calculation. Cap tighter than
   // the per-feature plan ($5/day) — at 1k DAU a runaway refresh loop could
   // rack up Vonage spend in minutes.
-  // The telemetry half is `.filter().reduce()`, not `.find()`, for the same
-  // reason as charity_check: daily_cost_summary groups by
-  // (day, feature, provider), so a multi-provider feature yields multiple rows
-  // and `.find()` silently keeps only the first. It sums to 0 today —
+  // The telemetry half sums to 0 today —
   // phone-footprint is mothballed (NORTH_STAR.md) behind
   // NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER and has written zero cost_telemetry
   // rows ever — so this is pre-emptive rather than a live fix.
@@ -236,43 +211,24 @@ export async function GET(req: Request) {
   // (telco_api_usage, ~$0.12/lookup), so this guard is live even while the
   // telemetry side is empty. Deleting it would remove a working control.
   const phoneFootprintThresholdUsd = envReads.PHONE_FOOTPRINT_CAP_USD.value;
-  const phoneFootprintTelemetryCost = top
-    .filter((t) => t.feature === "phone_footprint")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const phoneFootprintTelemetryCost = brakeSpend(top, "phone_footprint");
   const phoneFootprintCost = vonageCost + phoneFootprintTelemetryCost;
 
   // Charity Check — v0.1 has zero marginal external cost (ACNC is a local
   // Postgres mirror, ABR is free + Redis-cached). The brake exists ahead
   // of v0.2's image OCR (Claude Vision ~$0.002–$0.01/image) so the
   // threshold is wired before the spend appears. Default $5/day matches
-  // the per-feature pattern used elsewhere.
-  //
-  // `.filter().reduce()`, not `.find()`: `daily_cost_summary` groups by
-  // (day, feature, provider), so a feature with more than one provider
-  // produces more than one row and `.find()` silently returns only the
-  // first. charity_check already has two (`composite`, `voyage`), so the
-  // brake has been under-counting live — it just has not mattered yet
-  // because lifetime spend is $0.00. It would matter the day OCR ships.
+  // the per-feature pattern used elsewhere. It has two providers
+  // (`composite`, `voyage`) — why brakeSpend sums rather than `.find()`s.
   const charityCheckThresholdUsd = envReads.CHARITY_CHECK_CAP_USD.value;
-  const charityCheckCost = top
-    .filter((t) => t.feature === "charity_check")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const charityCheckCost = brakeSpend(top, "charity_check");
 
-  // Shop Signal — APIVoid Site Trustworthiness paid feed. Same multi-tag
-  // aggregation as Reddit Intel: the headline `shop_signal` tag carries the
-  // per-call cost; the `-error` / `-overage` tags are $0 diagnostics, summed
-  // in for tag-drift resilience. Cap defaults to $15/day (~A$22.50) — see
+  // Shop Signal — APIVoid Site Trustworthiness paid feed. Cap defaults to
+  // $15/day (~A$22.50) — see
   // docs/ops/shop-signal-config.md §3. Engaging this brake pauses only the
   // paid feed; the free Stage-0 detector keeps running.
   const shopSignalThresholdUsd = envReads.SHOP_SIGNAL_CAP_USD.value;
-  const shopSignalCost = top
-    .filter(
-      (t) =>
-        t.feature === "shop_signal" ||
-        t.feature === "shop-signal-apivoid-error" ||
-        t.feature === "shop-signal-apivoid-overage",
-    )
-    .reduce((sum, t) => sum + t.cost, 0);
+  const shopSignalCost = brakeSpend(top, "shop_signal");
 
   // Shop Signal reviews — the paid Claude language pass over sampled review
   // text (the free review fetch logs $0 under the same tag). Separate cap from
@@ -280,43 +236,17 @@ export async function GET(req: Request) {
   // review pass, and vice-versa. Engaging this brake pauses only the LLM leg;
   // the free deterministic distribution check keeps running. Default $5/day.
   const shopSignalReviewsThresholdUsd = envReads.REVIEWS_LLM_CAP_USD.value;
-  const shopSignalReviewsCost = top
-    .filter(
-      (t) =>
-        t.feature === "shop_signal_reviews" ||
-        t.feature === "shop-signal-reviews-error",
-    )
-    .reduce((sum, t) => sum + t.cost, 0);
+  const shopSignalReviewsCost = brakeSpend(top, "shop_signal_reviews");
 
-  // Clone-watch outreach — aggregate across 8 sub-features:
-  //   Netcraft submit + poll, brand notify, weekly digest,
-  //   urlscan + urlscan rescan,
-  //   Haiku pre-classifier (PR-D2, #498) + its `_error` diagnostic row.
-  //
-  // Engaging this brake pauses ALL clone-watch outreach activity for 24h;
-  // the upstream Layer 0 NRD ingest (shopfront_clone_watch) keeps running.
-  // urlscan + urlscan_rescan added per ultrareview F6 (PR #432).
-  // preclassify + preclassify_error added per local-ultrareview F1 + F5
-  // (PR-H, 2026-05-28) — wires the Haiku spend (real $) + the error
-  // diagnostic ($0, surfaces in health-digest) into the shared brake.
+  // Clone-watch outreach — brand notify, weekly digest, urlscan and the
+  // pre-classifier (Haiku + Jev). Engaging this brake pauses ALL clone-watch
+  // outreach activity for 24h; the upstream Layer 0 NRD ingest
+  // (shopfront_clone_watch) keeps running. The Netcraft submit/poll and
+  // urlscan-rescan tags were dropped 2026-09-24: their lanes were deleted and
+  // nothing has written them since.
   const shopfrontCloneOutreachThresholdUsd =
     envReads.SHOPFRONT_CLONE_OUTREACH_CAP_USD.value;
-  const shopfrontCloneOutreachCost = top
-    .filter(
-      (t) =>
-        t.feature === "shopfront_clone_submit_netcraft" ||
-        t.feature === "shopfront_clone_notify_brand" ||
-        t.feature === "shopfront_clone_weekly_digest" ||
-        t.feature === "shopfront_clone_poll_netcraft" ||
-        t.feature === "shopfront_clone_urlscan" ||
-        t.feature === "shopfront_clone_urlscan_rescan" ||
-        t.feature === "shopfront_clone_preclassify" ||
-        t.feature === "shopfront_clone_preclassify_error" ||
-        // Jev shadow lane (v311) — same fn, same brake.
-        t.feature === "shopfront_clone_preclassify_jev" ||
-        t.feature === "shopfront_clone_preclassify_jev_error",
-    )
-    .reduce((sum, t) => sum + t.cost, 0);
+  const shopfrontCloneOutreachCost = brakeSpend(top, "shopfront_clone_outreach");
 
   // Clone-watch Layer 0 (NRD lexical sweep) — separate aggregate from
   // shopfront_clone_outreach because the cost drivers are different
@@ -326,9 +256,7 @@ export async function GET(req: Request) {
   // per #412 Sprint 1; raise when Phase A spend lands.
   const shopfrontCloneWatchThresholdUsd =
     envReads.SHOPFRONT_CLONE_WATCH_CAP_USD.value;
-  const shopfrontCloneWatchCost = top
-    .filter((t) => t.feature === "shopfront_clone_watch")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const shopfrontCloneWatchCost = brakeSpend(top, "shopfront_clone_watch");
 
   // Voyage embedding consumers (cron-hardening #519 H4). Cost tags use
   // hyphens (news-intel-embed, scam-report-embed); the brake KEYS use
@@ -336,14 +264,10 @@ export async function GET(req: Request) {
   // underscore-key split as reddit_intel. The Inngest functions call
   // isFeatureBraked("<underscore key>") at handler entry.
   const newsIntelEmbedThresholdUsd = envReads.NEWS_INTEL_EMBED_CAP_USD.value;
-  const newsIntelEmbedCost = top
-    .filter((t) => t.feature === "news-intel-embed")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const newsIntelEmbedCost = brakeSpend(top, "news_intel_embed");
 
   const scamReportEmbedThresholdUsd = envReads.SCAM_REPORT_EMBED_CAP_USD.value;
-  const scamReportEmbedCost = top
-    .filter((t) => t.feature === "scam-report-embed")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const scamReportEmbedCost = brakeSpend(top, "scam_report_embed");
 
   // Bot scam-analysis spend — single `bot_analyze` tag emitted by
   // analyzeForBot (packages/bot-core/src/analyze.ts) on every billable
@@ -351,25 +275,19 @@ export async function GET(req: Request) {
   // analyzeForBot throw BotAnalysisPausedError; handlers fall back to a
   // "try again shortly" reply.
   const botAnalyzeThresholdUsd = envReads.BOT_ANALYZE_CAP_USD.value;
-  const botAnalyzeCost = top
-    .filter((t) => t.feature === "bot_analyze")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const botAnalyzeCost = brakeSpend(top, "bot_analyze");
 
   // Hive AI image scans — single `hive_ai` tag shared by every checkHiveAI
   // call site (extension analyze-ad today; extension image-check next), so
   // one brake covers the vendor regardless of which surface drove the spend.
   const hiveAiThresholdUsd = envReads.HIVE_AI_CAP_USD.value;
-  const hiveAiCost = top
-    .filter((t) => t.feature === "hive_ai")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const hiveAiCost = brakeSpend(top, "hive_ai");
 
   // Extension image-check vision pass (Claude Haiku, feature tag
   // extension_image_check) — separate ceiling from the hive_ai vendor brake.
   const extensionImageCheckThresholdUsd =
     envReads.EXTENSION_IMAGE_CHECK_CAP_USD.value;
-  const extensionImageCheckCost = top
-    .filter((t) => t.feature === "extension_image_check")
-    .reduce((sum, t) => sum + t.cost, 0);
+  const extensionImageCheckCost = brakeSpend(top, "extension_image_check");
 
   let brakeSet = false;
   let redditBrakeSet = false;
