@@ -173,9 +173,16 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     expectEvery: 26 * H,
     enabled: () =>
       featureFlags.shopfrontCloneOutreach && featureFlags.cloneLifecycleReconcile,
-    consecutive: 3,
-    shape: "uuids=0 on every recent run",
-    silentZero: (o) => n(o, "uuids") === 0,
+    consecutive: 1,
+    // Absence only (2026-09-24). "uuids=0 three runs running" was written when
+    // every submission was re-read daily; since v316's unchanged-verdict
+    // backoff (72 h) and v284's ~1 submission/day, an empty worklist is the
+    // NORMAL quiet state (day 1: 10:00 run found 0, correctly) and the check
+    // would have paged every few days. The failure it stood in for — a broken
+    // worklist read — now throws and writes a Lane error row (PR B, #1188),
+    // which the digest reports directly; absence still catches a dead Lane.
+    shape: "(absence only — worklist read failures surface as Lane errors)",
+    silentZero: () => false,
   },
   "shopfront-nrd-daily-ingest": {
     expectEvery: 26 * H,
