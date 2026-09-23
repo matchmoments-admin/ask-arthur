@@ -59,7 +59,6 @@ Plans/decisions: `docs/plans/clone-watch-deepening-2026-09-23.md`,
 - **`.au` sourcing (#772)** — bank counts remain generic-TLD lower bounds (disclosed everywhere via `CoverageNote`).
 - **Registrar coverage** — 59% → climbing ~60/day via enrichment of unscanned rows (35-day window).
 - **fp-cluster-digest has no input** — no FP triage since 09-04 while ~868 alerts pend; decide whether auto-parked rows count as FP or retire the lane.
-- **`cost-daily-check/route.ts`** still filters the dead feature `shopfront_clone_submit_netcraft` (harmless).
 - **Preclassify batch size** is capped at 5 by the Inngest plan; a plan upgrade could raise it (change the named constant; `inngestBatchLimit.test.ts` guards it).
 
 ## 5. Traps (cost real time this session)

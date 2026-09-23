@@ -276,18 +276,16 @@ does the insert (the `analyze-cost.ts` pattern). Shipped shape:
 | `shop-signal-apivoid-error` | `apivoid`  | `site-trust`         | rare      | $0 diagnostic row when an attempted APIVoid call genuinely failed (missing key, bad host, HTTP error, timeout). The `metadata.reason` field carries the failure reason. A by-design **brake** skip writes **no** row — it is the system working correctly, so it must not look like an APIVoid error in the health digest (GitHub #349, F-B). |
 | `shop-signal-enrich-error`  | `inngest`  | `shop-signal-enrich` | rare      | $0 diagnostic row written by the `shop-signal-enrich` Inngest `onFailure` handler when the enrichment exhausts its retries. Surfaces a retry-exhausted Deep Shop Check in the daily health digest (the `feature LIKE '%error%'` filter) instead of only the logs (GitHub #349, F4).                                                           |
 
-(The `cost-daily-check` brake aggregator also enumerates a
-`shop-signal-apivoid-overage` tag for forward-compat; the deep check
-does not currently emit it — a 402/quota error falls into the
-`shop-signal-apivoid-error` row.)
+A 402/quota error falls into the `shop-signal-apivoid-error` row; there is
+no separate overage tag. (The brake aggregator enumerated a
+`shop-signal-apivoid-overage` tag "for forward-compat" from #319 until
+2026-09-24; nothing ever wrote it, so it was dropped.)
 
-The brake-aggregator filter (live since #319) uses exact-match
-enumeration matching the Reddit Intel pattern in
-`apps/web/app/api/cron/cost-daily-check/route.ts`:
-`top.filter(t => t.feature === 'shop_signal' || t.feature === 'shop-signal-apivoid-error' || t.feature === 'shop-signal-apivoid-overage')`.
-All three tags feed into the daily cap calculation but only the first
-carries non-zero cost; including the diagnostic tags future-proofs
-against tag drift.
+The tags the brake sums are declared once in `apps/web/lib/cost-brakes.ts`
+(`BRAKE_SPEND_FEATURES.shop_signal`: `shop_signal` + the $0
+`shop-signal-apivoid-error` diagnostic); `cost-daily-check` reads that list,
+and `costBrakeRegistry.test.ts` fails if a listed tag has no writer. Only the
+first tag carries non-zero cost.
 
 ---
 
