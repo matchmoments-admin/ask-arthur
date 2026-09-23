@@ -63,6 +63,21 @@ describe("clone-watch lane roster", () => {
     }
   });
 
+  // An absence watch on a misspelt or renamed id never matches a function, so
+  // it silently stops counting that function as watched (the coverage test
+  // above then passes only if something else covers it) while the digest
+  // keeps paging on a lane that cannot exist. Exact id, like EXEMPT: the
+  // coverage set uses `w.lane` unsplit, so a `<fnId>/<sub>` here would not
+  // count either.
+  // Go-red (2026-09-23): append a watch { lane: "shopfront-clone-ghost" } →
+  // ONLY this test fails (the coverage test stays green — the gap it closes).
+  it("every absence watch names a real Inngest function", () => {
+    expect(ABSENCE_WATCHES.length).toBeGreaterThan(0);
+    for (const w of ABSENCE_WATCHES) {
+      expect(all, `absence watch ${w.lane} names no Inngest function`).toContain(w.lane);
+    }
+  });
+
   it("every roster lane has a health shape and vice versa", () => {
     expect(Object.keys(LANE_SHAPES).sort()).toEqual(Object.keys(LANES).sort());
   });

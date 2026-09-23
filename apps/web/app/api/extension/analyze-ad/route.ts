@@ -3,7 +3,8 @@ import { z } from "zod";
 import { Redis } from "@upstash/redis";
 import { waitUntil } from "@vercel/functions";
 import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
-import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { extractURLs } from "@askarthur/scam-engine/safebrowsing";
+import { checkAnalyzeUrlReputation } from "@askarthur/scam-engine/first-party-url-reputation";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { mergeVerdict, type DeepfakeSignal } from "@askarthur/core-analysis";
 import { collectImageOriginRedFlags } from "@askarthur/scam-engine/image-origin-flags";
@@ -125,7 +126,14 @@ export async function POST(req: NextRequest) {
     // 4. Phase 1: text (Claude) + URL reputation in parallel (always run)
     const [textResult, urlResult] = await Promise.allSettled([
       analyzeWithClaude(adText),
-      landingUrl ? checkURLReputation(extractURLs(landingUrl)) : Promise.resolve([]),
+      // The ONE analyze URL-reputation seam (GSB/VT + First-party URL
+      // Reputation), same as /api/analyze and runAnalysisCore.
+      landingUrl
+        ? checkAnalyzeUrlReputation(extractURLs(landingUrl), {
+            requestId: auth.requestId ?? undefined,
+            source: "api/extension/analyze-ad",
+          })
+        : Promise.resolve([]),
     ]);
 
     const analysis = textResult.status === "fulfilled" ? textResult.value : null;

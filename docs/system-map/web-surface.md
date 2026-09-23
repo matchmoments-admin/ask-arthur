@@ -146,7 +146,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/admin/brand-register`     | Brand 360 — one row per canonical brand across reported-scams, Reddit-intel and clone-watch. Its `Curation` column is read-only; decisions happen at `/admin/brand-candidates`.                                                                                                                                                                                                                                                                                                              |
 | `/admin/clone-watch`        | Clone-watch triage queue (FP/TP/Investigate) + per-brand history + Netcraft takedown stats + urlscan classification chips                                                                                                                                                                                                                                                                                                                                                                    |
 | `/admin/onward-reports`     | Pre-approve regulator submissions                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `/admin/newsletter` | Arthur’s Watch: source-backed drafts, editing, saved preview, revision approval, operator-only test and explicit subscriber send. API: `/api/admin/newsletter` (admin auth; same-origin POST). |
+| `/admin/newsletter`         | Arthur’s Watch: source-backed drafts, editing, saved preview, revision approval, operator-only test and explicit subscriber send. API: `/api/admin/newsletter` (admin auth; same-origin POST).                                                                                                                                                                                                                                                                                               |
 | `/admin/email-studio`       | Preview all outbound email templates + edit their prose "copy slots" (markdown, DB-backed `email_copy`); preview / test-send-to-self / save. APIs: `/api/admin/email-studio/{preview,save,test-send}`. v167.                                                                                                                                                                                                                                                                                 |
 | `/admin/vulnerabilities`    | Vuln-intel review                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `/admin/blog`               | Blog post admin — status/category edits + "Further reading" link curation. **The only blog publish path** since Ghost's decommission (2026-08-07).                                                                                                                                                                                                                                                                                                                                           |
@@ -192,24 +192,24 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Extension integration (open, ECDSA-signed install requests)
 
-| Route                                         | Method | Purpose                                                                  |
-| --------------------------------------------- | ------ | ------------------------------------------------------------------------ |
-| `/api/extension/register`                     | POST   | Register install (Turnstile-gated; one-shot)                             |
-| `/api/extension/heartbeat`                    | POST   | Keep-alive + threat-DB version sync                                      |
-| `/api/extension/analyze`                      | POST   | Full analysis from extension                                             |
-| `/api/extension/analyze-ad`                   | POST   | Facebook ad scan (text + landing + image)                                |
-| `/api/extension/analyze-image`                | POST   | Right-click image AI/deepfake check (`FF_IMAGE_CHECK`, tiered daily cap) |
-| `/api/extension/check-ad`                     | POST   | Batch ad-safety lookup                                                   |
-| `/api/extension/flag-ad`                      | POST   | Community ad flag                                                        |
-| `/api/extension/url-check`                    | POST   | Real-time URL reputation (navigation guard)                              |
-| `/api/extension/report-email`                 | POST   | Email header analysis                                                    |
-| `/api/extension/site-audit`                   | POST   | Website security-header audit                                            |
-| `/api/extension/extension-security/analyze`   | POST   | Extension code / manifest scan                                           |
-| `/api/extension/extension-security/threat-db` | GET    | Malware-signature DB (extension fetch)                                   |
-| `/api/extension/subscription`                 | POST   | Subscription tier lookup                                                 |
-| `/api/extension/link-token`                   | POST   | Mint single-use account-link token (`FF_EXTENSION_BILLING`)              |
-| `/api/extension/link`                         | POST   | Consume link token, associate install↔user (session-authed)              |
-| `/api/extension/checkout`                     | POST   | Extension Pro Stripe checkout (session-authed, linked installs only)     |
+| Route                                         | Method | Purpose                                                                   |
+| --------------------------------------------- | ------ | ------------------------------------------------------------------------- |
+| `/api/extension/register`                     | POST   | Register install (Turnstile-gated; one-shot)                              |
+| `/api/extension/heartbeat`                    | POST   | Keep-alive + threat-DB version sync                                       |
+| `/api/extension/analyze`                      | POST   | Full analysis from extension                                              |
+| `/api/extension/analyze-ad`                   | POST   | Facebook ad scan (text + landing + image)                                 |
+| `/api/extension/analyze-image`                | POST   | Right-click image AI/deepfake check (`FF_IMAGE_CHECK`, tiered daily cap)  |
+| `/api/extension/check-ad`                     | POST   | Batch ad-safety lookup                                                    |
+| `/api/extension/flag-ad`                      | POST   | Community ad flag                                                         |
+| `/api/extension/url-check`                    | POST   | Real-time URL reputation (navigation guard) — `checkAnalyzeUrlReputation` |
+| `/api/extension/report-email`                 | POST   | Email header analysis                                                     |
+| `/api/extension/site-audit`                   | POST   | Website security-header audit                                             |
+| `/api/extension/extension-security/analyze`   | POST   | Extension code / manifest scan                                            |
+| `/api/extension/extension-security/threat-db` | GET    | Malware-signature DB (extension fetch)                                    |
+| `/api/extension/subscription`                 | POST   | Subscription tier lookup                                                  |
+| `/api/extension/link-token`                   | POST   | Mint single-use account-link token (`FF_EXTENSION_BILLING`)               |
+| `/api/extension/link`                         | POST   | Consume link token, associate install↔user (session-authed)               |
+| `/api/extension/checkout`                     | POST   | Extension Pro Stripe checkout (session-authed, linked installs only)      |
 
 ### Security audits (open, max 30–60s)
 
@@ -377,23 +377,23 @@ _`/api/admin/stripe/invoice` was deleted 2026-08-07 (admin-console map #939, ver
 
 ### Cron routes (Vercel signature)
 
-| Route                               | Schedule       | Purpose                              |
-| ----------------------------------- | -------------- | ------------------------------------ |
+| Route                               | Schedule       | Purpose                               |
+| ----------------------------------- | -------------- | ------------------------------------- |
 | `/api/cron/weekly-email`            | `0 14 * * 1`   | Prepare newsletter draft; manual send |
-| `/api/cron/nurture`                 | `0 23 * * *`   | B2B leads nurture sequence           |
-| `/api/cron/bot-queue-sweep`         | `0 */6 * * *`  | Bot queue safety-net                 |
-| `/api/cron/bot-queue-cleanup`       | `0 4 * * *`    | Purge old queue entries              |
-| `/api/cron/cost-daily-check`        | `0 */6 * * *`  | Check spend against feature brakes   |
-| `/api/cron/cost-weekly-digest`      | `0 22 * * 0`   | Weekly WoW cost digest               |
-| `/api/cron/vuln-retention`          | `0 3 * * *`    | Prune vulnerability_detections >180d |
-| `/api/cron/scam-reports-retention`  | `30 3 * * *`   | Archive + prune scam_reports         |
-| `/api/cron/ensure-partitions`       | `0 2 * * *`    | Create next-month partitions         |
-| `/api/cron/reddit-intel-trigger`    | `0 8 * * *`    | Fire reddit-intel-daily Inngest      |
-| `/api/cron/reddit-intel-retention`  | `30 4 * * *`   | Prune reddit_processed_posts         |
-| `/api/cron/feedback-digest`         | `0 9 * * *`    | Compile feedback triage queue        |
-| `/api/cron/health-digest`           | `0 22 * * *`   | Daily health metrics + errors        |
-| `/api/cron/pg-stuck-query-watchdog` | `*/5 * * * *`  | Stuck-query watchdog                 |
-| `/api/cron/scraper-brake-alert`     | `*/15 * * * *` | Feature-brake alerter                |
+| `/api/cron/nurture`                 | `0 23 * * *`   | B2B leads nurture sequence            |
+| `/api/cron/bot-queue-sweep`         | `0 */6 * * *`  | Bot queue safety-net                  |
+| `/api/cron/bot-queue-cleanup`       | `0 4 * * *`    | Purge old queue entries               |
+| `/api/cron/cost-daily-check`        | `0 */6 * * *`  | Check spend against feature brakes    |
+| `/api/cron/cost-weekly-digest`      | `0 22 * * 0`   | Weekly WoW cost digest                |
+| `/api/cron/vuln-retention`          | `0 3 * * *`    | Prune vulnerability_detections >180d  |
+| `/api/cron/scam-reports-retention`  | `30 3 * * *`   | Archive + prune scam_reports          |
+| `/api/cron/ensure-partitions`       | `0 2 * * *`    | Create next-month partitions          |
+| `/api/cron/reddit-intel-trigger`    | `0 8 * * *`    | Fire reddit-intel-daily Inngest       |
+| `/api/cron/reddit-intel-retention`  | `30 4 * * *`   | Prune reddit_processed_posts          |
+| `/api/cron/feedback-digest`         | `0 9 * * *`    | Compile feedback triage queue         |
+| `/api/cron/health-digest`           | `0 22 * * *`   | Daily health metrics + errors         |
+| `/api/cron/pg-stuck-query-watchdog` | `*/5 * * * *`  | Stuck-query watchdog                  |
+| `/api/cron/scraper-brake-alert`     | `*/15 * * * *` | Feature-brake alerter                 |
 
 Full timetable, cron-route handlers, and Inngest cross-references in [background-workers.md](./background-workers.md).
 

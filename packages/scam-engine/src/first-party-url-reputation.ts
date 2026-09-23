@@ -253,9 +253,19 @@ export function mergeUrlReputation(
 /**
  * The analyze pipeline's URL reputation: GSB + VirusTotal and, when
  * FF_ANALYZE_FIRST_PARTY_URLS is on, our own threat URLs — in parallel, merged
- * per URL. The one call site for both the web route and runAnalysisCore
- * (extension + bots), so the surfaces cannot drift. Never throws on the
- * first-party half.
+ * per URL. The one URL-reputation call for every surface that reads
+ * `scam_urls` as a reputation signal: `/api/analyze`, runAnalysisCore
+ * (extension `/analyze` + bots), `/api/extension/analyze-ad` and
+ * `/api/extension/url-check` — so their keys and verified-source predicate
+ * cannot drift. Pinned per surface by apps/web/__tests__/
+ * {analyzeFirstPartyUrls,extensionAnalyzeAdFirstParty,extensionUrlCheckFirstParty}
+ * and analyze-core-first-party. NOT routed through here (known, not hidden):
+ * `/api/extension/analyze-checkout`'s `scamUrlListed` is a host-presence
+ * check over EVERY source (bulk feeds included, confidence ignored — see its
+ * route comment), scored by checkout-guard-score; it therefore also counts
+ * report-driven rows. The B2B/mobile lookup routes (`/api/v1/threats/*`,
+ * `/api/scam-urls/lookup`, `/api/mobile/threat-snapshot`) return rows, they
+ * do not escalate a verdict. Never throws on the first-party half.
  */
 export async function checkAnalyzeUrlReputation(
   urls: string[],

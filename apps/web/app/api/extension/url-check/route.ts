@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createServiceClient } from "@askarthur/supabase/server";
 import { normalizeURL } from "@askarthur/scam-engine/url-normalize";
-import { checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { checkAnalyzeUrlReputation } from "@askarthur/scam-engine/first-party-url-reputation";
 import { resolveRedirectChain } from "@askarthur/scam-engine/redirect-resolver";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -50,7 +49,6 @@ export async function POST(req: NextRequest) {
 
     // 4. Resolve redirects when feature flag is on
     let redirectInfo: { finalUrl: string; hopCount: number; isShortened: boolean } | undefined;
-    let finalNormalized: string | undefined;
     if (featureFlags.redirectResolve) {
       const chain = await resolveRedirectChain(parsed.data.url);
       if (chain.finalUrl !== chain.originalUrl) {
@@ -59,75 +57,39 @@ export async function POST(req: NextRequest) {
           hopCount: chain.hopCount,
           isShortened: chain.isShortened,
         };
-        const finalNorm = normalizeURL(chain.finalUrl);
-        if (finalNorm) {
-          finalNormalized = finalNorm.normalized;
-        }
       }
     }
 
-    // 5. Check scam_urls table in Supabase (original + final URL)
-    let found = false;
-    let threatLevel: "LOW" | "MEDIUM" | "HIGH" | undefined;
-    let reportCount: number | undefined;
-
-    const supabase = createServiceClient();
-    if (supabase) {
-      const urlsToCheck = [norm.normalized];
-      if (finalNormalized && finalNormalized !== norm.normalized) {
-        urlsToCheck.push(finalNormalized);
-      }
-
-      for (const normalizedUrl of urlsToCheck) {
-        const { data } = await supabase
-          .from("scam_urls")
-          .select("confidence_level, report_count")
-          .eq("normalized_url", normalizedUrl)
-          .eq("is_active", true)
-          .single();
-
-        if (data) {
-          found = true;
-          threatLevel = data.confidence_level;
-          reportCount = data.report_count;
-          break;
-        }
-      }
+    // 5. URL reputation through the ONE analyze seam: GSB + VirusTotal and,
+    //    when FF_ANALYZE_FIRST_PARTY_URLS is on, First-party URL Reputation —
+    //    in parallel, merged per URL. This route used to query `scam_urls`
+    //    itself (is_active only, exact URL), which trusted report-driven rows
+    //    (upsert_scam_url scores four user reports 'high' — abuse-reachable)
+    //    and missed `/login` on a clone's host-root row. The module owns the
+    //    lookup keys AND the verified-source predicate; never re-query here.
+    const urlsToCheck = [parsed.data.url];
+    if (redirectInfo && redirectInfo.finalUrl !== parsed.data.url) {
+      urlsToCheck.push(redirectInfo.finalUrl);
     }
+    const results = await checkAnalyzeUrlReputation(urlsToCheck, {
+      requestId: auth.requestId ?? undefined,
+      source: "api/extension/url-check",
+    });
 
-    // 6. If not found in DB, check URL reputation (Safe Browsing + VirusTotal)
-    let safeBrowsing: { isMalicious: boolean; sources: string[] } | undefined;
-    if (!found) {
-      const urlsToCheck = [parsed.data.url];
-      if (redirectInfo && redirectInfo.finalUrl !== parsed.data.url) {
-        urlsToCheck.push(redirectInfo.finalUrl);
-      }
-      const results = await checkURLReputation(urlsToCheck);
-      for (const result of results) {
-        if (result.isMalicious) {
-          safeBrowsing = {
-            isMalicious: true,
-            sources: result.sources,
-          };
-          found = true;
-          threatLevel = "HIGH";
-          break;
-        }
-      }
-      // If none malicious, use first result
-      if (!safeBrowsing && results.length > 0 && results[0]) {
-        safeBrowsing = {
-          isMalicious: results[0].isMalicious,
-          sources: results[0].sources,
-        };
-      }
-    }
+    // 6. The first malicious result wins; otherwise the first (clean) result
+    //    is passed through so the popup can show what was checked.
+    const hit = results.find((r) => r.isMalicious);
+    const shown = hit ?? results[0];
+    const found = hit !== undefined;
+    const safeBrowsing = shown
+      ? { isMalicious: shown.isMalicious, sources: shown.sources }
+      : undefined;
 
-    // 7. Return response
+    // 7. Return response. `reportCount` is no longer set: report counts are
+    //    not a reputation signal here (see step 5).
     const response: ExtensionURLCheckResponse = {
       found,
-      ...(threatLevel && { threatLevel }),
-      ...(reportCount && { reportCount }),
+      ...(found && { threatLevel: "HIGH" as const }),
       domain: norm.domain,
       ...(safeBrowsing && { safeBrowsing }),
       ...(redirectInfo && { redirect: redirectInfo }),
