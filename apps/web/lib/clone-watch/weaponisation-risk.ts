@@ -178,7 +178,15 @@ export function computeWeaponisationRisk(
   if (i.auNameMatches === false) raw += AU_NAME_MISMATCH_POINTS;
 
   const score = Math.min(100, Math.max(0, Math.round(raw)));
-  const band =
-    score >= BAND_CRITICAL ? "critical" : score >= BAND_ELEVATED ? "elevated" : "low";
-  return { score, band };
+  return { score, band: riskBand(score) };
+}
+
+/** The ONE score → band mapping. Callers that kept only `.score` (the recheck
+ *  lane's band histogram) re-derive the band here instead of re-typing 70/40. */
+export function riskBand(score: number): WeaponisationRisk["band"] {
+  return score >= BAND_CRITICAL
+    ? "critical"
+    : score >= BAND_ELEVATED
+      ? "elevated"
+      : "low";
 }

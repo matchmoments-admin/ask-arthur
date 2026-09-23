@@ -173,6 +173,12 @@ export interface LaneOutcome {
     /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
      *  absent on quiet runs and rows written before it existed. */
     dns_skipped?: number;
+    /** urlscan 429s — our quota, not a failure; rows left unstamped to retry
+     *  first. Absent on quiet runs and rows before 2026-09-24 (when this lane
+     *  still folded 429s into submit_failed). */
+    rate_limited?: number;
+    /** Candidates the wall-clock budget stopped before; they re-present. */
+    unreached?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
@@ -183,6 +189,8 @@ export interface LaneOutcome {
     dns_skipped?: number;
     rate_limited: number;
     dormant_retired: number;
+    /** Candidates the wall-clock budget stopped before (2026-09-24). */
+    unreached?: number;
   };
   "shopfront-clone-urlscan-retrieve": {
     classified: number;

@@ -163,3 +163,84 @@ export async function submitCloneCandidate(
     error: submission.error,
   };
 }
+
+/** What a batch of submits added up to. The ONE mapping from `SubmitOutcome`
+ *  to lane counters — the submit and recheck lanes used to keep their own, and
+ *  the recheck copy counted a 429 as a failure, so a quota day paged the
+ *  health digest as "silent zero" (2026-09-24). */
+export interface SubmitTally {
+  /** Submitted to urlscan, or classified by reputation when the submit failed. */
+  submitted: number;
+  /** urlscan 429 — OUR quota. Not a failure, row untouched, not in attemptedIds. */
+  rateLimited: number;
+  /** DNS precheck proved no host; no urlscan call. */
+  dnsSkipped: number;
+  /** Genuine submit failure, no client, or a thrown row. */
+  submitFailed: number;
+  reputationHits: number;
+  /** Every row the loop looked at EXCEPT a 429 — "we looked", which is what
+   *  the recheck cadence stamp records (see clone-watch-lifecycle-recheck). */
+  attemptedIds: number[];
+  /** Rows the budget stopped the loop before reaching; they re-present next run. */
+  unreached: number;
+}
+
+/**
+ * Submit candidates sequentially until `budget.expired()`. Runs INSIDE the
+ * caller's single budgeted step — it never awaits step.run per item, so the
+ * budget is in-step and a replay cannot reset the tally mid-loop. One row's
+ * throw is counted and logged via `onRowError`, never aborts the rest.
+ */
+export async function submitCandidateBatch(
+  candidates: readonly CloneCandidate[],
+  budget: { expired(): boolean },
+  opts: {
+    onRowError?: (id: number, err: unknown) => void;
+    submitOne?: (c: CloneCandidate) => Promise<SubmitOutcome>;
+  } = {},
+): Promise<SubmitTally> {
+  const submitOne = opts.submitOne ?? submitCloneCandidate;
+  const tally: SubmitTally = {
+    submitted: 0,
+    rateLimited: 0,
+    dnsSkipped: 0,
+    submitFailed: 0,
+    reputationHits: 0,
+    attemptedIds: [],
+    unreached: 0,
+  };
+  let reached = 0;
+  for (const c of candidates) {
+    if (budget.expired()) break;
+    reached++;
+    try {
+      const outcome = await submitOne({
+        id: c.id,
+        candidate_url: c.candidate_url,
+        candidate_domain: c.candidate_domain,
+      });
+      if (outcome.reputationMalicious) tally.reputationHits++;
+      switch (outcome.kind) {
+        case "submitted":
+        case "reputation_classified":
+          tally.submitted++;
+          break;
+        case "rate_limited":
+          tally.rateLimited++;
+          continue; // not attempted: leave it unstamped so it retries first
+        case "dns_no_host":
+          tally.dnsSkipped++;
+          break;
+        default:
+          tally.submitFailed++;
+      }
+      tally.attemptedIds.push(c.id);
+    } catch (err) {
+      tally.submitFailed++;
+      tally.attemptedIds.push(c.id);
+      opts.onRowError?.(c.id, err);
+    }
+  }
+  tally.unreached = candidates.length - reached;
+  return tally;
+}

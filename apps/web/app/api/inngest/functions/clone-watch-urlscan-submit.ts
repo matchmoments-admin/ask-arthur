@@ -6,7 +6,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import {
-  submitCloneCandidate,
+  submitCandidateBatch,
   type CloneCandidate,
 } from "@/lib/clone-watch/urlscan-submit-one";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
@@ -193,45 +193,20 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         step,
         "submit-batch",
         SUBMIT_WALL_CLOCK_MS,
-        async (budget) => {
-          let submitted = 0;
-          let submitFailed = 0;
-          let rateLimited = 0;
-          let dnsSkipped = 0;
-          let reputationHits = 0;
-          for (const row of candidates) {
-            if (budget.expired()) break;
-            try {
-              const outcome = await submitCloneCandidate(row);
-              if (outcome.reputationMalicious) reputationHits++;
-              if (
-                outcome.kind === "submitted" ||
-                outcome.kind === "reputation_classified"
-              ) {
-                submitted++;
-              } else if (outcome.kind === "rate_limited") {
-                // Counted apart from failures: a 429 is quota exhaustion, leaves the
-                // row untouched, and must not read as evidence about the URL. Before
-                // this it was folded into submitFailed and left no DB trace, so
-                // "has urlscan ever rate-limited us?" had no answer anywhere.
-                rateLimited++;
-              } else if (outcome.kind === "dns_no_host") {
-                dnsSkipped++;
-              } else {
-                submitFailed++;
-              }
-            } catch (err) {
-              submitFailed++;
+        async (budget) =>
+          // The outcome → counter mapping lives in submitCandidateBatch (one
+          // copy for this lane and the recheck lane). A 429 is counted apart
+          // from failures: quota exhaustion, row untouched, no evidence about
+          // the URL.
+          submitCandidateBatch(candidates, budget, {
+            onRowError: (alertId, err) =>
               logger.error("clone-watch urlscan submit: row failed", {
-                alertId: row.id,
+                alertId,
                 error: err instanceof Error ? err.message : String(err),
-              });
-            }
-          }
-          return { submitted, submitFailed, rateLimited, dnsSkipped, reputationHits };
-        },
+              }),
+          }),
       );
-      const { submitted, submitFailed, rateLimited, dnsSkipped, reputationHits } =
+      const { submitted, submitFailed, rateLimited, dnsSkipped, reputationHits, unreached } =
         batch;
 
       await step.run("log-cost", async () => {
@@ -248,6 +223,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             rate_limited: rateLimited,
             reputation_hits: reputationHits,
             dormant_retired: dormant,
+            unreached,
           },
         );
       });

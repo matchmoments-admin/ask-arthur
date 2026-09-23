@@ -121,9 +121,16 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     enabled: () =>
       featureFlags.shopfrontCloneRecheck && featureFlags.shopfrontCloneUrlscan,
     consecutive: 2,
-    shape: "pool>0 ∧ rechecked=0, or every recheck failed to submit",
+    shape:
+      "pool>0 ∧ rechecked=0 (not quota), or every recheck failed to submit",
+    // A 429 is urlscan quota, not a broken lane: an all-rate-limited run
+    // rechecks nothing by design (rows left unstamped to retry first), so it
+    // is excluded. Rows before 2026-09-24 carry no rate_limited (n() → 0) and
+    // judge exactly as before.
     silentZero: (o) =>
-      (n(o, "pool") > 0 && n(o, "rechecked") === 0) ||
+      (n(o, "pool") > 0 &&
+        n(o, "rechecked") === 0 &&
+        n(o, "rate_limited") === 0) ||
       (n(o, "rechecked") > 0 &&
         n(o, "submitted") === 0 &&
         n(o, "submit_failed") >= n(o, "rechecked")),
