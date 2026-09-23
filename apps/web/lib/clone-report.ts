@@ -25,6 +25,9 @@ export interface CloneReportView {
   /** "May 2026" */
   periodLabel: string;
   clones: CloneDetections;
+  /** When the report's per-domain statuses were read (ISO) — they are a
+   *  snapshot at preparation, not live, and the page says so. */
+  preparedAt: string | null;
 }
 
 interface StewardshipMetrics {
@@ -48,7 +51,7 @@ export const getCloneReportByToken = cache(
 
     const { data, error } = await sb
       .from("brand_stewardship_reports")
-      .select("brand_name, period_month, metrics")
+      .select("brand_name, period_month, metrics, prepared_at")
       .eq("share_token", token)
       .single();
     if (error || !data) return null;
@@ -66,6 +69,7 @@ export const getCloneReportByToken = cache(
       periodMonth,
       periodLabel: periodLabel(periodMonth),
       clones,
+      preparedAt: (data.prepared_at as string | null) ?? null,
     };
   },
 );

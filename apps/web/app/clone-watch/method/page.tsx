@@ -5,6 +5,7 @@
 // Deliberately factual and non-characterising, so it is the least #371-sensitive
 // of the owned-media pages. Still `noindex` until FF_CLONE_WATCH_PUBLIC is ON.
 
+import CoverageNote from "@/components/clone-watch/CoverageNote";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -57,11 +58,14 @@ export default function CloneWatchMethodPage() {
 
       <Section title="Scope">
         <p>
-          We match against a reference watch-list of roughly 50 Australian
-          retail, bank, telco, superannuation, and logistics brand names, plus a
-          small set of heavily-targeted global brands. The list is curated and
-          evolves; it is not exhaustive.
+          We match against a curated watch-list of roughly 290 brands —
+          Australian retail, bank, telco, superannuation, government and
+          logistics names plus heavily-targeted global brands. The list evolves
+          (each brand&apos;s coverage start is recorded, so month-on-month
+          comparisons only count brands covered for the whole period); it is
+          not exhaustive.
         </p>
+        <CoverageNote className="mt-3" />
       </Section>
 
       <Section title="How a domain is matched">

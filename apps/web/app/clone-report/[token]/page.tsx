@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import CoverageNote from "@/components/clone-watch/CoverageNote";
 import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
@@ -9,8 +10,10 @@ import {
   ICANN_COMPLAINT_URL,
 } from "@/lib/email/registrar-abuse";
 import {
+  SQUAT_DEFINITION,
   SQUAT_LABEL,
   formatRegistered,
+  safeAbuseEmail,
   squattingRows,
   squattingSummary,
   type SquatView,
@@ -22,7 +25,9 @@ const STATUS_STYLE: Record<SquatView, string> = {
   phishing: "bg-red-50 text-red-700",
   live: "bg-amber-50 text-amber-800",
   parked: "bg-slate-100 text-slate-700",
+  unverified: "bg-slate-50 text-slate-500",
   registered: "bg-slate-50 text-slate-500",
+  held_phishing: "bg-emerald-50 text-emerald-800",
   held: "bg-emerald-50 text-emerald-800",
   taken_down: "bg-teal-50 text-teal-800",
 };
@@ -57,7 +62,8 @@ export default async function CloneReportPage({ params }: PageProps) {
   const report = await getCloneReportByToken(token);
   if (!report) notFound();
 
-  const { brandName, periodLabel, clones } = report;
+  const { brandName, periodLabel, clones, preparedAt } = report;
+  const statusesAsOf = formatRegistered(preparedAt);
   const countrySlices = toSlices(clones.byCountry);
   const registrars = toSlices(clones.byRegistrar);
   const asns = toSlices(clones.byAsn);
@@ -201,6 +207,7 @@ export default async function CloneReportPage({ params }: PageProps) {
                 {rows.map((c) => {
                   const form =
                     registrarAbuseUrl(c.registrar) ?? ICANN_COMPLAINT_URL;
+                  const abuseEmail = safeAbuseEmail(c.abuseEmail);
                   return (
                     <tr
                       key={c.domain}
@@ -227,9 +234,9 @@ export default async function CloneReportPage({ params }: PageProps) {
                           "—"}
                       </td>
                       <td className="py-2 whitespace-nowrap">
-                        {c.abuseEmail && (
+                        {abuseEmail && (
                           <a
-                            href={`mailto:${c.abuseEmail}?subject=${encodeURIComponent(`Abuse report: ${c.domain} impersonating ${brandName}`)}`}
+                            href={`mailto:${abuseEmail}?subject=${encodeURIComponent(`Abuse report: ${c.domain} impersonating ${brandName}`)}`}
                             className="block font-semibold text-[#0F766E] hover:underline"
                           >
                             Email abuse →
@@ -257,17 +264,25 @@ export default async function CloneReportPage({ params }: PageProps) {
               list available on request.
             </p>
           )}
+          <dl className="mt-4 grid gap-1 text-xs leading-relaxed text-slate-500">
+            {summary.length > 0 &&
+              (Object.keys(SQUAT_LABEL) as SquatView[]).map((v) => (
+                <div key={v}>
+                  <dt className="inline font-semibold text-slate-600">
+                    {SQUAT_LABEL[v]}:
+                  </dt>{" "}
+                  <dd className="inline">{SQUAT_DEFINITION[v]}.</dd>
+                </div>
+              ))}
+          </dl>
           <p className="mt-3 text-xs leading-relaxed text-slate-400">
-            Status: <strong>Live phishing</strong> = our scan saw credential or
-            payment-harvesting content; <strong>Blocklisted</strong> = Netcraft
-            classified it malicious (browser blocklists act on this);{" "}
-            <strong>Suspended by registrar</strong> = the registry placed it on
-            hold; <strong>Parked / for sale</strong> = on a parking or
-            aftermarket nameserver. Registrant identities are redacted by
-            privacy services, so the registrar is the accountable party.
-            Coverage is newly registered generic-TLD domains; <code>.au</code>{" "}
-            registrations are not yet included.
+            Domains are those first detected in {periodLabel}; each
+            domain&apos;s status is a snapshot
+            {statusesAsOf ? ` taken ${statusesAsOf}` : ""}, not live.
+            Registrant identities are redacted by privacy services, so the
+            registrar is the accountable party.
           </p>
+          <CoverageNote className="mt-2" />
         </section>
 
         <p className="mt-10 border-t border-slate-200 pt-6 text-xs leading-relaxed text-slate-500">

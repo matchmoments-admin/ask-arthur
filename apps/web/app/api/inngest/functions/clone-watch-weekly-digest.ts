@@ -450,7 +450,7 @@ export function buildLinkedInDraft({
 
   const takedownLine =
     takedown && takedown.takedowns_total > 0
-      ? `${takedown.takedowns_total} domains browser-blocked via Netcraft — median time-to-takedown ${formatMinutes(takedown.median_minutes)}.`
+      ? `${takedown.takedowns_total} domains browser-blocked via Netcraft — median report→blocklisting ${formatMinutes(takedown.median_minutes)} (classification, not offline).`
       : null;
 
   return [

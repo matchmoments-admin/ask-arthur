@@ -37,13 +37,10 @@
  * `braked:true` until the next run overwrites it, which read as a live brake
  * for up to a day (the Sep 16–17 case).
  *
- * Lanes with NO per-run Outcome Row (notify-brand, notify-weaponised,
- * enforcement-*, reemergence, enrich-attribution, report-summary,
- * the digests, scan-one) cannot be watched from telemetry and are not listed —
- * listing them would be a guard that reads as protection. They are the
- * graduated ticket "every lane logs one outcome row per run". Preclassify
- * writes per-alert Claude rows, not a per-run outcome, and is watched for
- * absence only.
+ * Coverage is enforced, not described: __tests__/laneRoster.test.ts fails if a
+ * clone-watch function is neither in the roster, an absence watch, nor in its
+ * EXEMPT map with a reason (ADR-0025 amendment 2026-09-23). Preclassify writes
+ * per-alert vendor rows, not a per-run outcome, and is watched for absence.
  */
 
 import {
@@ -121,6 +118,8 @@ const H = 3_600_000;
 export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   "shopfront-clone-lifecycle-recheck": {
     expectEvery: 9 * H, // 6h cron + slack
+    enabled: () =>
+      featureFlags.shopfrontCloneRecheck && featureFlags.shopfrontCloneUrlscan,
     consecutive: 2,
     shape: "pool>0 ∧ rechecked=0, or every recheck failed to submit",
     silentZero: (o) =>
@@ -131,6 +130,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-urlscan-submit": {
     expectEvery: 26 * H, // daily 09:00
+    enabled: () =>
+      featureFlags.shopfrontCloneUrlscan,
     consecutive: 1,
     shape: "units>0 ∧ submitted=0 ∧ rate_limited=0",
     silentZero: (o) =>
@@ -140,6 +141,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-urlscan-retrieve": {
     expectEvery: 9 * H,
+    enabled: () =>
+      featureFlags.shopfrontCloneUrlscan,
     consecutive: 3,
     shape: "classified=0 while still_pending>0, or unnotified_weaponised>0",
     silentZero: (o) =>
@@ -148,6 +151,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-netcraft-issue": {
     expectEvery: 26 * H, // daily 11:00
+    enabled: () =>
+      featureFlags.shopfrontCloneOutreach && featureFlags.cloneNetcraftIssue,
     consecutive: 1,
     shape: "every uuid permanently rejected (the #1157 'not yet' shape)",
     silentZero: (o) =>
@@ -155,6 +160,10 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-netcraft-auto/resubmit": {
     expectEvery: 26 * H,
+    enabled: () =>
+      featureFlags.cloneNetcraftResubmit &&
+      featureFlags.shopfrontCloneSubmitNetcraft &&
+      featureFlags.shopfrontCloneOutreach,
     consecutive: 1,
     shape: "candidates>0 ∧ marked=0 ∧ deferred=0",
     silentZero: (o) =>
@@ -162,12 +171,16 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-netcraft-reconcile": {
     expectEvery: 26 * H,
+    enabled: () =>
+      featureFlags.shopfrontCloneOutreach && featureFlags.cloneLifecycleReconcile,
     consecutive: 3,
     shape: "uuids=0 on every recent run",
     silentZero: (o) => n(o, "uuids") === 0,
   },
   "shopfront-nrd-daily-ingest": {
     expectEvery: 26 * H,
+    enabled: () =>
+      featureFlags.shopfrontCloneWatch,
     consecutive: 1,
     shape: "domains_scanned=0, or every chunk failed",
     silentZero: (o) =>
@@ -177,6 +190,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "clone-watch-auto-triage": {
     expectEvery: 26 * H, // daily 13:00
+    enabled: () =>
+      featureFlags.cloneWatchAutoTriage,
     consecutive: 2,
     // The lane's job is to CLEAR the queue: park the weak tail, confirm the
     // strict one. A run that parks nothing while the pending queue is the
@@ -297,13 +312,35 @@ export const ABSENCE_WATCHES: ReadonlyArray<{
   // shadow's silence is accepted as unattended (documented).
 ];
 
-/** The `feature` values the digest must fetch to evaluate everything above. */
-export const WATCHED_FEATURES: readonly string[] = Array.from(
-  new Set([
-    ...Object.values(LANES).map((l) => l.feature),
-    ...ABSENCE_WATCHES.map((w) => w.feature),
-  ]),
-);
+/**
+ * What the digest must fetch so every lane can be judged: one window for the
+ * frequent lanes (enough for their consecutive-run depth) and one wide enough
+ * for the weekly/monthly lanes' `expectEvery`. A single 72 h window made every
+ * lane with a longer cadence read "absent" most days (review 2026-09-23) — a
+ * false page trains people to ignore the real ones. Derived from the shapes,
+ * so a new long-cadence lane cannot silently fall outside the fetch; pinned by
+ * laneHealth.test.ts.
+ */
+export const SHORT_FETCH_WINDOW_MS = 72 * H;
+
+export function laneFetchPlan(): Array<{ features: string[]; windowMs: number }> {
+  const short = new Set<string>(ABSENCE_WATCHES.map((w) => w.feature));
+  const long = new Set<string>();
+  let longWindow = 0;
+  for (const lane of Object.keys(LANE_SHAPES) as LaneId[]) {
+    const every = LANE_SHAPES[lane].expectEvery;
+    const feature = LANES[lane].feature;
+    if (Number.isFinite(every) && every > SHORT_FETCH_WINDOW_MS) {
+      long.add(feature);
+      longWindow = Math.max(longWindow, every + 24 * H);
+    } else {
+      short.add(feature);
+    }
+  }
+  const plan = [{ features: [...short], windowMs: SHORT_FETCH_WINDOW_MS }];
+  if (long.size > 0) plan.push({ features: [...long], windowMs: longWindow });
+  return plan;
+}
 
 /** Number of lanes evaluated — the digest's proof-of-life counter. */
 export const LANES_CHECKED =
@@ -387,6 +424,20 @@ export function classifyLaneHealth(
     if (shape.enabled && !shape.enabled()) continue;
     const mine = rowsFor(rows, key.feature, key.operation);
 
+    // Brake FIRST: a braked lane skips without writing a row, so judging
+    // absence first reported every braked lane as "absent" — the wrong page.
+    if ("brake" in key) {
+      const pausedUntil = brakes[key.brake];
+      if (pausedUntil && Date.parse(pausedUntil) > now) {
+        problems.push({
+          lane,
+          kind: "braked",
+          detail: `feature_brakes.${key.brake} paused until ${pausedUntil}`,
+        });
+        continue;
+      }
+    }
+
     const absent = absence(
       lane,
       key.feature,
@@ -398,18 +449,6 @@ export function classifyLaneHealth(
     if (absent) {
       problems.push(absent);
       continue;
-    }
-
-    if ("brake" in key) {
-      const pausedUntil = brakes[key.brake];
-      if (pausedUntil && Date.parse(pausedUntil) > now) {
-        problems.push({
-          lane,
-          kind: "braked",
-          detail: `feature_brakes.${key.brake} paused until ${pausedUntil}`,
-        });
-        continue;
-      }
     }
 
     const recent = mine.slice(0, shape.consecutive);

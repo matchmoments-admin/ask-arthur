@@ -16,6 +16,7 @@ import Link from "next/link";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
+import CoverageNote from "@/components/clone-watch/CoverageNote";
 
 export const revalidate = 3600; // 1 hour ISR
 
@@ -220,6 +221,7 @@ export default async function CloneWatchMonthPage({
       {row.top_au_brands.length > 0 && (
         <section className="mb-8">
           <h2 className="text-deep-navy text-sm font-bold mb-3">Most-targeted Australian brands</h2>
+          <CoverageNote className="mb-3" />
           <BrandBars rows={row.top_au_brands} />
         </section>
       )}

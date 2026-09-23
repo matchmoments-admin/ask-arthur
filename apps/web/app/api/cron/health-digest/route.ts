@@ -17,7 +17,7 @@ import { LANE_BRAKES } from "@askarthur/scam-engine/lane-outcome";
 import {
   classifyLaneHealth,
   LANES_CHECKED,
-  WATCHED_FEATURES,
+  laneFetchPlan,
   type LaneCostRow,
   type LaneProblem,
   type LaneProblemKind,
@@ -247,26 +247,35 @@ export async function GET(req: Request) {
   };
 
   // ── Check 4: clone-watch silent-zero lanes (#1145) ────────────────────
-  // Fetch by ROSTER feature list over a window wider than the longest
-  // cadence in LANE_SHAPES (26h) plus the consecutive-run depth (3 × 6h), so
-  // a lane that stopped writing is judged absent rather than dropping out of
-  // the result set. Measured 149 rows / 72h across the roster (2026-09-17);
-  // 1000 is PostgREST's hard cap (rowCap.test.ts) and ~7x the observed volume.
-  // Brake state comes from feature_brakes, not from the rows: a cleared brake
-  // otherwise reads as braked until the lane's next run overwrites the row.
-  const [laneRes, brakeRes] = await Promise.all([
-    supabase
-      .from("cost_telemetry")
-      .select("feature, operation, created_at, units, metadata")
-      .in("feature", [...WATCHED_FEATURES])
-      .gte("created_at", new Date(now - 72 * 3600 * 1000).toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1000),
+  // One query per fetch-plan window (laneFetchPlan, derived from each lane's
+  // expectEvery): 72 h for frequent lanes, ~33 days for the weekly/monthly
+  // ones — a single 72 h window paged those "absent" most days. Long-cadence
+  // features write a handful of rows a month, so the second query is tiny;
+  // 1000 is PostgREST's hard cap (rowCap.test.ts). Brake state comes from
+  // feature_brakes, not from the rows: a cleared brake otherwise reads as
+  // braked until the lane's next run overwrites the row.
+  const lanePlan = laneFetchPlan();
+  const [laneResults, brakeRes] = await Promise.all([
+    Promise.all(
+      lanePlan.map((g) =>
+        supabase
+          .from("cost_telemetry")
+          .select("feature, operation, created_at, units, metadata")
+          .in("feature", g.features)
+          .gte("created_at", new Date(now - g.windowMs).toISOString())
+          .order("created_at", { ascending: false })
+          .limit(1000),
+      ),
+    ),
     supabase
       .from("feature_brakes")
       .select("feature, paused_until")
       .in("feature", [...LANE_BRAKES]),
   ]);
+  const laneRes = {
+    error: laneResults.find((r) => r.error)?.error ?? null,
+    data: laneResults.flatMap((r) => r.data ?? []),
+  };
 
   if (laneRes.error) {
     logger.error("health-digest: lane query failed", {

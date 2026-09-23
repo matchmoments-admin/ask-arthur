@@ -17,17 +17,37 @@ export type SquatView =
   | "phishing"
   | "live"
   | "parked"
+  | "held_phishing"
   | "held"
   | "taken_down"
-  | "registered";
+  | "registered"
+  | "unverified";
 
 export const SQUAT_LABEL: Record<SquatView, string> = {
   phishing: "Live phishing",
   live: "Live site",
   parked: "Parked / for sale",
+  held_phishing: "Suspended (was phishing)",
   held: "Suspended by registrar",
   taken_down: "Blocklisted",
   registered: "Registered, not serving",
+  unverified: "Not yet verified",
+};
+
+/** One-line definition per status — the page legend renders ALL of them, so
+ *  no label reaches a brand undefined (review 2026-09-23). */
+export const SQUAT_DEFINITION: Record<SquatView, string> = {
+  phishing:
+    "our scan observed credential- or payment-harvesting content on it",
+  live: "our scan reached a server hosting a site on it",
+  parked: "it sits on a domain-parking or aftermarket (for-sale) nameserver",
+  held_phishing:
+    "we observed phishing on it, and the registrar has since suspended it (client/server hold)",
+  held: "the registrar or registry has suspended it (client/server hold)",
+  taken_down:
+    "Netcraft classified it malicious, so browser blocklists warn on it — the site may still be online",
+  registered: "registered, but our scan found nothing serving on it",
+  unverified: "registered recently and not yet scanned",
 };
 
 /** What a brand should do first — lower sorts first. */
@@ -35,27 +55,35 @@ const PRIORITY: Record<SquatView, number> = {
   phishing: 0,
   live: 1,
   parked: 2,
-  registered: 3,
-  held: 4,
-  taken_down: 5,
+  unverified: 3,
+  registered: 4,
+  held_phishing: 5,
+  held: 6,
+  taken_down: 7,
 };
 
 export function squatView(row: CloneDetectionRow): SquatView {
+  // A registry/registrar hold is the strongest fact about the domain TODAY: a
+  // suspended name is not a live threat, whatever it did before.
+  if (row.squatStatus === "held") {
+    return row.lifecycleState === "weaponised" ? "held_phishing" : "held";
+  }
   if (row.lifecycleState === "weaponised") return "phishing";
   if (row.lifecycleState === "taken_down") return "taken_down";
-  switch (row.squatStatus) {
-    case "held":
-      return "held";
-    case "parked":
-      return "parked";
-    case "live":
-      return "live";
+  if (row.squatStatus === "parked") return "parked";
+  if (row.squatStatus === "live") return "live";
+  if (row.squatStatus === "unknown") {
+    // Known unknown: no server, no parking NS, no hold. Only a completed scan
+    // that found nothing earns "not serving"; otherwise it is unverified.
+    return row.classification ? "registered" : "unverified";
   }
-  // Pre-squat-status ledger rows: the urlscan classification is all we have.
+  // Squat status ABSENT (ledger rows written before 2026-09-22): the urlscan
+  // classification is all we have. Never applied to a known "unknown" — that
+  // fallback read "neutral" as a live site for 21 of Apple's 43 (review).
   if (row.classification === "likely_phishing") return "phishing";
   if (row.classification === "parked_for_sale") return "parked";
   if (row.classification === "neutral") return "live";
-  return "registered";
+  return row.classification ? "registered" : "unverified";
 }
 
 export interface SquattingRow extends CloneDetectionRow {
@@ -99,4 +127,12 @@ export function formatRegistered(date: string | null | undefined): string | null
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+/** A registrar abuse address safe to put in a mailto: href — WHOIS/RDAP data is
+ *  third-party input, so anything that isn't a plain address is dropped
+ *  (a `?cc=` or `&body=` would otherwise rewrite the brand's email). */
+export function safeAbuseEmail(email: string | null | undefined): string | null {
+  const e = email?.trim() ?? "";
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(e) ? e : null;
 }
