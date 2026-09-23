@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Every lane's gate reads a flag; the shape tests below judge lanes as if
+// they are ON (production), and the enabled() test flips flags explicitly.
+vi.mock("@askarthur/utils/feature-flags", () => ({
+  featureFlags: new Proxy({} as Record<string, boolean>, {
+    get: (t, k: string) => (k in t ? t[k] : true),
+    set: (t, k: string, v: boolean) => ((t[k] = v), true),
+  }),
+}));
 
 import {
   LANES,
@@ -126,6 +135,25 @@ function healthyRows(): LaneCostRow[] {
       offline: 2,
     }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
+    outcomeRow("shopfront-clone-netcraft-auto/auto", 20, 1, { candidates: 1, marked: 1 }),
+    outcomeRow("clone-watch-enrich-attribution", 19, 60, { pending: 60, enriched: 60 }),
+    outcomeRow("shopfront-clone-notify-brand-prepare", 23, 2, {
+      batches_prepared: 2,
+      groups_failed: 0,
+    }),
+    outcomeRow("shopfront-clone-reemergence-monitor", 17, 5, { checked: 5, reemerged: 0 }),
+    outcomeRow("shopfront-clone-enforcement-execute", 2, 3, { candidates: 3, enqueued: 3 }),
+    outcomeRow("shopfront-clone-weekly-digest", 3 * 24, 1, { candidates_total: 180 }),
+    outcomeRow("shopfront-clone-fp-cluster-digest", 3 * 24, 0, {
+      reason: "no_fps_in_window",
+      clusters: 0,
+      fp_count: 0,
+    }),
+    outcomeRow("report-brand-stewardship", 20 * 24, 28, {
+      prepared: 28,
+      failed: 0,
+      clone_brands: 148,
+    }),
     // Monthly: written on the 1st, so up to ~31 days old on a healthy day.
     outcomeRow("clone-watch-report-summary", 20 * 24, 148, {
       total: 855,
@@ -480,5 +508,42 @@ describe("classifyLaneHealth — enabled() gate", () => {
       flags.cloneEnforcement = saved.e;
       flags.cloneReemergenceMonitor = saved.r;
     }
+  });
+});
+
+// Review 2026-09-23: the digest fetched ONE 72 h window, so every weekly /
+// monthly lane read "absent" most days. The fetch plan is derived from the
+// shapes; this pins that every lane's expectEvery fits its window.
+describe("laneFetchPlan", () => {
+  it("covers every finite expectEvery (and every absence watch) with a wide-enough window", async () => {
+    const { laneFetchPlan, LANE_SHAPES: shapes, ABSENCE_WATCHES: watches } = await import("@/lib/laneHealth");
+    const plan = laneFetchPlan();
+    const windowFor = (feature: string) =>
+      Math.max(0, ...plan.filter((g) => g.features.includes(feature)).map((g) => g.windowMs));
+    for (const [lane, shape] of Object.entries(shapes)) {
+      const feature = LANES[lane as keyof typeof LANES].feature;
+      expect(windowFor(feature), `${lane} is not fetched`).toBeGreaterThan(0);
+      if (Number.isFinite(shape.expectEvery)) {
+        expect(windowFor(feature), `${lane}: window < expectEvery`).toBeGreaterThanOrEqual(shape.expectEvery);
+      }
+    }
+    for (const w of watches) expect(windowFor(w.feature)).toBeGreaterThanOrEqual(w.expectEvery);
+  });
+
+  it("a monthly lane last seen 20 days ago is healthy, not absent", () => {
+    const rows = healthyRows();
+    const problems = classifyLaneHealth(rows, { now: NOW });
+    expect(problems.find((p) => p.lane === "clone-watch-report-summary")).toBeUndefined();
+  });
+});
+
+describe("classifyLaneHealth — brake before absence", () => {
+  it("a braked lane with no rows is reported braked, not absent", () => {
+    const rows = healthyRows().filter((r) => r.operation !== "recheck_batch");
+    const brakes = { shopfront_clone_recheck: new Date(NOW + 3_600_000).toISOString() };
+    const p = classifyLaneHealth(rows, { now: NOW, brakes }).find(
+      (x) => x.lane === "shopfront-clone-lifecycle-recheck",
+    );
+    expect(p?.kind).toBe("braked");
   });
 });

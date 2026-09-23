@@ -11,6 +11,7 @@ import {
   Heading,
   Img,
 } from "@react-email/components";
+import { CLONE_WATCH_COVERAGE_SENTENCE } from "@/components/clone-watch/CoverageNote";
 import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
 import { hasOutcomes, lifecycleBadge } from "@/lib/clone-watch/outcome-copy";
@@ -327,9 +328,13 @@ export default function BrandStewardshipReport({
                 </Text>
                 <Text style={{ color: "#475569", fontSize: "13px", lineHeight: "1.5", margin: "0 0 12px 0" }}>
                   These are the suspected clone / lookalike domains we detected
-                  impersonating <strong>{brandName}</strong> this period and
-                  reported on your behalf. Each one&apos;s hosting and registrar
-                  details are below so your team can action takedowns directly.
+                  impersonating <strong>{brandName}</strong> this period; those
+                  our scans caught serving phishing were reported to Netcraft on
+                  your behalf. Each one&apos;s hosting and registrar details are
+                  below so your team can action takedowns directly.
+                </Text>
+                <Text style={{ color: "#64748b", fontSize: "12px", lineHeight: "1.5", margin: "0 0 12px 0" }}>
+                  {CLONE_WATCH_COVERAGE_SENTENCE}
                 </Text>
 
                 {/* Netcraft outcome — the honest lifecycle of what we reported.
@@ -389,8 +394,8 @@ export default function BrandStewardshipReport({
                     )}
                     {(cloneDetections.weaponised ?? 0) > 0 && (
                       <Text style={outcomeLine}>
-                        🔥 <strong>{cloneDetections.weaponised}</strong> now
-                        serving active phishing
+                        🔥 <strong>{cloneDetections.weaponised}</strong>{" "}
+                        observed serving phishing (at the time of this report)
                         {(cloneDetections.weaponisedAfterDecline ?? 0) > 0 && (
                           <>
                             {" "}

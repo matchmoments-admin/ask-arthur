@@ -4,6 +4,7 @@ import type { CloneDetectionRow } from "@/emails/BrandStewardshipReport";
 import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
 import {
   formatRegistered,
+  safeAbuseEmail,
   squatView,
   squattingRows,
   squattingSummary,
@@ -35,7 +36,18 @@ describe("squatView", () => {
     expect(squatView(row({ domain: "a", classification: "likely_phishing" }))).toBe("phishing");
     expect(squatView(row({ domain: "a", classification: "parked_for_sale" }))).toBe("parked");
     expect(squatView(row({ domain: "a", classification: "neutral" }))).toBe("live");
-    expect(squatView(row({ domain: "a", squatStatus: "unknown" }))).toBe("registered");
+  });
+
+  // Review 2026-09-23 (Apple, Aug): 21 of 43 "Live site" rows were a KNOWN
+  // unknown that fell through to the neutral→live fallback.
+  it("a known 'unknown' never reads as live, whatever urlscan said", () => {
+    expect(squatView(row({ domain: "a", squatStatus: "unknown", classification: "neutral" }))).toBe("registered");
+    expect(squatView(row({ domain: "a", squatStatus: "unknown" }))).toBe("unverified");
+  });
+
+  // Review 2026-09-23: 3 of Apple's 12 "Live phishing" were on registry hold.
+  it("a registry hold beats weaponised: suspended, not live phishing", () => {
+    expect(squatView(row({ domain: "a", lifecycleState: "weaponised", squatStatus: "held" }))).toBe("held_phishing");
   });
 });
 
@@ -91,5 +103,16 @@ describe("formatRegistered", () => {
     expect(formatRegistered("2026-09-19T00:00:00Z")).toBe("19 Sept 2026");
     expect(formatRegistered("yesterday")).toBeNull();
     expect(formatRegistered(null)).toBeNull();
+  });
+});
+
+describe("safeAbuseEmail", () => {
+  it("passes a plain address, drops anything that could rewrite the mailto", () => {
+    expect(safeAbuseEmail(" abuse@namesilo.com ")).toBe("abuse@namesilo.com");
+    expect(safeAbuseEmail("abuse@x.com?cc=evil@y.com")).toBeNull();
+    expect(safeAbuseEmail("abuse@x.com&body=hi")).toBeNull();
+    expect(safeAbuseEmail("a@x.com,b@y.com")).toBeNull();
+    expect(safeAbuseEmail("not an email")).toBeNull();
+    expect(safeAbuseEmail(null)).toBeNull();
   });
 });

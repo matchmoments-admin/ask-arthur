@@ -13,6 +13,7 @@
 // The interactive domain grid is a client component that receives an
 // already-safe, pre-decoded array (see CloneWatchDomainList).
 
+import CoverageNote from "@/components/clone-watch/CoverageNote";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ShieldQuestion, ShieldCheck, Mail } from "lucide-react";
@@ -214,7 +215,7 @@ function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
     {
       n: vendorGap.refile_to_takedown_n,
       median: vendorGap.refile_to_takedown_median_hours,
-      label: "from the evidence re-filing to a witnessed takedown",
+      label: "from the evidence re-filing to a witnessed Netcraft malicious classification (blocklisting)",
     },
   ];
   if (legs.every((l) => l.n === 0)) return null;
@@ -249,9 +250,9 @@ function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
       <p className="mt-4 text-xs leading-relaxed text-slate-400">
         Phishing classifications come from urlscan.io renders or Safe
         Browsing / VirusTotal reputation; their timestamps are quantised by
-        our 6-hour recheck and 3-hour retrieve cycles. Takedown timings count
-        only transitions we witnessed in the vendor&apos;s own per-URL
-        gradings. Aggregate-only — no specific domains are published.
+        our recheck and retrieve cycles. Blocklisting timings count only
+        transitions witnessed in the vendor&apos;s own per-URL gradings; a
+        blocklisted site may still be online. Aggregate-only — no specific domains are published.
       </p>
     </div>
   );
@@ -294,11 +295,16 @@ function PublicImpactPanel({
       label: "Reported to Netcraft",
       sub: "forwarded to blocklists",
     },
-    takedown && takedown.takedowns_total > 0
+    // "Taken down" in our data means Netcraft CLASSIFIED the URL malicious
+    // (browser blocklists act on that) — not that the site went offline. On
+    // weaponised re-reports that classification lands in seconds, so a
+    // "time-to-takedown from report to removal" tile read "0 min" (review
+    // 2026-09-23). Say what it is, and only with a sample worth a median.
+    takedown && takedown.takedowns_total >= MEDIAN_FLOOR
       ? {
           value: fmtMinutes(takedown.median_minutes),
-          label: "Median time-to-takedown",
-          sub: "from report to removal",
+          label: "Median time to blocklisting",
+          sub: `report → Netcraft malicious classification (n=${takedown.takedowns_total})`,
         }
       : {
           value: impact.brand_notifications_total.toLocaleString(),
@@ -410,6 +416,7 @@ export default async function CloneWatchPage() {
         <h1 className="mx-auto max-w-[20ch] text-4xl md:text-5xl font-extrabold leading-[1.1] tracking-tight text-deep-navy">
           Newly-registered AU brand-pattern domains
         </h1>
+        <CoverageNote className="mx-auto mt-4 max-w-[60ch]" />
         <p className="mx-auto mt-7 max-w-[60ch] text-lg text-gov-slate leading-relaxed">
           Each entry below is a domain registered in the last 7 days whose
           characters match the lexical pattern of an Australian brand on our
@@ -563,8 +570,9 @@ export default async function CloneWatchPage() {
             What we have not done
           </div>
           <p className="text-[13.5px] leading-relaxed text-slate-500">
-            Entries appear only after a human reviewer confirms the
-            name-similarity match. That review does not determine who registered
+            Entries are machine-classified (name-similarity match plus an
+            automated clone classifier); operators review exceptions. That
+            process does not determine who registered
             the domain or why: we have not contacted registrants, and we make no
             legal characterisation of any domain or its registrant.
           </p>
