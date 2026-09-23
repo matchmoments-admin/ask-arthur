@@ -42,10 +42,13 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
     concurrency: { limit: 1 },
     timeouts: { finish: "27m" },
   },
-  [
-    { cron: "45 6 * * *" },
-    { event: "shopfront/clone.reemergence.manual-trigger.v1" },
-  ],
+  // Manual-trigger only (no cron). FF_CLONE_ENFORCEMENT +
+  // FF_CLONE_REEMERGENCE_MONITOR are dark in prod, so a scheduled tick just
+  // burned an execution to early-return (fleet audit 2026-09-16). Invoke on
+  // demand via the `shopfront/clone.reemergence.manual-trigger.v1` event.
+  // **At launch, restore the sweep by re-adding `{ cron: "45 6 * * *" }`**
+  // alongside this event trigger — laneHealth's 26h expectEvery assumes it.
+  { event: "shopfront/clone.reemergence.manual-trigger.v1" },
   withAxiomLogging(
     { fnId: "shopfront-clone-reemergence-monitor" },
     async ({ step, runId }) => {

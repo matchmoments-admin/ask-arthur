@@ -262,8 +262,8 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
   return data;
 }
 
-// inngest-finish-budget: 33 boundaries — 3 static + 1 per-entity enrich step x
-// MAX_ENTITIES_PER_RUN (30).
+// inngest-finish-budget: 32 boundaries — 2 static + 1 per-entity enrich step x
+// MAX_ENTITIES_PER_RUN (30). (Was 33; the reap step folded into fetch.)
 export const entityEnrichmentFanOut = inngest.createFunction(
   {
     id: "pipeline-entity-enrichment",
@@ -285,40 +285,42 @@ export const entityEnrichmentFanOut = inngest.createFunction(
       };
     }
 
-    // Step 0: Reap orphaned `in_progress` rows (#520 H3). If a prior run
-    // crashed between mark-in-progress and the per-entity completion, those
-    // rows are stuck `in_progress` forever — the pending/failed fetch below
-    // never re-selects them, a silent permanent enrichment gap. concurrency:1
-    // (above) guarantees no other run is legitimately mid-flight, so any
-    // `in_progress` row here is orphaned and safe to reset to `failed` so it
-    // re-enters the queue. Bounded (<= MAX_ENTITIES_PER_RUN accumulate), so no
-    // hot-table chunking needed.
-    const reaped = await step.run("reap-orphaned-in-progress", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) return 0;
-      const { data, error } = await supabase
-        .from("scam_entities")
-        .update({ enrichment_status: "failed" })
-        .eq("enrichment_status", "in_progress")
-        .select("id");
-      if (error) {
-        logger.warn("entity-enrichment: reap in_progress failed", {
-          error: error.message,
-        });
-        return 0;
-      }
-      const n = (data ?? []).length;
-      if (n > 0) logger.info("entity-enrichment: reaped orphaned rows", { n });
-      return n;
-    });
-    void reaped;
-
-    // Step 1: Find entities needing enrichment
+    // Step 1: Reap orphans, then find entities needing enrichment — one step.
+    //
+    // Reap (#520 H3): if a prior run crashed between mark-in-progress and the
+    // per-entity completion, those rows are stuck `in_progress` forever — the
+    // pending/failed fetch below never re-selects them, a silent permanent
+    // enrichment gap. concurrency:1 (above) guarantees no other run is
+    // legitimately mid-flight, so any `in_progress` row here is orphaned and
+    // safe to reset to `failed` so it re-enters the queue. Bounded
+    // (<= MAX_ENTITIES_PER_RUN accumulate), so no hot-table chunking needed.
+    //
+    // Folded into the fetch step (2026-09-24, ADR-0019 bookkeeping rule): it
+    // was its own step, so every no-op run (21/21 in the 2026-09-16 fleet
+    // audit) cost two steps instead of one. The reap MUST stay before the
+    // select — reaped rows become `failed` and this same fetch re-picks them.
+    // A retry of this step re-runs the reap, which is harmless: nothing is
+    // marked in_progress until the later mark step.
     const pendingEntities = await step.run(
       "fetch-pending-entities",
       async () => {
         const supabase = createServiceClient();
         if (!supabase) return [];
+
+        const { data: reapedRows, error: reapError } = await supabase
+          .from("scam_entities")
+          .update({ enrichment_status: "failed" })
+          .eq("enrichment_status", "in_progress")
+          .select("id");
+        if (reapError) {
+          logger.warn("entity-enrichment: reap in_progress failed", {
+            error: reapError.message,
+          });
+        } else if ((reapedRows ?? []).length > 0) {
+          logger.info("entity-enrichment: reaped orphaned rows", {
+            n: (reapedRows ?? []).length,
+          });
+        }
 
         const { data, error } = await supabase
           .from("scam_entities")

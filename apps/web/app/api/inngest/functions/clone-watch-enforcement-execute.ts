@@ -80,10 +80,13 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
     // 7 boundaries × 30s + 60s slack = 4.5m; 6m leaves queue headroom.
     timeouts: { finish: "6m" },
   },
-  [
-    { cron: "15 */3 * * *" },
-    { event: "shopfront/clone.enforcement-execute.manual-trigger.v1" },
-  ],
+  // Manual-trigger only (no cron). FF_CLONE_ENFORCEMENT is dark in prod, so a
+  // scheduled tick just burned 8 executions/day to early-return (fleet audit
+  // 2026-09-16: 56/56 dark). Invoke on demand via the
+  // `shopfront/clone.enforcement-execute.manual-trigger.v1` event. **At launch,
+  // restore the sweep by re-adding `{ cron: "15 */3 * * *" }`** alongside this
+  // event trigger — laneHealth's 4h expectEvery for this lane assumes it.
+  { event: "shopfront/clone.enforcement-execute.manual-trigger.v1" },
   withAxiomLogging(
     { fnId: "shopfront-clone-enforcement-execute" },
     async ({ step, runId }) => {

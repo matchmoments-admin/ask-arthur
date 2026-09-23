@@ -149,10 +149,13 @@ export const brandRegisterRefresh = inngest.createFunction(
     concurrency: { limit: 1 },
     singleton: { mode: "skip" },
   },
-  [
-    { cron: "30 3 * * *" }, // daily 03:30 UTC
-    { event: "brand-register/refresh.manual-trigger.v1" },
-  ],
+  // Manual-trigger only (no cron). FF_BRAND_REGISTER is dark in prod, so a
+  // scheduled tick just burned an execution to early-return (fleet audit
+  // 2026-09-16). Invoke on demand via the
+  // `brand-register/refresh.manual-trigger.v1` event. **At launch, restore the
+  // daily sweep by re-adding `{ cron: "30 3 * * *" }`** (03:30 UTC) alongside
+  // this event trigger.
+  { event: "brand-register/refresh.manual-trigger.v1" },
   withAxiomLogging({ fnId: "brand-register-refresh" }, async ({ step }) => {
     if (!featureFlags.brandRegister) {
       return { skipped: true, reason: "flag_off" };

@@ -87,8 +87,10 @@ interface PendingAlert {
   urlscan_evidence: { server?: HostingInfo } | null;
 }
 
-// inngest-finish-budget: 64 boundaries — 4 static + 1 per-item enrich step x
-// ENRICH_RUN_CAP (60). The single largest per-item fan-out in the lane;
+// inngest-finish-budget: 64 boundaries — 3 static + 1 per-item enrich step x
+// ENRICH_RUN_CAP (60), declared at the old 4-static count (the check-brake
+// step folded into select-pending 2026-09-24) to keep the 36m budget's minute
+// of headroom rather than re-derive it. The single largest per-item fan-out in the lane;
 // batching it is the highest-value fold available. See #1074.
 //
 // The floor is therefore 64 x 30s = 1920s of queue wait + 120s inline
@@ -157,16 +159,16 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         return { skipped: true, reason: "FF_CLONE_WATCH_ATTRIBUTION disabled" };
       }
 
-      const braked = await step.run("check-brake", () =>
-        isFeatureBrakedOrUnknown(BRAKE),
-      );
-      if (braked) {
-        return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
-      }
-
-      const pending = await step.run("select-pending", async () => {
+      // The brake read rides inside select-pending (ADR-0019 bookkeeping rule;
+      // inngest-slot-budget.md "Step 3"): it was its own `check-brake` step,
+      // one Inngest step per run for a single SELECT. Memoised with the
+      // worklist, so a replay does not re-read it. Fail-closed as before.
+      const selected = await step.run("select-pending", async () => {
+        if (await isFeatureBrakedOrUnknown(BRAKE)) {
+          return { braked: true as const, rows: [] as PendingAlert[] };
+        }
         const sb = createServiceClient();
-        if (!sb) return [] as PendingAlert[];
+        if (!sb) return { braked: false as const, rows: [] as PendingAlert[] };
         const since = new Date(
           Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
         ).toISOString();
@@ -201,10 +203,14 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
           logger.error("clone-watch enrich: select failed", {
             error: error.message,
           });
-          return [] as PendingAlert[];
+          return { braked: false as const, rows: [] as PendingAlert[] };
         }
-        return (data ?? []) as PendingAlert[];
+        return { braked: false as const, rows: (data ?? []) as PendingAlert[] };
       });
+      if (selected.braked) {
+        return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
+      }
+      const pending = selected.rows;
 
       // NO early return on an empty `pending`. This run has THREE independent
       // stages — enrich (worklist: attribution IS NULL), kit-pivots (worklist:

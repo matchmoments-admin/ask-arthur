@@ -159,6 +159,17 @@ MONTHLY = outside the window.
 
 ## Proposed retire / park / skip list for #1152
 
+> **Status 2026-09-24 (PR `inngest/park-dark-crons-and-fold-brakes`):** the five **Park**
+> functions below are now event-only, each with an "At launch, restore `{ cron: … }`" note in
+> its trigger comment (the phone claimer gained a manual event and will restore as a plain UTC
+> cron — the `TZ=Australia/Sydney` form would have drifted onto 13:00 UTC at the 2026-10-04 DST
+> change). `feedback-triage-refresh` went hourly → `50 */6 * * *`. Single-query brake steps were
+> folded: the three `reddit-intel-*` `check-cost-brake` steps became un-stepped reads, and
+> `clone-watch-enrich-attribution`'s `check-brake` rides inside `select-pending`.
+> `pipeline-entity-enrichment`'s reap step folded into `fetch-pending-entities`. ≈ 34 runs/day
+> and ≈ 25 steps/day. The preclassify brake fold waits on the batched pre-classifier's first
+> verified run. Cadence cuts for the data-pipeline crons and the reddit cron halves are NOT done.
+
 **Park (event-only, one-line change each; flag stays as the revive switch):**
 `shopfront-clone-enforcement-execute` (8×/day dark), `shopfront-clone-reemergence-monitor`,
 `brand-register-refresh`, `shopfront-clone-weekly-digest`, `phone-footprint-refresh-claimer`

@@ -93,7 +93,7 @@ export default async function FeedbackTriagePage({
         <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs">
           (1 - |confidence - 0.5| · 2) × impact_weight
         </code>
-        — peaks where the model was 50/50 AND the user disagreed. Refreshed every 5 min by the{" "}
+        — peaks where the model was 50/50 AND the user disagreed. Refreshed every 6 hours by the{" "}
         <code className="font-mono text-xs">feedback-triage-refresh</code> Inngest cron.
       </p>
 

@@ -154,8 +154,11 @@ export const redditIntelEmbed = inngest.createFunction(
       return { skipped: true, reason: "redditIntelIngest flag off" };
     }
 
-    const braked = await step.run("check-cost-brake", isRedditIntelBraked);
-    if (braked) {
+    // Un-stepped brake read (ADR-0019: single-query bookkeeping rides outside
+    // a step, precedent feed-items-embed.ts). It was its own step — one
+    // Inngest step per run for a cheap idempotent SELECT. A replay re-reads
+    // it, so a brake set mid-run stops the remaining steps: the brake's intent.
+    if (await isRedditIntelBraked()) {
       return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 

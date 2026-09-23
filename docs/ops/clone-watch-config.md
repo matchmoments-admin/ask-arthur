@@ -559,6 +559,19 @@ public page shows defamation-risk language):
 3. To blank the page, `DELETE FROM shopfront_clone_alerts WHERE
 source='nrd'` after the flag is OFF.
 
+### Flipping a PARKED lane ON — the cron is part of the flip
+
+Three dark clone-watch lanes are **event-only** (cron removed 2026-09-24 so a dark flag stops
+burning Inngest runs): `shopfront-clone-enforcement-execute` (restore `15 */3 * * *`;
+`FF_CLONE_ENFORCEMENT` + `FF_CLONE_ENFORCE_AUTO_BLOCKLIST`), `shopfront-clone-reemergence-monitor`
+(restore `45 6 * * *`; `FF_CLONE_ENFORCEMENT` + `FF_CLONE_REEMERGENCE_MONITOR`) and
+`shopfront-clone-weekly-digest` (restore `0 10 * * 0`; `FF_SHOPFRONT_CLONE_WEEKLY_DIGEST`).
+Flipping the flag alone does **nothing on a schedule**, and the health digest will then page
+the lane as `absent` (its `laneHealth` `enabled()` gate turns on, but no Outcome Row arrives).
+The flip is: (1) a PR re-adding the `{ cron: … }` trigger named in the function's own comment,
+with `[build]` in the commit; (2) after deploy, `curl -X PUT https://askarthur.au/api/inngest`
+and read the body; (3) then the env flag.
+
 ### Pre-flip checklist for a matcher-change PR
 
 Every PR that touches `packages/shopfront-glue/src/lexical-match.ts` must
