@@ -96,9 +96,13 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 (APWG + OpenPhish). Since v318 it does not send: it enqueues `onward_report_log` rows
 (`source='clone_alert'`) and the `report-onward-*` workers send (ADR-0018 amendment
 2026-09-23). It is bounded by a SHARED daily cap (`CLONE_SUBMISSION_DAILY_CAP`,
-default 50, counted across ALL submission paths via `count_todays_takedown_submissions`,
-which reads the `enforcement.queued` row execute records per enqueued report —
-`clone-watch-enforcement-execute.ts` step `record-queued`; v318 §6)
+default 50, counted by `count_todays_takedown_submissions` over the `clone_enforcement`
+`enforcement.queued` + `enforcement.reported` rows — i.e. the blocklist/registrar-abuse
+sends that share one sending address. Netcraft is deliberately EXCLUDED (v320): it has
+its own caps (auto 50/day, the resubmit cap, the issue counter), and counting its bulk
+submits would let one batch starve every blocklist send for the day. The cap FAILS
+CLOSED when the count query errors (execute throws; the admin send route returns 503).
+`clone-watch-enforcement-execute.ts` step `record-queued`; v318 §6, v320)
 
 - `concurrency: 1`, but has **no Inngest `throttle` and no same-window cooldown** —
   unlike its cron+manual siblings (recheck has both; notify-brand-prepare has a 24h
