@@ -45,7 +45,7 @@ it("skips urlscan + reputation for a name with no host and stamps a 400", async 
  m.rpc.mockResolvedValue({ error: null });
  const out = await submitCloneCandidate(candidate);
  expect(DNS_PRECHECK_ERROR).toBe("dns_no_host_precheck");
- expect(out).toMatchObject({ kind: "submit_failed", error: DNS_PRECHECK_ERROR });
+ expect(out).toMatchObject({ kind: "dns_no_host", error: DNS_PRECHECK_ERROR });
  expect(m.submit).not.toHaveBeenCalled();
  expect(m.reputation).not.toHaveBeenCalled();
  const evidence = m.rpc.mock.calls[0][1].p_evidence;

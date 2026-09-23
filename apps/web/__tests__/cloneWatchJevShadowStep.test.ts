@@ -61,18 +61,25 @@ const EVENT = {
 };
 
 const steps: string[] = [];
-const invoke = () =>
-  (cloneWatchHaikuPreclassify as unknown as (ctx: unknown) => Promise<unknown>)(
-    {
-      event: EVENT,
-      step: {
-        run: (name: string, fn: () => unknown) => {
-          steps.push(name);
-          return fn();
-        },
+// Batched since 2026-09-23: the handler takes `events` and returns per-alert
+// `results`. invoke() hands back the (single) alert's result so the per-alert
+// contract below is asserted unchanged; a failed alert surfaces as ok:false.
+const invoke = async () => {
+  const out = (await (
+    cloneWatchHaikuPreclassify as unknown as (ctx: unknown) => Promise<unknown>
+  )({
+    events: [EVENT],
+    step: {
+      run: (name: string, fn: () => unknown) => {
+        steps.push(name);
+        return fn();
       },
     },
-  );
+  })) as { results?: unknown[] } & Record<string, unknown>;
+  return (out.results?.[0] ?? out) as unknown;
+};
+/** The batch's own boundaries — per-alert work no longer owns a step. */
+const BATCH_STEPS = ["check-brake", "classify-batch", "log-outcome"];
 
 function query(result: unknown) {
   const chain: Record<string, unknown> = {
@@ -161,7 +168,7 @@ describe("jev-shadow step", () => {
     expect(out.ok).toBe(true);
     expect(out.jev).toBe("off");
     expect(mocks.askJev).not.toHaveBeenCalled();
-    expect(steps).toEqual(["classify-haiku", "persist"]);
+    expect(steps).toEqual(BATCH_STEPS);
     expect(rpcCalls("record_clone_watch_classification")).toHaveLength(1);
     expect(rpcCalls("record_clone_watch_jev_classification")).toHaveLength(0);
     expect(costRows("shopfront_clone_preclassify")).toHaveLength(1);
@@ -173,7 +180,7 @@ describe("jev-shadow step", () => {
     expect(out.ok).toBe(true);
     expect(out.jev).toBe("ok");
     // Folded: no fourth boundary.
-    expect(steps).toEqual(["classify-haiku", "persist"]);
+    expect(steps).toEqual(BATCH_STEPS);
     // …and Haiku's row + cost row are written BEFORE Jev is asked.
     const order = mocks.rpc.mock.calls.map(([n]) => n as string);
     expect(order.indexOf("record_clone_watch_classification")).toBeLessThan(
@@ -268,7 +275,7 @@ describe("primary mode (ADR-0026, FF_CLONE_WATCH_JEV_PRIMARY)", () => {
     expect(out.jev).toBe("primary");
     expect(out.is_clone).toBe(true);
     expect(out.confidence).toBe(0.93);
-    expect(steps).toEqual(["classify-jev"]);
+    expect(steps).toEqual(BATCH_STEPS);
     expect(mocks.callClaude).not.toHaveBeenCalled();
     expect(mocks.askJev).toHaveBeenCalledTimes(1);
     expect(rpcCalls("record_clone_watch_classification")).toHaveLength(1);
@@ -305,7 +312,10 @@ describe("primary mode (ADR-0026, FF_CLONE_WATCH_JEV_PRIMARY)", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it("ON + vendor failure: the fn THROWS (Inngest retries), Claude is still never called", async () => {
+  // Batched (2026-09-23): one alert's vendor failure must not fail the other
+  // 49 in the batch. It records its `_error` row and comes back ok:false; the
+  // daily selector re-fans it tomorrow (it has no classification row).
+  it("ON + vendor failure: that alert fails alone (ok:false + _error row), Claude is still never called", async () => {
     mocks.flags.cloneWatchJevPrimary = true;
     mocks.askJev.mockResolvedValue({
       ok: false,
@@ -314,7 +324,9 @@ describe("primary mode (ADR-0026, FF_CLONE_WATCH_JEV_PRIMARY)", () => {
       elapsedMs: 100,
     });
 
-    await expect(invoke()).rejects.toThrow(/jev-primary/);
+    const out = (await invoke()) as { ok: boolean; error?: string };
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(/jev-primary/);
     expect(mocks.callClaude).not.toHaveBeenCalled();
     expect(costRows("shopfront_clone_preclassify_error")[0]).toMatchObject({
       provider: "typesafe",

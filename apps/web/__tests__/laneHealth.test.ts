@@ -457,7 +457,8 @@ describe("classifyLaneHealth", () => {
       }),
     ]);
 
-    // Reconcile's quiet row is allowed to count: three in a row is a page.
+    // Reconcile: quiet rows are NORMAL under the v316 backoff — three in a
+    // row must NOT page (read failures page as Lane errors instead).
     const noReconcile = rows.filter(
       (r) => r.operation !== "lifecycle_reconcile",
     );
@@ -469,12 +470,7 @@ describe("classifyLaneHealth", () => {
         }),
       );
     }
-    expect(classifyLaneHealth(noReconcile, { now: NOW })).toEqual([
-      expect.objectContaining({
-        lane: "shopfront-clone-netcraft-reconcile",
-        kind: "silent_zero",
-      }),
-    ]);
+    expect(classifyLaneHealth(noReconcile, { now: NOW })).toEqual([]);
   });
 
   it("ignores rows for features outside the roster", () => {

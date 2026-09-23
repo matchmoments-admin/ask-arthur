@@ -128,6 +128,12 @@ export const LANES = {
     operation: "execute_batch",
     brake: "clone_enforcement",
   },
+  "shopfront-clone-haiku-preclassify": {
+    feature: "shopfront_clone_preclassify",
+    provider: "internal",
+    operation: "batch",
+    brake: "shopfront_clone_outreach",
+  },
   "clone-watch-report-summary": {
     feature: "clone_watch_report_summary",
     provider: "internal",
@@ -164,11 +170,17 @@ export interface LaneOutcome {
     rechecked: number;
     submitted: number;
     submit_failed: number;
+    /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
+     *  absent on quiet runs and rows written before it existed. */
+    dns_skipped?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
     submitted: number;
     submit_failed: number;
+    /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
+     *  absent on quiet runs and rows written before it existed. */
+    dns_skipped?: number;
     rate_limited: number;
     dormant_retired: number;
   };
@@ -241,6 +253,12 @@ export interface LaneOutcome {
     reason?: "nothing_pending";
     candidates: number;
     enqueued: number;
+  };
+  "shopfront-clone-haiku-preclassify": {
+    reason?: "braked";
+    alerts: number;
+    classified: number;
+    failed: number;
   };
   "clone-watch-report-summary": {
     reason?: "frozen" | "no_clones";
