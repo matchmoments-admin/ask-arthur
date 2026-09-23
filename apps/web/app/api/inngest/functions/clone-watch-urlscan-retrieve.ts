@@ -8,7 +8,6 @@ import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import {
   classifyScan,
@@ -17,6 +16,7 @@ import {
   serialiseRetrievalPending,
   reputationFromEvidence,
 } from "@/lib/clone-watch/urlscan-classify";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch urlscan — Stage 2 of 2: RETRIEVE.
@@ -77,15 +77,15 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     // 14 days were the 00:10 / 06:10 / 18:10 ticks, which fire 20 min BEFORE
     // the :30 recheck submits anything to retrieve. 09:10 follows the 09:00
     // submit; 12:10 still precedes netcraft-auto at 13:00 (cron-ordering test).
-    { cron: "10 3,9,12,15,21 * * *" },
+    ...laneCrons("shopfront-clone-urlscan-retrieve"),
     { event: "shopfront/clone.urlscan-retrieve.manual-trigger.v1" },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-urlscan-retrieve" },
     async ({ step }) => {
-      if (!featureFlags.shopfrontCloneUrlscan) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-urlscan-retrieve");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
       if (!process.env.URLSCAN_API_KEY) {
         return { skipped: true, reason: "URLSCAN_API_KEY not set" };
       }

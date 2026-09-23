@@ -1,12 +1,12 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import {
+  LANES,
   recordLaneError,
   recordLaneOutcome,
 } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
@@ -24,6 +24,7 @@ import {
   type NetcraftAutoCandidate,
   type NetcraftResubmitCandidate,
 } from "@/lib/clone-watch/netcraft-report";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch — Netcraft AUTO-report producer (PR3).
@@ -98,12 +99,12 @@ const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
 const MIN_CONFIDENCE = WORKLIST_MIN_CONFIDENCE;
 
 // ── Weaponised RE-submission lane (v250) ────────────────────────────────────
-const RESUBMIT_BRAKE = "clone_netcraft_resubmit";
+const RESUBMIT_BRAKE = LANES["shopfront-clone-netcraft-auto/resubmit"].brake;
 // The auto lane's operator kill-switch (review 2026-09-23: it was the one
 // outbound clone-watch Lane without one). Same fail-closed read as resubmit —
 // an unreadable brake counts as engaged, because this Lane reports third-party
 // URLs to an external vendor in Ask Arthur's name.
-const AUTO_BRAKE = "clone_netcraft_auto";
+const AUTO_BRAKE = LANES["shopfront-clone-netcraft-auto/auto"].brake;
 const RESUBMIT_DEFAULT_CAP = 10;
 const RESUBMIT_MIN_AGE_DAYS = 30; // matches the issue reporter's window
 const RESUBMIT_COOLDOWN_DAYS = 14;
@@ -143,7 +144,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
   [
     // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:10 pass, so the
     // v284 evidence gate has a verdict to read. See the header note.
-    { cron: "0 13 * * *" },
+    ...laneCrons("shopfront-clone-netcraft-auto/auto"),
     { event: "shopfront/clone.netcraft-auto.producer.manual-trigger.v1" },
   ],
   withAxiomLogging(
@@ -174,22 +175,9 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       return { ...autoResult, resubmit: resubmitResult };
 
       async function runAutoLane() {
-        if (!isTest && !featureFlags.shopfrontCloneNetcraftAuto) {
-          return {
-            skipped: true,
-            reason: "FF_SHOPFRONT_CLONE_NETCRAFT_AUTO disabled",
-          };
-        }
-        if (
-          !isTest &&
-          (!featureFlags.shopfrontCloneSubmitNetcraft ||
-            !featureFlags.shopfrontCloneOutreach)
-        ) {
-          return {
-            skipped: true,
-            reason: "netcraft_submit_or_outreach_disabled",
-          };
-        }
+        // Flag gate declared once, in LANE_SHAPES; test mode bypasses it.
+        const gate = laneGate("shopfront-clone-netcraft-auto/auto");
+        if (!isTest && !gate.ok) return { skipped: true, reason: gate.reason };
 
         if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
@@ -369,22 +357,8 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         // It used to return HERE, ahead of everything — which meant
         // `{ test: true }` validated the auto lane's payload and silently
         // covered none of this one, the only novel payload of the two.
-        if (!isTest && !featureFlags.cloneNetcraftResubmit) {
-          return {
-            skipped: true,
-            reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled",
-          };
-        }
-        if (
-          !isTest &&
-          (!featureFlags.shopfrontCloneSubmitNetcraft ||
-            !featureFlags.shopfrontCloneOutreach)
-        ) {
-          return {
-            skipped: true,
-            reason: "netcraft_submit_or_outreach_disabled",
-          };
-        }
+        const gate = laneGate("shopfront-clone-netcraft-auto/resubmit");
+        if (!isTest && !gate.ok) return { skipped: true, reason: gate.reason };
         if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
         // The brake is an operator kill-switch on SUBMITTING. Test mode files

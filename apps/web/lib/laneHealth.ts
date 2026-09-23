@@ -49,6 +49,7 @@ import {
   type LaneOutcome,
 } from "@askarthur/scam-engine/lane-outcome";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { expectEveryFromCrons } from "@/lib/cron-cadence";
 
 export type LaneProblemKind =
   /** No row inside the lane's expected window. */
@@ -56,7 +57,9 @@ export type LaneProblemKind =
   /** Rows arrive on schedule and every one is a no-op. */
   | "silent_zero"
   /** `feature_brakes` says the lane is paused right now. */
-  | "braked";
+  | "braked"
+  /** `feature_brakes` could not be read, so no lane's brake could be judged. */
+  | "brake_unknown";
 
 export interface LaneProblem {
   lane: string;
@@ -87,15 +90,36 @@ const n = <L extends LaneId>(o: Seen<L>, k: keyof Seen<L> & string): number => {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 };
 
+/** A featureFlags key whose value is a boolean — what a Lane's gate is made of. */
+export type LaneFlag = {
+  [K in keyof typeof featureFlags]: (typeof featureFlags)[K] extends boolean
+    ? K
+    : never;
+}[keyof typeof featureFlags];
+
 interface Shape<L extends LaneId> {
-  /** Longest gap between rows that is still healthy, in ms. */
-  expectEvery: number;
   /**
-   * The Lane's own gate. A flag-off Lane writes nothing by design (skip paths
-   * are silent), so without this a disabled Lane would page "absent" every
-   * day. Evaluated at digest time; omitted = always expected to run.
+   * The Lane's cron triggers — the ONE copy. The Lane's createFunction reads
+   * them through `laneCrons()`, and `expectEvery` is derived from them, so the
+   * schedule and the health window cannot drift apart. A PARKED Lane (cron
+   * removed while its flag is dark) keeps its restore value here and its
+   * trigger does not read it.
    */
-  enabled?: () => boolean;
+  crons?: readonly string[];
+  /**
+   * Longest healthy gap between rows, in ms — ONLY where `crons` cannot give
+   * it: event-driven Lanes (`POSITIVE_INFINITY`) and monthly ones (the cron
+   * parser refuses a day-of-month on purpose). Otherwise derived.
+   */
+  expectEvery?: number;
+  /**
+   * The Lane's flag gate — the ONE copy. The Lane body calls `laneGate()`,
+   * and the digest skips the Lane while any flag is off (a flag-off Lane
+   * writes nothing by design, so it would otherwise page "absent" daily).
+   * Omitted = always expected to run. Non-flag conditions (an API key, a
+   * test-mode bypass) stay in the body.
+   */
+  flags?: readonly LaneFlag[];
   /**
    * How many consecutive most-recent rows must ALL be zero before it counts.
    * 1 = one bad run pages (daily lanes); 3 = tolerate two quiet runs (lanes
@@ -110,6 +134,9 @@ interface Shape<L extends LaneId> {
 
 const H = 3_600_000;
 
+/** netcraft-auto runs both sub-lanes in one function, so they share a schedule. */
+const NETCRAFT_AUTO_CRONS = ["0 13 * * *"] as const;
+
 /**
  * One shape per roster Lane. Predicates are written against the metadata each
  * Lane actually writes (`LaneOutcome`); docs/ops/clone-watch-config.md §4b
@@ -117,9 +144,8 @@ const H = 3_600_000;
  */
 export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   "shopfront-clone-lifecycle-recheck": {
-    expectEvery: 9 * H, // 6h cron + slack
-    enabled: () =>
-      featureFlags.shopfrontCloneRecheck && featureFlags.shopfrontCloneUrlscan,
+    crons: ["30 */6 * * *"],
+    flags: ["shopfrontCloneRecheck", "shopfrontCloneUrlscan"],
     consecutive: 2,
     shape:
       "pool>0 ∧ rechecked=0 (not quota), or every recheck failed to submit",
@@ -136,9 +162,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
         n(o, "submit_failed") >= n(o, "rechecked")),
   },
   "shopfront-clone-urlscan-submit": {
-    expectEvery: 26 * H, // daily 09:00
-    enabled: () =>
-      featureFlags.shopfrontCloneUrlscan,
+    crons: ["0 9 * * *"],
+    flags: ["shopfrontCloneUrlscan"],
     consecutive: 1,
     shape: "units>0 ∧ submitted=0 ∧ rate_limited=0",
     silentZero: (o) =>
@@ -147,9 +172,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       n(o, "rate_limited") === 0,
   },
   "shopfront-clone-urlscan-retrieve": {
-    expectEvery: 9 * H,
-    enabled: () =>
-      featureFlags.shopfrontCloneUrlscan,
+    crons: ["10 3,9,12,15,21 * * *"],
+    flags: ["shopfrontCloneUrlscan"],
     consecutive: 3,
     shape: "classified=0 while still_pending>0, or unnotified_weaponised>0",
     silentZero: (o) =>
@@ -157,29 +181,24 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       n(o, "unnotified_weaponised") > 0,
   },
   "shopfront-clone-netcraft-issue": {
-    expectEvery: 26 * H, // daily 11:00
-    enabled: () =>
-      featureFlags.shopfrontCloneOutreach && featureFlags.cloneNetcraftIssue,
+    crons: ["0 11 * * *"],
+    flags: ["shopfrontCloneOutreach", "cloneNetcraftIssue"],
     consecutive: 1,
     shape: "every uuid permanently rejected (the #1157 'not yet' shape)",
     silentZero: (o) =>
       n(o, "uuids") > 0 && n(o, "permanentRejects") >= n(o, "uuids"),
   },
   "shopfront-clone-netcraft-auto/resubmit": {
-    expectEvery: 26 * H,
-    enabled: () =>
-      featureFlags.cloneNetcraftResubmit &&
-      featureFlags.shopfrontCloneSubmitNetcraft &&
-      featureFlags.shopfrontCloneOutreach,
+    crons: NETCRAFT_AUTO_CRONS,
+    flags: ["cloneNetcraftResubmit", "shopfrontCloneSubmitNetcraft", "shopfrontCloneOutreach"],
     consecutive: 1,
     shape: "candidates>0 ∧ marked=0 ∧ deferred=0",
     silentZero: (o) =>
       n(o, "candidates") > 0 && n(o, "marked") === 0 && n(o, "deferred") === 0,
   },
   "shopfront-clone-netcraft-reconcile": {
-    expectEvery: 26 * H,
-    enabled: () =>
-      featureFlags.shopfrontCloneOutreach && featureFlags.cloneLifecycleReconcile,
+    crons: ["0 10 * * *", "0 22 * * *"],
+    flags: ["shopfrontCloneOutreach", "cloneLifecycleReconcile"],
     consecutive: 1,
     // Absence only (2026-09-24). "uuids=0 three runs running" was written when
     // every submission was re-read daily; since v316's unchanged-verdict
@@ -192,9 +211,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     silentZero: () => false,
   },
   "shopfront-nrd-daily-ingest": {
-    expectEvery: 26 * H,
-    enabled: () =>
-      featureFlags.shopfrontCloneWatch,
+    crons: ["30 8 * * *"],
+    flags: ["shopfrontCloneWatch"],
     consecutive: 1,
     shape: "domains_scanned=0, or every chunk failed",
     silentZero: (o) =>
@@ -203,9 +221,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
         n(o, "failed_chunks") >= n(o, "total_chunks")),
   },
   "clone-watch-auto-triage": {
-    expectEvery: 26 * H, // daily 13:00
-    enabled: () =>
-      featureFlags.cloneWatchAutoTriage,
+    crons: ["0 13 * * *"],
+    flags: ["cloneWatchAutoTriage"],
     consecutive: 2,
     // The lane's job is to CLEAR the queue: park the weak tail, confirm the
     // strict one. A run that parks nothing while the pending queue is the
@@ -218,62 +235,55 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       n(o, "eligible") > 0 && n(o, "confirmed") === 0 && n(o, "offline") === 0,
   },
   "shopfront-clone-netcraft-auto/auto": {
-    expectEvery: 26 * H, // daily 13:00
-    enabled: () =>
-      featureFlags.shopfrontCloneNetcraftAuto &&
-      featureFlags.shopfrontCloneSubmitNetcraft &&
-      featureFlags.shopfrontCloneOutreach,
+    crons: NETCRAFT_AUTO_CRONS,
+    flags: ["shopfrontCloneNetcraftAuto", "shopfrontCloneSubmitNetcraft", "shopfrontCloneOutreach"],
     consecutive: 1,
     shape: "candidates>0 ∧ marked=0",
     silentZero: (o) => n(o, "candidates") > 0 && n(o, "marked") === 0,
   },
   "clone-watch-enrich-attribution": {
-    expectEvery: 26 * H, // daily 13:30
-    enabled: () => featureFlags.cloneWatchAttribution,
+    crons: ["30 13 * * *"],
     // Two runs: a one-off RDAP outage should not page; six silent days
     // (2026-09-11..16, found by the 09-22 audit) must.
+    flags: ["cloneWatchAttribution"],
     consecutive: 2,
     shape: "pending>0 ∧ enriched=0",
     silentZero: (o) => n(o, "pending") > 0 && n(o, "enriched") === 0,
   },
   "shopfront-clone-notify-brand-prepare": {
-    expectEvery: 26 * H, // daily 09:30
-    enabled: () =>
-      featureFlags.shopfrontCloneOutreach && featureFlags.shopfrontCloneNotifyBrand,
+    crons: ["30 9 * * *"],
+    flags: ["shopfrontCloneOutreach", "shopfrontCloneNotifyBrand"],
     consecutive: 1,
     shape: "every prepared group failed",
     silentZero: (o) =>
       n(o, "groups_failed") > 0 && n(o, "batches_prepared") === 0,
   },
   "shopfront-clone-reemergence-monitor": {
-    expectEvery: 26 * H, // daily 06:45
+    crons: ["45 6 * * *"],
     // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
     // gate turns on without the cron restored, the lane pages `absent` — by
     // design; clone-watch-config.md "Flipping a PARKED lane ON".
-    enabled: () =>
-      featureFlags.cloneEnforcement && featureFlags.cloneReemergenceMonitor,
+    flags: ["cloneEnforcement", "cloneReemergenceMonitor"],
     consecutive: 1,
     shape: "(absence only)",
     silentZero: () => false,
   },
   "shopfront-clone-weekly-digest": {
-    expectEvery: 8 * 24 * H, // Sundays 10:00
+    crons: ["0 10 * * 0"],
     // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
     // gate turns on without the cron restored, the lane pages `absent` — by
     // design; clone-watch-config.md "Flipping a PARKED lane ON".
-    enabled: () =>
-      featureFlags.shopfrontCloneOutreach && featureFlags.shopfrontCloneWeeklyDigest,
+    flags: ["shopfrontCloneOutreach", "shopfrontCloneWeeklyDigest"],
     consecutive: 1,
     shape: "(absence only)",
     silentZero: () => false,
   },
   "shopfront-clone-enforcement-execute": {
-    expectEvery: 4 * 3_600_000, // every 3h at :15
+    crons: ["15 */3 * * *"],
     // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
     // gate turns on without the cron restored, the lane pages `absent` — by
     // design; clone-watch-config.md "Flipping a PARKED lane ON".
-    enabled: () =>
-      featureFlags.cloneEnforcement && featureFlags.cloneEnforceAutoBlocklist,
+    flags: ["cloneEnforcement", "cloneEnforceAutoBlocklist"],
     consecutive: 1,
     // A fully-deduped batch legitimately enqueues 0, so there is no honest
     // silent-zero shape here; the watch is absence (the lane stopped running).
@@ -285,7 +295,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // ABSENCE_WATCHES `classify` stream below, which proves vendor calls
     // happen. This row judges the BATCH: alerts in, nothing classified.
     expectEvery: Number.POSITIVE_INFINITY,
-    enabled: () => featureFlags.shopfrontClonePreclassify,
+    flags: ["shopfrontClonePreclassify"],
     consecutive: 1,
     shape: "alerts>0 ∧ classified=0",
     silentZero: (o) => n(o, "alerts") > 0 && n(o, "classified") === 0,
@@ -294,6 +304,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // Monthly (1st, 11:00). Absence is THE signal for a monthly Lane: the
     // 2026-09-01 stewardship run was finish-cancelled with no retry and no
     // row, and nothing noticed that August's brand reports never existed.
+    crons: ["0 11 1 * *"],
+    // Monthly: the cron parser refuses day-of-month, so the window is explicit.
     expectEvery: 32 * 24 * H,
     consecutive: 1,
     shape: "clones found but no store rows written",
@@ -301,14 +313,14 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "report-brand-stewardship": {
     expectEvery: 32 * 24 * H, // monthly, after the store is written
-    enabled: () => featureFlags.brandStewardshipReport,
+    flags: ["brandStewardshipReport"],
     consecutive: 1,
     shape: "every report row failed to write",
     silentZero: (o) => n(o, "failed") > 0 && n(o, "prepared") === 0,
   },
   "shopfront-clone-fp-cluster-digest": {
-    expectEvery: 8 * 24 * H, // Sundays 09:30
-    enabled: () => featureFlags.shopfrontCloneWatch,
+    crons: ["30 9 * * 0"],
+    flags: ["shopfrontCloneWatch"],
     consecutive: 1,
     shape: "(absence only)",
     silentZero: () => false,
@@ -321,6 +333,38 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     silentZero: (o) => n(o, "pool") > 0 && n(o, "written") === 0,
   },
 };
+
+/**
+ * The Lane's cron triggers, for its createFunction. Throws for a Lane that
+ * declares none — an event-driven Lane asking for a schedule is a wiring bug.
+ */
+export function laneCrons(lane: LaneId): Array<{ cron: string }> {
+  const crons = LANE_SHAPES[lane].crons;
+  if (!crons?.length) throw new Error(`laneCrons: ${lane} declares no crons`);
+  return crons.map((cron) => ({ cron }));
+}
+
+/** Longest healthy gap between the Lane's rows: explicit, else from its crons. */
+export function laneExpectEvery(lane: LaneId): number {
+  const shape = LANE_SHAPES[lane];
+  if (shape.expectEvery !== undefined) return shape.expectEvery;
+  if (shape.crons?.length) return expectEveryFromCrons(shape.crons);
+  throw new Error(`laneExpectEvery: ${lane} declares neither crons nor expectEvery`);
+}
+
+export type LaneGate = { ok: true } | { ok: false; reason: string };
+
+/**
+ * The Lane's flag gate, evaluated now. Lane bodies return
+ * `{ skipped: true, reason }` on `ok: false`; the digest skips the Lane.
+ * `reason` names the first flag that is off.
+ */
+export function laneGate(lane: LaneId): LaneGate {
+  for (const flag of LANE_SHAPES[lane].flags ?? []) {
+    if (!featureFlags[flag]) return { ok: false, reason: `${flag} disabled` };
+  }
+  return { ok: true };
+}
 
 /**
  * Absence-only watches: streams with no per-run outcome where the only
@@ -361,7 +405,7 @@ export function laneFetchPlan(): Array<{ features: string[]; windowMs: number }>
   const long = new Set<string>();
   let longWindow = 0;
   for (const lane of Object.keys(LANE_SHAPES) as LaneId[]) {
-    const every = LANE_SHAPES[lane].expectEvery;
+    const every = laneExpectEvery(lane);
     const feature = LANES[lane].feature;
     if (Number.isFinite(every) && every > SHORT_FETCH_WINDOW_MS) {
       long.add(feature);
@@ -381,8 +425,12 @@ export const LANES_CHECKED =
 
 export interface LaneHealthInput {
   now?: number;
-  /** `feature_brakes.feature` → `paused_until` ISO, for the roster's brake keys. */
-  brakes?: Record<string, string | null | undefined>;
+  /**
+   * `feature_brakes.feature` → `paused_until` ISO, for the roster's brake keys;
+   * `"unreadable"` when the read failed. The third state is reported, never
+   * collapsed into "not braked" (brakeState's rule, ADR-0025 amendment).
+   */
+  brakes?: Record<string, string | null | undefined> | "unreadable";
 }
 
 const seenOf = <L extends LaneId>(r: LaneCostRow): Seen<L> =>
@@ -448,13 +496,25 @@ export function classifyLaneHealth(
   input: LaneHealthInput = {},
 ): LaneProblem[] {
   const now = input.now ?? Date.now();
-  const brakes = input.brakes ?? {};
+  const brakesUnreadable = input.brakes === "unreadable";
+  const brakes: Record<string, string | null | undefined> =
+    input.brakes === "unreadable" ? {} : (input.brakes ?? {});
   const problems: LaneProblem[] = [];
+  if (brakesUnreadable) {
+    // One line, not one per lane: the lanes below are still judged (as
+    // unbraked), so a braked lane may read "absent" — this line says why.
+    problems.push({
+      lane: "feature_brakes",
+      kind: "brake_unknown",
+      detail:
+        "brake state unreadable — brake-gated lanes judged as if unbraked (an 'absent' below may be a brake)",
+    });
+  }
 
   for (const lane of Object.keys(LANE_SHAPES) as LaneId[]) {
     const key = LANES[lane];
     const shape = LANE_SHAPES[lane];
-    if (shape.enabled && !shape.enabled()) continue;
+    if (!laneGate(lane).ok) continue;
     const mine = rowsFor(rows, key.feature, key.operation);
 
     // Brake FIRST: a braked lane skips without writing a row, so judging
@@ -476,7 +536,7 @@ export function classifyLaneHealth(
       key.feature,
       key.operation,
       mine[0],
-      shape.expectEvery,
+      laneExpectEvery(lane),
       now,
     );
     if (absent) {

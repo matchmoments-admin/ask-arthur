@@ -1,12 +1,11 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
@@ -31,6 +30,7 @@ import {
   selectFalseNegativeCandidates,
   type PendingAlert,
 } from "@/lib/clone-watch/netcraft-urls";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch — Netcraft false-negative auto-escalation (PR2-hardened).
@@ -85,7 +85,7 @@ import {
  * docs/plans/clone-watch-brand-value-features.md §F4.
  */
 
-const BRAKE = "clone_netcraft_issue";
+const BRAKE = LANES["shopfront-clone-netcraft-issue"].brake;
 const DEFAULT_DAILY_CAP = 20;
 
 // Break the per-uuid loop before the finish budget (#1069). This fn runs up to
@@ -166,7 +166,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
     timeouts: { finish: "12m" },
   },
   [
-    { cron: "0 11 * * *" },
+    ...laneCrons("shopfront-clone-netcraft-issue"),
     { event: "shopfront/clone.netcraft-issue.manual-trigger.v1" },
     // FAST LANE (v249-era, no migration): the daily cron WAS the latency. Steady
     // -state weaponised_at → issue_reported_at measured a 23h median (n=5) —
@@ -187,15 +187,9 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
   withAxiomLogging(
     { fnId: "shopfront-clone-netcraft-issue" },
     async ({ event, step, runId }) => {
-      if (!featureFlags.shopfrontCloneOutreach) {
-        return {
-          skipped: true,
-          reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled",
-        };
-      }
-      if (!featureFlags.cloneNetcraftIssue) {
-        return { skipped: true, reason: "FF_CLONE_NETCRAFT_ISSUE disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-netcraft-issue");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
       const braked = await step.run("check-brake", () =>
         isFeatureBrakedOrUnknown(BRAKE),
       );

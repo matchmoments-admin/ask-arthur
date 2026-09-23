@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { LaneId } from "@askarthur/scam-engine/lane-outcome";
+import { laneCrons } from "@/lib/laneHealth";
 
 import {
   buildNetcraftBulkBody,
@@ -219,12 +220,10 @@ describe("postNetcraftBulk", () => {
  * starving the gate in prod.
  */
 describe("netcraft auto-lane cron ordering (v284)", () => {
-  const FN_DIR = new URL("../app/api/inngest/functions/", import.meta.url);
-
-  const cronsOf = (file: string): string[] => {
-    const src = readFileSync(new URL(file, FN_DIR), "utf8");
-    return [...src.matchAll(/\bcron:\s*"([^"]+)"/g)].map((m) => m[1]);
-  };
+  // Read from the ONE declaration each Lane's createFunction uses
+  // (LANE_SHAPES via laneCrons) instead of regex-scraping the source files.
+  const cronsOf = (lane: LaneId): string[] =>
+    laneCrons(lane).map((t) => t.cron);
   const fixedHour = (cron: string): number => {
     const hour = cron.trim().split(/\s+/)[1];
     expect(hour, `expected a fixed hour in "${cron}"`).toMatch(/^\d+$/);
@@ -232,9 +231,9 @@ describe("netcraft auto-lane cron ordering (v284)", () => {
   };
 
   it("fires after the first urlscan-retrieve pass following urlscan-submit", () => {
-    const submitHour = fixedHour(cronsOf("clone-watch-urlscan-submit.ts")[0]);
+    const submitHour = fixedHour(cronsOf("shopfront-clone-urlscan-submit")[0]);
 
-    const retrieveCron = cronsOf("clone-watch-urlscan-retrieve.ts")[0];
+    const retrieveCron = cronsOf("shopfront-clone-urlscan-retrieve")[0];
     const hourField = retrieveCron.trim().split(/\s+/)[1];
     // Both shapes: "*/N" and an explicit list "3,9,12,15,21" (2026-09-23).
     const stepN = Number(/^\*\/(\d+)$/.exec(hourField)?.[1]);
@@ -247,7 +246,7 @@ describe("netcraft auto-lane cron ordering (v284)", () => {
     // in the same hour may run before the batch's scans complete.
     const firstVerdictHour = Math.min(...retrieveHours.filter((h) => h > submitHour));
 
-    const autoHours = cronsOf("clone-watch-netcraft-auto.ts").map(fixedHour);
+    const autoHours = cronsOf("shopfront-clone-netcraft-auto/auto").map(fixedHour);
     expect(autoHours.length).toBeGreaterThan(0);
     for (const h of autoHours) {
       expect(

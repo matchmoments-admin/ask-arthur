@@ -1,10 +1,9 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCostAsync } from "@/lib/cost-telemetry";
 import {
@@ -13,6 +12,7 @@ import {
 } from "@/lib/clone-watch/weaponisation-risk";
 import { submitCandidateBatch } from "@/lib/clone-watch/urlscan-submit-one";
 import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch — lifecycle re-check loop (Wave 0 PR-B).
@@ -65,7 +65,7 @@ const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
 // ceiling; the :30 cron never sat on the fleet pileup so it happened not to
 // expire at index 0 the way the 09:00 submit lane did. Leftovers rotate next run.
 const RECHECK_SUBMIT_WALL_CLOCK_MS = 220_000;
-const BRAKE = "shopfront_clone_recheck";
+const BRAKE = LANES["shopfront-clone-lifecycle-recheck"].brake;
 
 interface RecheckRow {
   id: number;
@@ -190,21 +190,15 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     // Offset from urlscan-retrieve (10 */3 since #1069) so a rescan submit and
     // a retrieve tick don't race on the same row (v224). The offset is 20 min,
     // narrowed from 30 when retrieve moved off the top of the hour.
-    { cron: "30 */6 * * *" },
+    ...laneCrons("shopfront-clone-lifecycle-recheck"),
     { event: "shopfront/clone.lifecycle-recheck.manual-trigger.v1" },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-lifecycle-recheck" },
     async ({ step }) => {
-      if (!featureFlags.shopfrontCloneRecheck) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_RECHECK disabled" };
-      }
-      // The re-check loop's ONLY job is to trigger urlscan re-scans. If the
-      // urlscan pipeline can't run, don't mark candidates rechecked (which would
-      // bump last_rechecked_at and exclude them for a full cadence with no scan).
-      if (!featureFlags.shopfrontCloneUrlscan) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-lifecycle-recheck");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
       if (!process.env.URLSCAN_API_KEY) {
         return { skipped: true, reason: "URLSCAN_API_KEY not set" };
       }

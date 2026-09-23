@@ -2,7 +2,6 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -15,6 +14,7 @@ import {
   type ReconcileAlert,
   type ReconcileFetch,
 } from "@/lib/clone-watch/netcraft-urls";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch — Netcraft PER-URL lifecycle reconciler (PR3.1, Part A).
@@ -102,19 +102,15 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     // CADENCE_HOURS throttle means the 22:00 run picks up DIFFERENT uuids
     // than 10:00 did rather than re-checking them, and `singleton: skip`
     // makes an overrun harmless.
-    { cron: "0 10 * * *" },
-    { cron: "0 22 * * *" },
+    ...laneCrons("shopfront-clone-netcraft-reconcile"),
     { event: "shopfront/clone.netcraft-reconcile.manual-trigger.v1" },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-netcraft-reconcile" },
     async ({ step, runId }) => {
-      if (!featureFlags.shopfrontCloneOutreach) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
-      }
-      if (!featureFlags.cloneLifecycleReconcile) {
-        return { skipped: true, reason: "FF_CLONE_LIFECYCLE_RECONCILE disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-netcraft-reconcile");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
 
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };

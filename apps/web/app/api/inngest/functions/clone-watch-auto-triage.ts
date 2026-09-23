@@ -1,7 +1,6 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { readStringEnv } from "@askarthur/utils/env";
 import { logger } from "@askarthur/utils/logger";
 import { render } from "@react-email/components";
@@ -143,6 +142,7 @@ export function toSummaryItem(alert: AlertRow): CloneWatchRunSummaryItem {
 // isCandidateLive's canonical home is lib/clone-watch/liveness.ts (F3) —
 // shared with the Netcraft issue reporter's pre-file probe.
 import { isCandidateLive } from "@/lib/clone-watch/liveness";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 export { isCandidateLive };
 
 // inngest-finish-budget: 49 boundaries — 4 static + 3 per-item steps
@@ -160,11 +160,12 @@ export const cloneWatchAutoTriage = inngest.createFunction(
     timeouts: { finish: "26m" },
     retries: 2,
   },
-  { cron: "0 13 * * *" }, // daily, after the 08:30 NRD ingest + urlscan/preclassify
+  // daily 13:00, after the 08:30 NRD ingest + urlscan/preclassify
+  laneCrons("clone-watch-auto-triage"),
   withAxiomLogging({ fnId: "clone-watch-auto-triage" }, async ({ step }) => {
-    if (!featureFlags.cloneWatchAutoTriage) {
-      return { skipped: true, reason: "FF_CLONE_WATCH_AUTO_TRIAGE disabled" };
-    }
+    // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+    const gate = laneGate("clone-watch-auto-triage");
+    if (!gate.ok) return { skipped: true, reason: gate.reason };
 
     const shadowRecipient =
       readStringEnv("CLONE_WATCH_SHADOW_RECIPIENT") ||

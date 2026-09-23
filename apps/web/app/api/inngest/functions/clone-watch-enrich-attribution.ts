@@ -24,7 +24,8 @@ import {
   type KitPivotOutcome,
   type KitPivotRow,
 } from "@/lib/clone-watch/kit-pivot";
-import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-watch attribution enricher (Phase 2). Builds the per-clone dossier —
@@ -43,7 +44,7 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
  * ENRICH_RUN_CAP/run; runs daily just after auto-triage.
  */
 
-const BRAKE = "shopfront_clone_outreach";
+const BRAKE = LANES["clone-watch-enrich-attribution"].brake;
 // Bumped 15 → 60: attribution now feeds the monthly Brand Stewardship email,
 // which lists registrar + abuse contact for EVERY detected clone (not just
 // operator-confirmed ones), so the enricher must keep pace with the full NRD
@@ -144,7 +145,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     throttle: { limit: 6, period: "1d" },
   },
   [
-    { cron: "30 13 * * *" }, // daily, just after auto-triage (13:00 UTC)
+    ...laneCrons("clone-watch-enrich-attribution"), // daily 13:30, just after auto-triage
     // Verification/on-demand trigger. The enricher was the only clone-watch
     // stage without one (siblings: urlscan-submit, urlscan-retrieve,
     // lifecycle-recheck, enforcement-execute all have manual triggers), which
@@ -155,9 +156,9 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
   withAxiomLogging(
     { fnId: "clone-watch-enrich-attribution" },
     async ({ step }) => {
-      if (!featureFlags.cloneWatchAttribution) {
-        return { skipped: true, reason: "FF_CLONE_WATCH_ATTRIBUTION disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("clone-watch-enrich-attribution");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
 
       // The brake read rides inside select-pending (ADR-0019 bookkeeping rule;
       // inngest-slot-budget.md "Step 3"): it was its own `check-brake` step,

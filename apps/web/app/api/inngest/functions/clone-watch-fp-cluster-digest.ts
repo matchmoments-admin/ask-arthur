@@ -1,11 +1,11 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * PR-D1 (#497) — Weekly FP-cluster digest.
@@ -62,7 +62,7 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     // with it every Sunday 09:00 UTC — the same PR-#431 deconfliction policy
     // the sibling weekly-digest (0 10) follows. (The old urlscan-rescan 0 11
     // cron was deleted in #583; rescans now run inside lifecycle-recheck.)
-    { cron: "30 9 * * 0" },
+    ...laneCrons("shopfront-clone-fp-cluster-digest"),
     { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
   ],
   withAxiomLogging(
@@ -70,9 +70,9 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     async ({ step }) => {
       logger.info("clone-watch fp-cluster-digest: invoked");
 
-      if (!featureFlags.shopfrontCloneWatch) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-fp-cluster-digest");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
 
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };

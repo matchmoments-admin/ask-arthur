@@ -7,7 +7,6 @@ import {
   buildBrandResolver,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { loadAliasRecord } from "@/lib/brand-aliases";
@@ -336,6 +335,7 @@ export {
   type CloneBrandMetrics,
   type CloneDetail,
 } from "@/lib/clone-watch/clone-metrics";
+import { laneGate } from "@/lib/laneHealth";
 
 /**
  * The trigger set, exported so a test can pin the ordering contract: the
@@ -365,12 +365,9 @@ export const reportBrandStewardship = inngest.createFunction(
   withAxiomLogging(
     { fnId: "report-brand-stewardship" },
     async ({ event, step }) => {
-      if (!featureFlags.brandStewardshipReport) {
-        return {
-          skipped: true,
-          reason: "FF_BRAND_STEWARDSHIP_REPORT disabled",
-        };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("report-brand-stewardship");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
 
       const periodOverride = (
         event?.data as { periodMonth?: string } | undefined

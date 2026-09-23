@@ -1,11 +1,11 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { laneGate } from "@/lib/laneHealth";
 
 /**
  * Layer 5 — weekly digest of clone-watch activity. Cron Sun 09:00 UTC
@@ -43,25 +43,17 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
   // in prod, so the weekly tick just burned an execution to early-return
   // (fleet audit 2026-09-16). Invoke on demand via the
   // `shopfront/clone.weekly-digest.manual-trigger.v1` event. **At launch,
-  // restore by re-adding `{ cron: "0 10 * * 0" }`** alongside this event
-  // trigger — Sun 10:00 UTC, deconflicted from the daily feedback-digest cron
-  // (0 9 * * *) per ultrareview M3; laneHealth's 8d expectEvery assumes it.
+  // restore by re-adding `...laneCrons("shopfront-clone-weekly-digest")`**
+  // alongside this event trigger — Sun 10:00 UTC (declared in LANE_SHAPES),
+  // deconflicted from the daily feedback-digest cron (0 9 * * *) per
+  // ultrareview M3.
   { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
   withAxiomLogging(
     { fnId: "shopfront-clone-weekly-digest" },
     async ({ step }) => {
-      if (!featureFlags.shopfrontCloneOutreach) {
-        return {
-          skipped: true,
-          reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled",
-        };
-      }
-      if (!featureFlags.shopfrontCloneWeeklyDigest) {
-        return {
-          skipped: true,
-          reason: "FF_SHOPFRONT_CLONE_WEEKLY_DIGEST disabled",
-        };
-      }
+      // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
+      const gate = laneGate("shopfront-clone-weekly-digest");
+      if (!gate.ok) return { skipped: true, reason: gate.reason };
 
       const sb = createServiceClient();
       if (!sb) {

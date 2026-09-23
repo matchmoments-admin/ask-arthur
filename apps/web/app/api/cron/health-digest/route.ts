@@ -125,9 +125,11 @@ function buildMessage(
       absent:
         "🚫 <b>Clone-watch lane wrote no outcome row (not running, or skipped without logging):</b>",
       braked: "🛑 <b>Clone-watch lane braked:</b>",
+      brake_unknown: "❓ <b>Clone-watch brake state unreadable:</b>",
       silent_zero: "🕳️ <b>Clone-watch lane running but doing nothing:</b>",
     };
     for (const kind of [
+      "brake_unknown",
       "absent",
       "braked",
       "silent_zero",
@@ -283,18 +285,22 @@ export async function GET(req: Request) {
     });
   }
   if (brakeRes.error) {
-    // Reads as "not braked"; the issue lane's permanentRejects predicate
-    // still catches the trip shape from the row itself.
+    // Reported as its own lane problem (brake_unknown), not collapsed into
+    // "not braked" — that silent default was the one brake read in the repo
+    // that bypassed brakeState's three-valued rule (review 2026-09-24).
     logger.error("health-digest: brake query failed", {
       error: brakeRes.error.message,
     });
   }
-  const brakes: Record<string, string | null> = {};
-  for (const b of (brakeRes.data ?? []) as {
-    feature: string;
-    paused_until: string | null;
-  }[]) {
-    brakes[b.feature] = b.paused_until;
+  let brakes: Record<string, string | null> | "unreadable" = "unreadable";
+  if (!brakeRes.error) {
+    brakes = {};
+    for (const b of (brakeRes.data ?? []) as {
+      feature: string;
+      paused_until: string | null;
+    }[]) {
+      brakes[b.feature] = b.paused_until;
+    }
   }
   // A failed lane query must not read as "all lanes healthy": with no rows
   // every roster lane classifies as absent, which is the loud outcome.

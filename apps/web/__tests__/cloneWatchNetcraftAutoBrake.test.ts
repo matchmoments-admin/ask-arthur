@@ -24,7 +24,9 @@ vi.mock("@askarthur/scam-engine/inngest/with-axiom-logging", () => ({
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: () => ({ rpc: m.rpc }),
 }));
-vi.mock("@askarthur/scam-engine/lane-outcome", () => ({
+vi.mock("@askarthur/scam-engine/lane-outcome", async (importOriginal) => ({
+  // The real roster: Lanes read their brake key from it (LANE_SHAPES/LANES).
+  LANES: (await importOriginal<typeof import("@askarthur/scam-engine/lane-outcome")>()).LANES,
   recordLaneError: m.laneError,
   recordLaneOutcome: m.laneOutcome,
 }));
