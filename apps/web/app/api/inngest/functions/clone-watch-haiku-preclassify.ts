@@ -321,10 +321,15 @@ export function alertsFromEvents(events: ReadonlyArray<{ data?: unknown }>): {
   return { alerts: [...byId.values()], invalid };
 }
 
-// Jev ~300 ms/call; Haiku ~3 s — both well inside the budget at 50 alerts.
+/** Inngest plan ceiling for batchEvents.maxSize (Hobby: 5). Exported for the
+ *  guard test — exceeding it fails the entire app sync, not just this fn. */
+export const INNGEST_PLAN_MAX_BATCH_SIZE = 5;
+export const PRECLASSIFY_BATCH_SIZE = INNGEST_PLAN_MAX_BATCH_SIZE;
+
+// Jev ~300 ms/call; Haiku ~3 s — both well inside the budget per batch.
 const JEV_CONCURRENCY = 4;
 const HAIKU_CONCURRENCY = 2;
-// 50 × Haiku 3 s / 2 in flight ≈ 75 s worst realistic; 200 s leaves room for a
+// A batch of 5 × Haiku 3 s / 2 in flight ≈ 9 s; 200 s leaves room for a
 // slow vendor. Alerts the budget can't reach are left for tomorrow's re-fan.
 const BATCH_WALL_CLOCK_MS = 200_000;
 
@@ -335,11 +340,15 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     id: "shopfront-clone-haiku-preclassify",
     name: "Clone-Watch: pre-classifier (Jev primary, batched)",
     retries: 2,
-    // ONE run per daily batch (2026-09-23; plan
-    // docs/plans/preclassify-batch-events-2026-09-23.md). Was one run per alert
-    // at concurrency 3: ~26 runs holding 3 of the account's 5 slots at 08:31.
-    // Up to 50 events per run, flushed 60 s after the first arrives.
-    batchEvents: { maxSize: 50, timeout: "60s" },
+    // Batched (2026-09-23; plan docs/plans/preclassify-batch-events-2026-09-23.md).
+    // Was one run per alert at concurrency 3: ~26 runs holding 3 of the
+    // account's 5 slots at 08:31. maxSize is 5 because the current Inngest plan
+    // REJECTS a larger batch — and a rejected function fails the WHOLE app sync
+    // (`modified:false`: no function change registers). #1190 shipped 50 and
+    // the post-deploy resync 400'd with "cannot be larger than 5". A plan
+    // upgrade can raise it; inngestBatchLimit.test.ts pins the ceiling.
+    // ~26 alerts → ~6 runs, each one budgeted step.
+    batchEvents: { maxSize: PRECLASSIFY_BATCH_SIZE, timeout: "60s" },
     concurrency: { limit: 1 },
     // No `idempotency` — Inngest rejects it with batchEvents. The guarantee it
     // gave lives where it always really lived: the fan-out's event id
