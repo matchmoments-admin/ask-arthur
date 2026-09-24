@@ -2,6 +2,8 @@
 // returns unified scan result with A+ to F grade.
 
 import JSZip from "jszip";
+import { readBodyCapped } from "@askarthur/utils/read-body-capped";
+import { readZipEntryTextCapped } from "@askarthur/utils/zip-entry-capped";
 import type { ScanCheck, ScanCategory, ScanRecommendation, UnifiedScanResult } from "@askarthur/types/scanner";
 import { calculateGrade } from "@askarthur/types/scanner";
 import type { CRXManifest, ExtCheckCategory, ExtensionAuditOptions } from "./types";
@@ -15,9 +17,13 @@ async function fetchCRX(extensionId: string): Promise<ArrayBuffer> {
   const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0&acceptformat=crx3&x=id%3D${encodeURIComponent(extensionId)}%26uc`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`Failed to fetch CRX: ${res.status}`);
-  const buf = await res.arrayBuffer();
-  if (buf.byteLength > MAX_CRX_SIZE) throw new Error("CRX too large");
-  return buf;
+  // Streamed with a hard cap (the size check used to run after buffering).
+  const body = await readBodyCapped(res, MAX_CRX_SIZE);
+  if (!body.ok) throw new Error(body.reason === "too_large" ? "CRX too large" : "Empty CRX");
+  return body.bytes.buffer.slice(
+    body.bytes.byteOffset,
+    body.bytes.byteOffset + body.bytes.byteLength,
+  ) as ArrayBuffer;
 }
 
 function extractZip(buffer: ArrayBuffer): ArrayBuffer {
@@ -28,23 +34,33 @@ function extractZip(buffer: ArrayBuffer): ArrayBuffer {
   return buffer.slice(12 + headerLen);
 }
 
+// Uncompressed caps: entries are inflated by streaming and abandoned past
+// the cap, so a highly compressed entry can't expand without bound.
+const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_SOURCE_FILE_BYTES = 500_000;
+const MAX_TOTAL_SOURCE_BYTES = 25 * 1024 * 1024;
+
 async function parseManifest(zipData: ArrayBuffer): Promise<CRXManifest> {
   const zip = await JSZip.loadAsync(zipData);
   const file = zip.file("manifest.json");
   if (!file) throw new Error("No manifest.json in CRX");
-  return JSON.parse(await file.async("text"));
+  const text = await readZipEntryTextCapped(file, MAX_MANIFEST_BYTES);
+  if (text === null) throw new Error("manifest.json too large");
+  return JSON.parse(text);
 }
 
 async function extractSourceFiles(zipData: ArrayBuffer): Promise<Map<string, string>> {
   const zip = await JSZip.loadAsync(zipData);
   const sources = new Map<string, string>();
   const jsFiles = zip.filter((path) => path.endsWith(".js") || path.endsWith(".ts"));
+  let total = 0;
   for (const f of jsFiles.slice(0, 50)) { // Limit to 50 files
     try {
-      const content = await f.async("text");
-      if (content.length < 500_000) { // Skip very large files
-        sources.set(f.name, content);
-      }
+      const content = await readZipEntryTextCapped(f, MAX_SOURCE_FILE_BYTES);
+      if (content === null) continue; // Skip very large files
+      total += content.length;
+      if (total > MAX_TOTAL_SOURCE_BYTES) break;
+      sources.set(f.name, content);
     } catch { /* skip binary/corrupt files */ }
   }
   return sources;

@@ -225,11 +225,12 @@ describe("analyze-image route", () => {
     const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        headers: { get: () => String(jpegBytes.length) },
-        arrayBuffer: async () => jpegBytes.buffer,
-      })),
+      // A real Response: the image fetch streams the body with a byte cap.
+      vi.fn(async () =>
+        new Response(jpegBytes, {
+          headers: { "content-length": String(jpegBytes.length) },
+        }),
+      ),
     );
 
     const res = await POST(makeReq(GOOD_BODY));
@@ -262,11 +263,12 @@ describe("analyze-image route", () => {
     const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        headers: { get: () => String(jpegBytes.length) },
-        arrayBuffer: async () => jpegBytes.buffer,
-      })),
+      // A real Response: the image fetch streams the body with a byte cap.
+      vi.fn(async () =>
+        new Response(jpegBytes, {
+          headers: { "content-length": String(jpegBytes.length) },
+        }),
+      ),
     );
 
     const res = await POST(makeReq(GOOD_BODY));
@@ -284,11 +286,12 @@ describe("analyze-image route", () => {
     const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        headers: { get: () => String(jpegBytes.length) },
-        arrayBuffer: async () => jpegBytes.buffer,
-      })),
+      // A real Response: the image fetch streams the body with a byte cap.
+      vi.fn(async () =>
+        new Response(jpegBytes, {
+          headers: { "content-length": String(jpegBytes.length) },
+        }),
+      ),
     );
 
     const res = await POST(makeReq(GOOD_BODY));

@@ -13,7 +13,9 @@
     "./request-id": "./src/request-id.ts",
     "./concurrency": "./src/concurrency.ts",
     "./pgvector": "./src/pgvector.ts",
-    "./html": "./src/html.ts"
+    "./html": "./src/html.ts",
+    "./read-body-capped": "./src/read-body-capped.ts",
+    "./zip-entry-capped": "./src/zip-entry-capped.ts"
   },
   "scripts": {
     "test": "vitest run --passWithNoTests",

@@ -19,8 +19,8 @@
 // and reused by future outbound fetchers (Phase A Visual Match per #376).
 
 import { lookup as nodeDnsLookup } from "node:dns";
-import type { LookupFunction } from "node:net";
-import { Agent } from "undici";
+import { isIP, type LookupFunction } from "node:net";
+import { Agent, buildConnector } from "undici";
 
 // The IP classifier lives in the pure `./private-ip` module (no undici import)
 // so `safebrowsing.isPrivateURL` can share the exact same blocklist without
@@ -71,6 +71,36 @@ export function buildSsrfLookup(
   };
 }
 
+/** Strip IPv6 brackets; return the literal when `host` is an IP, else null. */
+function ipLiteral(host: string): string | null {
+  const bare = host.replace(/^\[/, "").replace(/\]$/, "");
+  return isIP(bare) ? bare : null;
+}
+
+/**
+ * Wrap an undici connector so an IP-LITERAL host is checked too. The DNS
+ * `lookup` hook above only runs for names: Node's socket connect skips
+ * resolution entirely when the host is already an IP, so without this a
+ * URL (or a followed redirect) naming a private IP directly would connect.
+ * Exposed for testing.
+ */
+export function buildSsrfConnector(
+  base: buildConnector.connector = buildConnector({ lookup: buildSsrfLookup() }),
+): buildConnector.connector {
+  return (options, callback) => {
+    const literal = ipLiteral(options.hostname);
+    if (literal && isPrivateIP(literal)) {
+      const blocked: NodeJS.ErrnoException = new Error(
+        `SSRF: ${options.hostname} is a private IP`,
+      );
+      blocked.code = "EPRIVATEHOST";
+      callback(blocked, null);
+      return;
+    }
+    return base(options, callback);
+  };
+}
+
 /**
  * Singleton SSRF-safe undici dispatcher. Pass as `dispatcher: ssrfSafeDispatcher`
  * to any `fetch()` that retrieves attacker-controlled content. Closes both
@@ -78,5 +108,5 @@ export function buildSsrfLookup(
  * attacks that the syntactic `isPrivateURL` check cannot catch.
  */
 export const ssrfSafeDispatcher = new Agent({
-  connect: { lookup: buildSsrfLookup() },
+  connect: buildSsrfConnector(),
 });

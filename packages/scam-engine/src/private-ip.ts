@@ -8,8 +8,7 @@
 // it's safe to pull into any module — unlike ssrf-dispatcher, which
 // instantiates an undici Agent at import time.
 
-export const PRIVATE_IP_PATTERNS: RegExp[] = [
-  // IPv4
+const IPV4_PRIVATE_PATTERNS: RegExp[] = [
   /^127\./, //                                   loopback
   /^10\./, //                                    RFC1918 class A
   /^172\.(1[6-9]|2\d|3[01])\./, //               RFC1918 class B
@@ -18,12 +17,25 @@ export const PRIVATE_IP_PATTERNS: RegExp[] = [
   /^0\./, //                                     current network
   /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // shared / CGNAT
   /^198\.1[89]\./, //                            benchmarking
-  // IPv6
+  /^192\.0\.0\./, //                             IETF protocol assignments
+  /^(22[4-9]|23\d)\./, //                        multicast 224/4
+  /^(24\d|25[0-5])\./, //                        reserved 240/4 + broadcast
+];
+
+// Only ever tested against strings containing ":" (see isPrivateIP), so a
+// HOSTNAME passed in by isPrivateURL — "fdic.gov", "ffmpeg.org" — never matches.
+const IPV6_PRIVATE_PATTERNS: RegExp[] = [
   /^::1$/i, //                                   loopback
   /^::$/, //                                     unspecified
   /^fc/i, //                                     unique local (fc00::/7)
   /^fd/i, //                                     unique local (fd00::/8)
   /^fe[89ab]/i, //                               link-local (fe80::/10)
+  /^ff/i, //                                     multicast (ff00::/8)
+];
+
+export const PRIVATE_IP_PATTERNS: RegExp[] = [
+  ...IPV4_PRIVATE_PATTERNS,
+  ...IPV6_PRIVATE_PATTERNS,
 ];
 
 /**
@@ -54,5 +66,32 @@ export function isPrivateIP(address: string): boolean {
     return true; // unrecognised mapped form → block defensively
   }
 
-  return PRIVATE_IP_PATTERNS.some((re) => re.test(addr));
+  // Forms that embed an IPv4 address: NAT64 (64:ff9b::/96), 6to4
+  // (2002:AABB:CCDD::/48) and deprecated IPv4-compatible (::a.b.c.d /
+  // ::aabb:ccdd). Decode and re-check the embedded IPv4.
+  const embedded = embeddedIPv4(addr);
+  if (embedded) return isPrivateIP(embedded);
+
+  const patterns = addr.includes(":") ? IPV6_PRIVATE_PATTERNS : IPV4_PRIVATE_PATTERNS;
+  return patterns.some((re) => re.test(addr));
+}
+
+function hexPairToDotted(h1: string, h2: string): string {
+  const a = parseInt(h1, 16);
+  const b = parseInt(h2, 16);
+  return `${(a >> 8) & 255}.${a & 255}.${(b >> 8) & 255}.${b & 255}`;
+}
+
+function embeddedIPv4(addr: string): string | null {
+  let m = addr.match(/^64:ff9b::(\d{1,3}(?:\.\d{1,3}){3})$/i);
+  if (m) return m[1]!;
+  m = addr.match(/^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (m) return hexPairToDotted(m[1]!, m[2]!);
+  m = addr.match(/^2002:([0-9a-f]{1,4}):([0-9a-f]{1,4})(?::|$)/i);
+  if (m) return hexPairToDotted(m[1]!, m[2]!);
+  m = addr.match(/^::(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (m) return m[1]!;
+  m = addr.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (m) return hexPairToDotted(m[1]!, m[2]!);
+  return null;
 }

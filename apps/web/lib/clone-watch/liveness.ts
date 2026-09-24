@@ -1,4 +1,5 @@
 import { Resolver } from "node:dns/promises";
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 
 /**
  * Clone-watch liveness probing — shared by auto-triage (confirm a clone is
@@ -296,10 +297,15 @@ async function getStatus(url: string): Promise<number> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), LIVENESS_TIMEOUT_MS);
   try {
+    // The SSRF-safe dispatcher checks every connect — names at DNS lookup and
+    // IP literals directly — so following redirects stays on public hosts.
+    // A refusal surfaces as a non-TLS error and falls through to the DNS
+    // check below, like any other failed fetch.
     const res = await fetch(url, {
       method: "GET",
       redirect: "follow",
       signal: ctrl.signal,
+      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
       headers: {
         "user-agent": "AskArthur-CloneWatch/1.0 (+https://askarthur.au)",
       },

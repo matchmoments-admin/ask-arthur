@@ -4,6 +4,11 @@ import { scanSkill } from "@askarthur/mcp-audit";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
+import { readBodyCapped } from "@askarthur/utils/read-body-capped";
+import { readZipEntryTextCapped } from "@askarthur/utils/zip-entry-capped";
+
+const MAX_SKILL_ZIP_BYTES = 5 * 1024 * 1024;
+const MAX_SKILL_MD_BYTES = 1024 * 1024;
 
 const SKILL_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 const GITHUB_PREFIX = "github:";
@@ -175,11 +180,15 @@ export async function POST(req: NextRequest) {
         const dlRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(15000) });
 
         if (dlRes.ok) {
-          const zipBuffer = await dlRes.arrayBuffer();
-          const zip = await JSZip.loadAsync(zipBuffer);
-          const skillFile = zip.file("SKILL.md");
-          if (skillFile) {
-            content = await skillFile.async("text");
+          // Both bounded: the download (streamed, capped) and SKILL.md's
+          // UNCOMPRESSED size — a small archive can inflate without limit.
+          const zipBody = await readBodyCapped(dlRes, MAX_SKILL_ZIP_BYTES);
+          if (zipBody.ok) {
+            const zip = await JSZip.loadAsync(zipBody.bytes);
+            const skillFile = zip.file("SKILL.md");
+            if (skillFile) {
+              content = (await readZipEntryTextCapped(skillFile, MAX_SKILL_MD_BYTES)) ?? "";
+            }
           }
         }
 
