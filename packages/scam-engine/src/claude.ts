@@ -677,7 +677,8 @@ export async function analyzeWithClaude(
           text: SYSTEM_PROMPT,
           cache_control: { type: "ephemeral" as const },
         },
-        // Marketplace-context block — non-cached for the same reason as themes.
+        // Marketplace-context block — static, code-owned text; non-cached so
+        // the SYSTEM_PROMPT cache entry is shared with calls that omit it.
         ...(marketplacePromptBlock && marketplacePromptBlock.length > 0
           ? [{ type: "text" as const, text: marketplacePromptBlock }]
           : []),
