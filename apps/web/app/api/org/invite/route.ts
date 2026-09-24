@@ -6,10 +6,11 @@ import { getOrg } from "@/lib/org";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { buildOrgInviteEmail } from "@/lib/email/org-invite";
 import { checkOrgInviteSendRateLimit } from "@askarthur/utils/rate-limit";
+import { ASSIGNABLE_ORG_ROLES } from "@/lib/org-roles";
 
 const InviteSchema = z.object({
   email: z.string().email().trim().toLowerCase(),
-  role: z.enum(["admin", "compliance_officer", "fraud_analyst", "developer", "viewer"]),
+  role: z.enum(ASSIGNABLE_ORG_ROLES),
 });
 
 export async function POST(req: NextRequest) {
@@ -47,6 +48,11 @@ export async function POST(req: NextRequest) {
   }
 
   const { email, role } = parsed.data;
+
+  // Only the owner grants admin — the same rule the members PATCH enforces.
+  if (role === "admin" && org.memberRole !== "owner") {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
 
   const supabase = createServiceClient();
   if (!supabase) {
