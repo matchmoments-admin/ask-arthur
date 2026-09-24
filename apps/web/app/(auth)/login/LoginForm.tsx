@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@askarthur/supabase/browser";
+import { safeNextPath } from "@/lib/safe-redirect";
 
 export default function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const router = useRouter();
@@ -39,7 +40,7 @@ export default function LoginForm({ redirectTo }: { redirectTo?: string }) {
         if (signInError) {
           setError(signInError.message);
         } else {
-          router.push(redirectTo ?? "/app");
+          router.push(safeNextPath(redirectTo));
           router.refresh();
         }
       }
