@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import {
   detectInjectionAttempt,
-  wrapUntrustedBlock,
+  type UntrustedBlockInput,
 } from "@askarthur/scam-engine/claude";
 import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
 import {
@@ -208,34 +207,32 @@ async function enrichEmail(email: string): Promise<string> {
 
 // ── Build enrichment context ──
 
-async function buildEnrichmentContext(
+async function buildEnrichmentBlocks(
   urls: string[] | undefined,
   email: string | undefined
-): Promise<string> {
-  const parts: string[] = [];
+): Promise<UntrustedBlockInput[]> {
+  const blocks: UntrustedBlockInput[] = [];
 
-  // Each third-party source gets its OWN nonce-tagged block (inside the outer
-  // sandwich callClaudeJson builds), so text on a fetched page cannot pose as
-  // the domain-intelligence section or as another page.
+  // Each third-party source is its OWN block inside the one outer sandwich
+  // callClaudeJson builds — escaped once, own nonce tag — so text on a fetched
+  // page cannot pose as the domain-intelligence section or as another page.
+  // Third-party values (the URL itself) go in the body, never the preamble.
   if (urls && urls.length > 0) {
     const results = await Promise.all(urls.map(fetchPageText));
     for (const r of results) {
       if (r.text) {
-        parts.push(
-          wrapUntrustedBlock(
-            "fetched_page",
-            r.text,
-            `Fetched page content from ${r.url} (text from an external website).`,
-          ),
-        );
+        blocks.push({
+          label: "fetched_page",
+          body: `Source URL: ${r.url}\n\n${r.text}`,
+          preamble: "Fetched page content (text from an external website).",
+        });
       } else {
-        parts.push(
-          wrapUntrustedBlock(
-            "fetch_failure",
-            `URL: ${r.url}\nError: ${r.error}`,
+        blocks.push({
+          label: "fetch_failure",
+          body: `URL: ${r.url}\nError: ${r.error}`,
+          preamble:
             "A URL that could not be fetched. Analyse the URL/domain itself for red flags.",
-          ),
-        );
+        });
       }
     }
   }
@@ -250,17 +247,16 @@ async function buildEnrichmentContext(
       emailContext = `Email provided: ${email}\n(Domain checks could not be completed — analyse the email address itself for red flags.)`;
     }
     if (emailContext) {
-      parts.push(
-        wrapUntrustedBlock(
-          "email_domain_intel",
-          emailContext,
+      blocks.push({
+        label: "email_domain_intel",
+        body: emailContext,
+        preamble:
           "Email-domain intelligence (DNS and WHOIS lookups; registrar strings come from third parties).",
-        ),
-      );
+      });
     }
   }
 
-  return parts.join("\n\n");
+  return blocks;
 }
 
 // ── Route handler ──
@@ -287,32 +283,41 @@ export async function POST(req: NextRequest) {
 
     const { text, urls, email, type } = parsed.data;
 
-    // Build enrichment context from URLs and email (runs in parallel)
-    const enrichmentContext = await buildEnrichmentContext(urls, email);
+    // Enrichment blocks from URLs and email (fetched in parallel).
+    const enrichmentBlocks = await buildEnrichmentBlocks(urls, email);
 
-    // Build the user message. PII is scrubbed from the user's own text before
-    // it leaves the process; callClaudeJson then sanitises, escapes and wraps
-    // the whole payload in one nonce-tagged untrusted block.
-    const messageParts: string[] = [`Persona type: ${type}`];
     // The floor judges the user's OWN text only. Fetched pages are delimited
     // data; legitimate pages (security blogs, docs) routinely contain the
     // phrases the detector matches, and would otherwise force SUSPICIOUS.
     const injection = detectInjectionAttempt(text ?? "");
 
+    // One block per source; callClaudeJson escapes each exactly once inside
+    // one outer sandwich. The user's own text is PII-scrubbed before it
+    // leaves the process. `type` is a validated enum, so it may sit in the
+    // (code-authored) preamble.
+    const blocks: UntrustedBlockInput[] = [];
     if (text && text.trim()) {
-      messageParts.push(`\nUser-submitted content:\n${scrubPII(text)}`);
+      blocks.push({
+        label: "user_submission",
+        body: text,
+        scrubPii: true,
+        preamble: `Persona type: ${type}. User-submitted content.`,
+      });
+    } else {
+      blocks.push({
+        label: "user_submission",
+        body: "(no text submitted)",
+        preamble: `Persona type: ${type}.`,
+      });
     }
-
-    if (enrichmentContext) {
-      messageParts.push(`\nEnrichment data:\n${enrichmentContext}`);
-    }
+    blocks.push(...enrichmentBlocks);
 
     let assessment: PersonaAssessment;
     try {
       const out = await callClaudeJson({
         model: "HAIKU_4_5",
         system: PERSONA_SYSTEM_PROMPT,
-        user: messageParts.join("\n"),
+        user: { blocks },
         schema: PersonaAssessmentSchema,
         maxTokens: 800,
         timeoutMs: 25_000,

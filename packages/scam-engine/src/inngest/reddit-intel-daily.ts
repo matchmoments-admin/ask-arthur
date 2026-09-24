@@ -483,6 +483,9 @@ export async function classifyWithRetry<TSchema extends z.ZodType<unknown>>(
         retryTimeoutMs: remainingMs,
       },
     );
+    // The classifier always sends a string payload; a structured-blocks call
+    // has no string to append the correction to, so it is not retried here.
+    if (typeof callArgs.user !== "string") throw err;
     const correctedArgs: CallClaudeJsonArgs<TSchema> = {
       ...callArgs,
       user: buildCorrectionUser(callArgs.user, errMsg),

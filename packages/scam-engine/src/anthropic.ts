@@ -27,7 +27,11 @@ import { z } from "zod";
 import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 
-import { buildInjectionSandwich } from "./claude";
+import {
+  buildInjectionSandwich,
+  buildInjectionSandwichFromBlocks,
+  type UntrustedBlockInput,
+} from "./claude";
 import { logCost } from "./cost-log";
 
 export type ClaudeModelKey = "HAIKU_4_5" | "SONNET_4_6" | "OPUS_4_7";
@@ -176,8 +180,13 @@ export interface CallClaudeJsonOptions<T> {
   model: ClaudeModelKey;
   /** System prompt — cached when `cacheSystem` is true (default). */
   system: string;
-  /** User content. Auto-sanitised + sandwich-wrapped unless `userIsTrusted`. */
-  user: string;
+  /** User content. A string is sanitised + sandwich-wrapped unless
+   *  `userIsTrusted`. `{ blocks }` is for input from several sources: each
+   *  block is escaped once and gets its own nonce tag inside the one outer
+   *  sandwich — use it instead of pre-wrapping text yourself (a pre-wrapped
+   *  string passed here is escaped a second time). Blocks are always wrapped;
+   *  `userIsTrusted` does not apply to them. */
+  user: string | { blocks: readonly UntrustedBlockInput[] };
   /** Zod schema the parsed JSON output must satisfy. Throws on mismatch. */
   schema: z.ZodType<T>;
   /** Output token ceiling. */
@@ -288,9 +297,12 @@ export async function callClaudeJson<T>(
   // the string happens to be JSON.
   // No scrubPii here: this wrapper's callers pass non-PII envelopes, matching
   // the pre-refactor behaviour (which never scrubbed).
-  const userContent = userIsTrusted
-    ? user
-    : buildInjectionSandwich(user, { variant: "generic" });
+  const userContent =
+    typeof user !== "string"
+      ? buildInjectionSandwichFromBlocks(user.blocks, { variant: "generic" })
+      : userIsTrusted
+        ? user
+        : buildInjectionSandwich(user, { variant: "generic" });
 
   const systemBlock = cacheSystem
     ? [
