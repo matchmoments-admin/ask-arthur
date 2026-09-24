@@ -63,6 +63,27 @@ interface CostSummary {
   events: number;
 }
 
+/**
+ * Display order for lane problems, worst first. Type-checked both ways: every
+ * entry is a LaneProblemKind (`satisfies`), and every LaneProblemKind appears
+ * (`_everyKindListed` fails to compile if a new kind is added to the union but
+ * not here — a missing kind would otherwise never be rendered).
+ */
+const LANE_PROBLEM_ORDER = [
+  "brake_unknown",
+  "quota_exhausted",
+  "absent",
+  "braked",
+  "silent_zero",
+] as const satisfies readonly LaneProblemKind[];
+const _everyKindListed: Exclude<
+  LaneProblemKind,
+  (typeof LANE_PROBLEM_ORDER)[number]
+> extends never
+  ? true
+  : never = true;
+void _everyKindListed;
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -129,13 +150,7 @@ function buildMessage(
       quota_exhausted: "⛔ <b>Clone-watch lane stopped by a vendor quota:</b>",
       silent_zero: "🕳️ <b>Clone-watch lane running but doing nothing:</b>",
     };
-    for (const kind of [
-      "brake_unknown",
-      "quota_exhausted",
-      "absent",
-      "braked",
-      "silent_zero",
-    ] as LaneProblemKind[]) {
+    for (const kind of LANE_PROBLEM_ORDER) {
       const group = laneProblems.filter((p) => p.kind === kind);
       if (group.length === 0) continue;
       lines.push(LANE_LABEL[kind]);

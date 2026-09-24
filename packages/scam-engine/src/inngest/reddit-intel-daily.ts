@@ -671,7 +671,8 @@ export const redditIntelDaily = inngest.createFunction(
     // queue wait = 270s; inline 280s classify (CLASSIFY_TIMEOUT_MS) + 240s
     // write-takes (TAKE_TIMEOUT_MS, in reddit-intel/take-writer.ts) = 520s;
     // the remaining seven steps are single statements; 60s slack = 850s.
-    // (Was 10; the check-cost-brake step became an un-stepped read.)
+    // (Was 10 with a standalone check-cost-brake step; the brake read now
+    // rides inside load-posts.)
     // Declared 16m (960s) rather than 15m so the budget is not sitting on its
     // own floor — a finish tuned to the exact worst case CANCELS healthy runs,
     // and a cancellation gets no retry, no error and no telemetry (#1069).
@@ -689,16 +690,14 @@ export const redditIntelDaily = inngest.createFunction(
       return { skipped: true, reason: "redditIntelIngest flag off" };
     }
 
-    // Cost brake — cost-daily-check sets feature_brakes.reddit_intel when
-    // the day's reddit-intel-* spend crosses REDDIT_INTEL_CAP_USD (default
-    // $10). Returning early here prevents continued Sonnet/Voyage burn
-    // until the brake expires (24h later). Operator overrides via DELETE
-    // FROM feature_brakes WHERE feature='reddit_intel'.
     // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
     // retry — memoising it as a durable step only cost an Inngest execution.
     const data = parseRedditIntelBatchReadyData(event.data);
 
     // ── Step 1: load post bodies from feed_items ─────────────────────────
+    // Cost brake: cost-daily-check sets feature_brakes.reddit_intel when the
+    // day's reddit-intel-* spend crosses REDDIT_INTEL_CAP_USD; operator
+    // override is DELETE FROM feature_brakes WHERE feature='reddit_intel'.
     // The brake read rides INSIDE the first work step (ADR-0019 bookkeeping
     // rule) so it is memoised. It was briefly an un-stepped read (#1196),
     // which re-ran on every replay: a brake set mid-run then returned
