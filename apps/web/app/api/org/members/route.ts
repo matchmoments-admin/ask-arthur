@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getUser } from "@/lib/auth";
 import { getOrg } from "@/lib/org";
@@ -49,6 +50,26 @@ export async function GET() {
   return NextResponse.json({ data: enriched });
 }
 
+/** Roles an admin/owner may assign. Never `owner` — ownership transfer is not a
+ *  role edit. Mirrors the invite route's enum. */
+const AssignableRole = z.enum([
+  "admin",
+  "compliance_officer",
+  "fraud_analyst",
+  "developer",
+  "viewer",
+]);
+
+const PatchBody = z
+  .object({
+    memberId: z.number().int().positive(),
+    role: AssignableRole.optional(),
+    status: z.enum(["active", "deactivated"]).optional(),
+  })
+  .refine((b) => b.role !== undefined || b.status !== undefined, {
+    message: "role or status is required",
+  });
+
 export async function PATCH(req: NextRequest) {
   const user = await getUser();
   if (!user) {
@@ -60,23 +81,46 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const { memberId, role, status } = body as {
-    memberId: number;
-    role?: string;
-    status?: string;
-  };
-
-  if (!memberId) {
-    return NextResponse.json({ error: "memberId is required" }, { status: 400 });
+  const parsed = PatchBody.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid request", details: parsed.error.issues.map((i) => i.message) },
+      { status: 400 },
+    );
   }
+  const { memberId, role, status } = parsed.data;
 
   const supabase = createServiceClient();
   if (!supabase) {
     return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
   }
 
-  const updates: Record<string, string> = {};
+  const { data: target, error: targetError } = await supabase
+    .from("org_members")
+    .select("id, user_id, role")
+    .eq("id", memberId)
+    .eq("org_id", org.orgId)
+    .maybeSingle();
+  if (targetError) {
+    return NextResponse.json({ error: "Failed to update member" }, { status: 500 });
+  }
+  if (!target) {
+    return NextResponse.json({ error: "Member not found" }, { status: 404 });
+  }
+
+  // The owner's row is never edited here, nobody edits their own membership,
+  // and only the owner manages admins (grant, change, or deactivate).
+  if (target.role === "owner" || target.user_id === user.id) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
+  if (
+    org.memberRole !== "owner" &&
+    (target.role === "admin" || role === "admin")
+  ) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
+
+  const updates: { role?: string; status?: string } = {};
   if (role) updates.role = role;
   if (status) updates.status = status;
 
