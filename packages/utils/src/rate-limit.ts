@@ -726,6 +726,66 @@ export async function checkOrgInviteAcceptRateLimit(
   }
 }
 
+// ─── Org-invite send rate limiter ───────────────────────────────────────
+//
+// Per-inviter quota for `POST /api/org/invite`. Each call sends an email from
+// the Ask Arthur sender, so it is bounded like any other outbound send.
+// 20 invites / 24h per user comfortably covers onboarding a whole team.
+
+const _orgInviteSendLimiter = { current: null as Ratelimit | null };
+
+function getOrgInviteSendLimiter(): Ratelimit {
+  if (_orgInviteSendLimiter.current) return _orgInviteSendLimiter.current;
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+  const lim = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(20, "24 h"),
+    prefix: "askarthur:org-invite-send",
+    analytics: true,
+  });
+  _orgInviteSendLimiter.current = lim;
+  return lim;
+}
+
+/**
+ * Check the org-invite-send rate-limit bucket for an authenticated user.
+ * 20 sends / 24h, fail-closed in production.
+ */
+export async function checkOrgInviteSendRateLimit(
+  userId: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, "checkOrgInviteSendRateLimit");
+  }
+  try {
+    const res = await getOrgInviteSendLimiter().limit(userId);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "Too many invitations sent. Try again later.",
+        reason: "exceeded",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+      reason: "ok",
+    };
+  } catch (err) {
+    logger.error("checkOrgInviteSendRateLimit: store error", {
+      error: String(err),
+    });
+    return storeUnavailable(failMode, "checkOrgInviteSendRateLimit");
+  }
+}
+
 // ─── Inbound-scan rate limiter (F1) ─────────────────────────────────────
 //
 // Per-sender quota for `/api/inbound-scan` — users forwarding suspicious
