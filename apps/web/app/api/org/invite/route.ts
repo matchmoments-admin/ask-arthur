@@ -4,6 +4,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { getUser } from "@/lib/auth";
 import { getOrg } from "@/lib/org";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { buildOrgInviteEmail } from "@/lib/email/org-invite";
+import { checkOrgInviteSendRateLimit } from "@askarthur/utils/rate-limit";
 
 const InviteSchema = z.object({
   email: z.string().email().trim().toLowerCase(),
@@ -19,6 +21,20 @@ export async function POST(req: NextRequest) {
   const org = await getOrg(user.id);
   if (!org || !["owner", "admin"].includes(org.memberRole)) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
+
+  // Per-inviter quota: each call sends an email from the Ask Arthur sender.
+  const rl = await checkOrgInviteSendRateLimit(user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: rl.message ?? "Too many invitations sent. Try again later." },
+      {
+        status: 429,
+        headers: rl.resetAt
+          ? { "Retry-After": Math.max(1, Math.ceil((rl.resetAt.getTime() - Date.now()) / 1000)).toString() }
+          : undefined,
+      },
+    );
   }
 
   const body = await req.json();
@@ -89,6 +105,7 @@ export async function POST(req: NextRequest) {
   const inviteUrl = `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://askarthur.au"}/invite/${rawToken}`;
 
   if (process.env.RESEND_API_KEY) {
+    const inviteEmail = buildOrgInviteEmail({ orgName: org.orgName, role, inviteUrl });
     fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -98,26 +115,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         from: process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <brendan@askarthur.au>",
         to: [email],
-        subject: `You've been invited to join ${org.orgName} on Ask Arthur`,
-        html: `
-          <div style="font-family: 'Public Sans', sans-serif; max-width: 560px; margin: 0 auto;">
-            <div style="background: #1B2A4A; padding: 24px 28px; border-radius: 8px 8px 0 0;">
-              <p style="color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin: 0;">Ask Arthur</p>
-            </div>
-            <div style="background: #fff; padding: 28px; border: 1px solid #E2E8F0; border-top: none; border-radius: 0 0 8px 8px;">
-              <h1 style="color: #1B2A4A; font-size: 24px; margin: 0 0 16px;">You've been invited</h1>
-              <p style="color: #334155; font-size: 16px; line-height: 1.6;">
-                You've been invited to join <strong>${org.orgName}</strong> on Ask Arthur as a <strong>${role.replace("_", " ")}</strong>.
-              </p>
-              <p style="margin: 24px 0;">
-                <a href="${inviteUrl}" style="background: #0D9488; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Accept Invitation</a>
-              </p>
-              <p style="color: #64748B; font-size: 14px;">This invitation expires in 7 days.</p>
-              <hr style="border-color: #E2E8F0; margin: 24px 0;" />
-              <p style="color: #94A3B8; font-size: 12px;">Ask Arthur | ABN 72 695 772 313 | Sydney, Australia</p>
-            </div>
-          </div>
-        `,
+        subject: inviteEmail.subject,
+        html: inviteEmail.html,
       }),
     })
       .then((r) => {
