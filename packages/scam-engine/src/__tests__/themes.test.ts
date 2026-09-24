@@ -10,6 +10,7 @@ vi.mock("@askarthur/supabase/server", () => ({
 import {
   getRelevantThemes,
   renderThemesForPrompt,
+  THEME_PROMPT_CAPS,
   type RelevantTheme,
 } from "../retrieval/themes";
 import { embedQuery } from "../embeddings";
@@ -177,7 +178,9 @@ describe("renderThemesForPrompt", () => {
     expect(out).toContain("Targets: PayID, Facebook Marketplace");
     expect(out).toContain("Modus operandi:");
     expect(out).toContain("Common tactics: urgency_window, authority_appeal");
-    expect(out).toContain("name it in the summary using the title above");
+    // The usage instruction lives in analyzeWithClaude, outside the
+    // untrusted block — this renderer returns data only.
+    expect(out).not.toContain("name it in the summary");
   });
 
   it("omits the tactics line when there are no tactic tags", () => {
@@ -220,5 +223,30 @@ describe("renderThemesForPrompt", () => {
     // in the surrounding scaffolding like "RECENT" — assert only that
     // they're not in the brands list).
     expect(out).not.toMatch(/Targets: [^.]*[DE]/);
+  });
+});
+
+describe("renderThemesForPrompt — field caps", () => {
+  it("flattens whitespace and caps every model-written field", () => {
+    const long = "x".repeat(1000);
+    const out = renderThemesForPrompt([
+      {
+        id: "1",
+        slug: "s",
+        title: `T\n\nline two ${long}`,
+        narrative: long,
+        modusOperandi: long,
+        representativeBrands: [long],
+        topTacticTags: [long],
+        signalStrength: "strong",
+        memberCount: 1,
+        similarity: 0.9,
+      },
+    ]);
+    const titleLine = out.split("\n")[1];
+    expect(titleLine.startsWith('- "T line two')).toBe(true);
+    expect(out.length).toBeLessThan(
+      THEME_PROMPT_CAPS.title + THEME_PROMPT_CAPS.narrative + THEME_PROMPT_CAPS.modus + 60 + 40 + 200,
+    );
   });
 });
