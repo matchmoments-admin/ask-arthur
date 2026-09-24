@@ -114,3 +114,48 @@ describe("readPdfPages — bounded work", () => {
     expect(f.read).toHaveLength(3);
   });
 });
+
+describe("extractPdfText — a load that outlives the timeout", () => {
+  it("destroys the document when the load resolves after the timeout", async () => {
+    const { extractPdfText } = await import("../document-check/pdf-text");
+    let destroyed = false;
+    let resolveLoad!: (d: unknown) => void;
+    const loadDocument = () =>
+      new Promise((r) => {
+        resolveLoad = r;
+      }) as never;
+
+    const out = await extractPdfText(Buffer.from("%PDF-1.4"), { timeoutMs: 20, loadDocument });
+    expect(out).toBeNull(); // timed out → not assessed
+
+    resolveLoad({
+      numPages: 1,
+      getPage: async () => ({ getTextContent: async () => ({ items: [] }) }),
+      loadingTask: {
+        destroy: async () => {
+          destroyed = true;
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(destroyed).toBe(true);
+  });
+
+  it("destroys the document after a normal extraction too", async () => {
+    const { extractPdfText } = await import("../document-check/pdf-text");
+    let destroyed = false;
+    const out = await extractPdfText(Buffer.from("%PDF-1.4"), {
+      loadDocument: async () => ({
+        numPages: 1,
+        getPage: async () => ({ getTextContent: async () => ({ items: [{ str: "hello" }] }) }),
+        loadingTask: {
+          destroy: async () => {
+            destroyed = true;
+          },
+        },
+      }),
+    });
+    expect(out).toBe("hello");
+    expect(destroyed).toBe(true);
+  });
+});

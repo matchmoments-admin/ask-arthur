@@ -28,3 +28,34 @@ describe("isPrivateIP — hostnames are not IPv6 literals", () => {
     expect(isPrivateIP(h)).toBe(false);
   });
 });
+
+// IPv4 ranges must only match real dotted-quads — hostnames reach this
+// classifier via isPrivateURL.
+describe("isPrivateIP — hostnames that start like an IPv4 range", () => {
+  it.each(["250.co", "247.ai", "224.example.com", "10.example.com", "127.example.org", "192.168.example.net", "169.254.example"])(
+    "treats hostname %s as public",
+    (h) => {
+      expect(isPrivateIP(h)).toBe(false);
+    },
+  );
+});
+
+describe("isPrivateIP — IPv6 forms that embed or imply a private address", () => {
+  it.each([
+    "2002:a00::1", "2002:7f00::", "2002:c0a8:101::1", // compressed 6to4 → 10/8, 127/8, 192.168/16
+    "64:ff9b:1::1", "64:ff9b:1:abcd::", // NAT64 local-use
+    "2001:0:7f00:1::1", // Teredo server 127.0.0.1
+    "2001:0:4136:e378:8000:63bf:f5ff:fffe", // Teredo client (inverted) 10.0.0.1
+    "fec0::1", "feff::1", // site-local
+    "::ffff:7f00:1", "0:0:0:0:0:ffff:127.0.0.1",
+  ])("blocks %s", (ip) => {
+    expect(isPrivateIP(ip)).toBe(true);
+  });
+
+  it.each(["2002:808:808::1", "2001:0:4136:e378:8000:63bf:f7f7:f7f7", "2606:4700::1111", "64:ff9b::808:808"])(
+    "allows %s",
+    (ip) => {
+      expect(isPrivateIP(ip)).toBe(false);
+    },
+  );
+});

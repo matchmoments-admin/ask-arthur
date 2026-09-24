@@ -45,19 +45,22 @@ export function buildSsrfLookup(
         return;
       }
 
-      // Defensive: handle both single-address (the default) and
-      // all-addresses forms. undici always passes `all: false` in
-      // practice; the array path is for completeness.
-      const first =
+      // Validate EVERY address. With autoSelectFamily (the Node 20+ default)
+      // undici asks for all addresses (`all: true`) and may dial any of them
+      // — e.g. the second after the first times out — so checking only the
+      // first would let a mixed answer reach a private host. A mixed answer
+      // is itself hostile: refuse it rather than filter it.
+      const all: string[] =
         typeof address === "string"
-          ? address
-          : Array.isArray(address) && address.length > 0
-            ? address[0]!.address
-            : "";
+          ? [address]
+          : Array.isArray(address)
+            ? address.map((a) => a.address)
+            : [];
+      const bad = all.length === 0 ? "<none>" : all.find((a) => !a || isPrivateIP(a));
 
-      if (!first || isPrivateIP(first)) {
+      if (bad !== undefined) {
         const blocked: NodeJS.ErrnoException = new Error(
-          `SSRF: ${hostname} resolves to private IP ${first || "<none>"}`,
+          `SSRF: ${hostname} resolves to private IP ${bad || "<none>"}`,
         );
         blocked.code = "EPRIVATEHOST";
         callback(blocked, "", 0);

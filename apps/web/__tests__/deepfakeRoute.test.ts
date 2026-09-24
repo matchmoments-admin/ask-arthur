@@ -68,3 +68,21 @@ describe("POST /api/deepfake", () => {
     expect(m.logCost).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/deepfake — quota is spent last", () => {
+  it("does not consume a rate-limit token for invalid input", async () => {
+    const form = new FormData();
+    form.set("audio", new File([new Uint8Array(10)], "a.txt", { type: "text/plain" }));
+    const res = await POST(
+      new Request("https://x.test/api/deepfake", { method: "POST", headers: { "x-real-ip": "1.2.3.4" }, body: form }) as never,
+    );
+    expect(res.status).toBe(400);
+    expect(m.rate).not.toHaveBeenCalled();
+  });
+
+  it("does not consume a rate-limit token while braked", async () => {
+    m.braked.mockResolvedValue(true);
+    expect((await POST(audioRequest())).status).toBe(503);
+    expect(m.rate).not.toHaveBeenCalled();
+  });
+});

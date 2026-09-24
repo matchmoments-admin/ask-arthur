@@ -38,6 +38,10 @@ const MAX_CHARS = 200_000;
 interface ExtractOptions {
   timeoutMs?: number;
   maxPages?: number;
+  /** Test seam: replaces unpdf's getDocumentProxy. */
+  loadDocument?: (
+    data: Uint8Array,
+  ) => Promise<PdfDocLike & { loadingTask: { destroy(): Promise<void> } }>;
 }
 
 /** The slice of pdfjs's document proxy this module uses — narrow so tests can
@@ -96,8 +100,8 @@ export async function extractPdfText(
   let timedOut = false;
   let loadingTask: { destroy(): Promise<void> } | undefined;
   try {
-    const { getDocumentProxy } = await import("unpdf");
-
+    const getDocumentProxy =
+      opts.loadDocument ?? (await import("unpdf")).getDocumentProxy;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         timedOut = true;
@@ -105,10 +109,20 @@ export async function extractPdfText(
       }, timeoutMs);
     });
 
+    // Copy: the parser may transfer/detach the buffer it is given.
+    const loading = getDocumentProxy(new Uint8Array(buffer));
+    // A load that finishes AFTER the timeout (or after the finally below has
+    // already run) must still be released — nothing else would destroy it.
+    void loading.then(
+      (doc) => {
+        if (timedOut) void doc.loadingTask.destroy().catch(() => undefined);
+      },
+      () => undefined,
+    );
+
     const extracted = await Promise.race([
       (async () => {
-        // Copy: the parser may transfer/detach the buffer it is given.
-        const doc = await getDocumentProxy(new Uint8Array(buffer));
+        const doc = await loading;
         loadingTask = doc.loadingTask;
         // Page by page, so the page cap and the timeout bound the work
         // itself rather than trimming a result that was fully computed.

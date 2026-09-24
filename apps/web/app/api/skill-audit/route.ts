@@ -10,6 +10,20 @@ import { readZipEntryTextCapped } from "@askarthur/utils/zip-entry-capped";
 const MAX_SKILL_ZIP_BYTES = 5 * 1024 * 1024;
 const MAX_SKILL_MD_BYTES = 1024 * 1024;
 
+/** Explicit "not assessed" response for a skill over the size caps. */
+function skillTooLarge(what: "package" | "SKILL.md") {
+  return NextResponse.json(
+    {
+      error:
+        what === "package"
+          ? "Skill package too large to assess (max 5 MB)."
+          : "SKILL.md too large to assess (max 1 MB).",
+      assessed: false,
+    },
+    { status: 413 },
+  );
+}
+
 const SKILL_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 const GITHUB_PREFIX = "github:";
 const GITHUB_REPO_RE = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
@@ -182,12 +196,20 @@ export async function POST(req: NextRequest) {
         if (dlRes.ok) {
           // Both bounded: the download (streamed, capped) and SKILL.md's
           // UNCOMPRESSED size — a small archive can inflate without limit.
+          // Over either cap the skill is NOT assessed — say so explicitly
+          // rather than silently scanning only its metadata, which would
+          // report a clean result for content we never read.
           const zipBody = await readBodyCapped(dlRes, MAX_SKILL_ZIP_BYTES);
+          if (!zipBody.ok && zipBody.reason === "too_large") {
+            return skillTooLarge("package");
+          }
           if (zipBody.ok) {
             const zip = await JSZip.loadAsync(zipBody.bytes);
             const skillFile = zip.file("SKILL.md");
             if (skillFile) {
-              content = (await readZipEntryTextCapped(skillFile, MAX_SKILL_MD_BYTES)) ?? "";
+              const text = await readZipEntryTextCapped(skillFile, MAX_SKILL_MD_BYTES);
+              if (text === null) return skillTooLarge("SKILL.md");
+              content = text;
             }
           }
         }

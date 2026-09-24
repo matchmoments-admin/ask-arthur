@@ -17,37 +17,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Each request can reach a paid vendor: per-IP limit (fail-closed in prod)
-  // and an operator kill-switch, both before the upload is read.
-  const ip =
-    req.headers.get("x-real-ip") ??
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown";
-  const rate = await checkDeepfakeRateLimit(ip);
-  if (!rate.allowed) {
-    if (rate.reason === "store_unavailable") {
-      return NextResponse.json(
-        { error: "Service temporarily unavailable" },
-        { status: 503, headers: { "Retry-After": "60" } },
-      );
-    }
-    const retryAfter = rate.resetAt
-      ? Math.max(1, Math.ceil((rate.resetAt.getTime() - Date.now()) / 1000))
-      : 3600;
-    return NextResponse.json(
-      { error: rate.message ?? "Too many requests" },
-      { status: 429, headers: { "Retry-After": String(retryAfter) } },
-    );
-  }
-  if (await isFeatureBrakedOrUnknown("deepfake")) {
-    return NextResponse.json(
-      { error: "Deepfake detection is temporarily paused" },
-      { status: 503, headers: { "Retry-After": "3600" } },
-    );
-  }
-
   const contentType = req.headers.get("content-type") ?? "";
-
   if (!contentType.includes("multipart/form-data")) {
     return NextResponse.json(
       { error: "Expected multipart/form-data" },
@@ -56,6 +26,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Order: validate the input, then the operator brake, THEN spend a
+    // rate-limit token, then the paid vendor call — a malformed request or a
+    // braked feature must not use up a caller's quota.
     const formData = await req.formData();
     const file = formData.get("audio") as File | null;
 
@@ -65,18 +38,45 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: "File too large (max 10 MB)" },
         { status: 400 }
       );
     }
-
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
         { error: `Unsupported audio format: ${file.type}` },
         { status: 400 }
+      );
+    }
+
+    if (await isFeatureBrakedOrUnknown("deepfake")) {
+      return NextResponse.json(
+        { error: "Deepfake detection is temporarily paused" },
+        { status: 503, headers: { "Retry-After": "3600" } },
+      );
+    }
+
+    // Per-IP limit on the paid call (fail-closed in prod).
+    const ip =
+      req.headers.get("x-real-ip") ??
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      "unknown";
+    const rate = await checkDeepfakeRateLimit(ip);
+    if (!rate.allowed) {
+      if (rate.reason === "store_unavailable") {
+        return NextResponse.json(
+          { error: "Service temporarily unavailable" },
+          { status: 503, headers: { "Retry-After": "60" } },
+        );
+      }
+      const retryAfter = rate.resetAt
+        ? Math.max(1, Math.ceil((rate.resetAt.getTime() - Date.now()) / 1000))
+        : 3600;
+      return NextResponse.json(
+        { error: rate.message ?? "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
       );
     }
 

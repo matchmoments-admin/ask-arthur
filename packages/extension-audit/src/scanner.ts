@@ -37,8 +37,11 @@ function extractZip(buffer: ArrayBuffer): ArrayBuffer {
 // Uncompressed caps: entries are inflated by streaming and abandoned past
 // the cap, so a highly compressed entry can't expand without bound.
 const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_SOURCE_FILES = 50;
 const MAX_SOURCE_FILE_BYTES = 500_000;
-const MAX_TOTAL_SOURCE_BYTES = 25 * 1024 * 1024;
+// Must sit BELOW MAX_SOURCE_FILES × MAX_SOURCE_FILE_BYTES (25 MB) or it bounds
+// nothing; 10 MB is far above a typical extension's source.
+export const MAX_TOTAL_SOURCE_BYTES = 10 * 1024 * 1024;
 
 async function parseManifest(zipData: ArrayBuffer): Promise<CRXManifest> {
   const zip = await JSZip.loadAsync(zipData);
@@ -49,17 +52,20 @@ async function parseManifest(zipData: ArrayBuffer): Promise<CRXManifest> {
   return JSON.parse(text);
 }
 
-async function extractSourceFiles(zipData: ArrayBuffer): Promise<Map<string, string>> {
+export async function extractSourceFiles(zipData: ArrayBuffer): Promise<Map<string, string>> {
   const zip = await JSZip.loadAsync(zipData);
   const sources = new Map<string, string>();
   const jsFiles = zip.filter((path) => path.endsWith(".js") || path.endsWith(".ts"));
-  let total = 0;
-  for (const f of jsFiles.slice(0, 50)) { // Limit to 50 files
+  let totalBytes = 0;
+  for (const f of jsFiles.slice(0, MAX_SOURCE_FILES)) {
     try {
-      const content = await readZipEntryTextCapped(f, MAX_SOURCE_FILE_BYTES);
-      if (content === null) continue; // Skip very large files
-      total += content.length;
-      if (total > MAX_TOTAL_SOURCE_BYTES) break;
+      // Stop inflating at the per-file cap, and never past the remaining
+      // total budget (bytes, not UTF-16 code units).
+      const budget = Math.min(MAX_SOURCE_FILE_BYTES, MAX_TOTAL_SOURCE_BYTES - totalBytes);
+      if (budget <= 0) break;
+      const content = await readZipEntryTextCapped(f, budget);
+      if (content === null) continue; // Skip files over the cap
+      totalBytes += new TextEncoder().encode(content).byteLength;
       sources.set(f.name, content);
     } catch { /* skip binary/corrupt files */ }
   }
