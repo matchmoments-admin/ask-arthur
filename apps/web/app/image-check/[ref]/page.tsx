@@ -7,7 +7,7 @@ import {
   REPORTCYBER_URL,
   ESAFETY_REPORT_URL,
 } from "@/lib/onward/destinations";
-import { pageHost } from "@/lib/page-host";
+import { pageHost, urlWithoutQuery } from "@/lib/page-host";
 
 export const metadata = {
   title: "Image Check Evidence — Ask Arthur",
@@ -81,7 +81,7 @@ export default async function ImageCheckEvidencePage({
             <div>
               <dt className="text-gray-500">Image URL</dt>
               <dd className="break-all font-mono text-xs text-gray-800">
-                {record.image_url ?? "—"}
+                {urlWithoutQuery(record.image_url) ?? "—"}
               </dd>
             </div>
             <div>

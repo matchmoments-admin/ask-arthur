@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pageHost } from "@/lib/page-host";
+import { pageHost, urlWithoutQuery } from "@/lib/page-host";
 import { jsonLdScript } from "@/lib/json-ld";
 
 describe("pageHost", () => {
@@ -29,5 +29,16 @@ describe("jsonLdScript", () => {
   it("round-trips to the same data", () => {
     const data = { headline: "a < b </script>", arr: ["\u2028", "x"] };
     expect(JSON.parse(jsonLdScript(data))).toEqual(data);
+  });
+});
+
+describe("urlWithoutQuery", () => {
+  it("keeps origin + path and drops query and fragment", () => {
+    expect(urlWithoutQuery("https://cdn.example.com/a/b.jpg?sig=abc&exp=1#frag")).toBe(
+      "https://cdn.example.com/a/b.jpg",
+    );
+  });
+  it.each([null, undefined, "", "nope", "data:image/png;base64,AAAA"])("returns null for %j", (input) => {
+    expect(urlWithoutQuery(input as string | null | undefined)).toBeNull();
   });
 });

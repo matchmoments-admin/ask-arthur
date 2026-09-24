@@ -159,18 +159,20 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     flags: ["shopfrontCloneRecheck", "shopfrontCloneUrlscan"],
     consecutive: 2,
     shape:
-      "pool>0 ∧ rechecked=0 (not quota), or every recheck failed to submit",
-    // A 429 is urlscan quota, not a broken lane: an all-rate-limited run
-    // rechecks nothing by design (rows left unstamped to retry first), so it
-    // is excluded. Rows before 2026-09-24 carry no rate_limited (n() → 0) and
-    // judge exactly as before.
+      "pool>0 ∧ rechecked=0 (not quota), or nothing submitted while real submits failed",
+    // One rule for both urlscan lanes: a run with ZERO successful submits and
+    // at least one GENUINE submit failure is broken, whatever else happened
+    // (429s and DNS skips don't excuse it). A pure-quota run (failures 0) is
+    // left to quotaExhausted. An all-rate-limited run rechecks nothing by
+    // design (rows left unstamped to retry first). Rows before 2026-09-24
+    // carry no rate_limited (n() → 0) and judge as before.
     silentZero: (o) =>
       (n(o, "pool") > 0 &&
         n(o, "rechecked") === 0 &&
         n(o, "rate_limited") === 0) ||
       (n(o, "rechecked") > 0 &&
         n(o, "submitted") === 0 &&
-        n(o, "submit_failed") >= n(o, "rechecked")),
+        n(o, "submit_failed") > 0),
 
     // 4 runs ≈ 24h of the 6-hourly cadence with nothing submitted and urlscan
     // refusing on quota.
@@ -188,11 +190,14 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     crons: ["0 9 * * *"],
     flags: ["shopfrontCloneUrlscan"],
     consecutive: 1,
-    shape: "units>0 ∧ submitted=0 ∧ rate_limited=0",
+    shape: "units>0 ∧ submitted=0 ∧ (rate_limited=0 ∨ submit_failed>0)",
+    // Same rule as recheck: nothing submitted while genuine submits failed
+    // pages regardless of 429s; nothing submitted AND nothing refused on quota
+    // (the Sep 12–16 shape) pages too. Pure quota → quotaExhausted.
     silentZero: (o) =>
       n(o, "units") > 0 &&
       n(o, "submitted") === 0 &&
-      n(o, "rate_limited") === 0,
+      (n(o, "rate_limited") === 0 || n(o, "submit_failed") > 0),
 
     // 2 daily runs with nothing submitted and urlscan refusing on quota.
     quotaExhausted: {

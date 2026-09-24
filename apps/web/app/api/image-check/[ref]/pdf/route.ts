@@ -4,7 +4,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { renderEvidencePdf } from "@askarthur/scam-engine/image-check-pdf";
 import { CHECK_REF_PATTERN } from "@/lib/check-ref";
-import { pageHost } from "@/lib/page-host";
+import { pageHost, urlWithoutQuery } from "@/lib/page-host";
 
 // One-page evidence PDF for a flagged image check (image-check v2 PR 5).
 // Public, keyed on the unguessable check ref (ADR-0022). Rendered
@@ -44,7 +44,7 @@ export async function GET(
     const pdf = await renderEvidencePdf({
       checkRef: record.check_ref as string,
       checkedAt: new Date(record.checked_at as string).toISOString(),
-      imageUrl: (record.image_url as string | null) ?? null,
+      imageUrl: urlWithoutQuery(record.image_url as string | null),
       pageUrl: pageHost(record.page_url as string | null),
       imageSha256: (record.image_sha256 as string | null) ?? null,
       aiConfidence:

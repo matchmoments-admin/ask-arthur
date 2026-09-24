@@ -733,6 +733,48 @@ describe("classifyLaneHealth — persistent vendor quota", () => {
     ]);
   });
 
+  // Coordinator review of #1210: runs mixing 429s with genuine failures and
+  // zero successes must page on the FIRST lane rule, not fall between the two.
+  it("pages a submit run with real failures even when some were rate-limited", () => {
+    const rows = [
+      ...without("submit_batch"),
+      outcomeRow("shopfront-clone-urlscan-submit", 21, 50, {
+        submitted: 0,
+        submit_failed: 20,
+        rate_limited: 30,
+        dormant_retired: 0,
+      }),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-urlscan-submit",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
+  it("pages a recheck run with some real failures, the rest DNS-skipped or rate-limited", () => {
+    const run = {
+      pool: 200,
+      rechecked: 20,
+      submitted: 0,
+      submit_failed: 5,
+      dns_skipped: 15,
+      rate_limited: 30,
+    };
+    const rows = [
+      ...without("recheck_batch"),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 1, 20, run),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 7, 20, run),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-lifecycle-recheck",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
   it("pages the daily submit lane after 2 all-429 runs", () => {
     const run = { submitted: 0, submit_failed: 0, rate_limited: 30, dormant_retired: 0 };
     const rows = [
