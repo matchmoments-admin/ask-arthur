@@ -702,11 +702,27 @@ export async function GET(req: Request) {
     // global gate, so it can only ever engage silently. Fixing that is the
     // brake-drill PR; recording it here at least makes the silent engage
     // visible, via condition_met.
-    const anyBrakeSet =
-      brakeSet ||
-      redditBrakeSet ||
-      phoneFootprintBrakeSet ||
-      extensionImageCheckBrakeSet;
+    // Derived from the SAME map the response reports, so a brake cannot
+    // engage without being counted here. It used to OR four of the thirteen
+    // brakes by hand; the other nine — including shopfront_clone_watch, the
+    // one this comment says can only ever engage silently — never set
+    // condition_met (review 2026-09-24).
+    const brakesSet = {
+      vuln_au_enrichment: brakeSet,
+      reddit_intel: redditBrakeSet,
+      phone_footprint: phoneFootprintBrakeSet,
+      charity_check: charityCheckBrakeSet,
+      shop_signal: shopSignalBrakeSet,
+      shop_signal_reviews: shopSignalReviewsBrakeSet,
+      shopfront_clone_outreach: shopfrontCloneOutreachBrakeSet,
+      shopfront_clone_watch: shopfrontCloneWatchBrakeSet,
+      news_intel_embed: newsIntelEmbedBrakeSet,
+      scam_report_embed: scamReportEmbedBrakeSet,
+      bot_analyze: botAnalyzeBrakeSet,
+      hive_ai: hiveAiBrakeSet,
+      extension_image_check: extensionImageCheckBrakeSet,
+    };
+    const anyBrakeSet = Object.values(brakesSet).some(Boolean);
     await recordAlertDelivery({
       alerter: "cost-daily-check",
       conditionMet: anyBrakeSet,
@@ -726,21 +742,7 @@ export async function GET(req: Request) {
       vonageCost,
       thresholdUsd,
       eventCount,
-      brakesSet: {
-        vuln_au_enrichment: brakeSet,
-        reddit_intel: redditBrakeSet,
-        phone_footprint: phoneFootprintBrakeSet,
-        charity_check: charityCheckBrakeSet,
-        shop_signal: shopSignalBrakeSet,
-        shop_signal_reviews: shopSignalReviewsBrakeSet,
-        shopfront_clone_outreach: shopfrontCloneOutreachBrakeSet,
-        shopfront_clone_watch: shopfrontCloneWatchBrakeSet,
-        news_intel_embed: newsIntelEmbedBrakeSet,
-        scam_report_embed: scamReportEmbedBrakeSet,
-        bot_analyze: botAnalyzeBrakeSet,
-        hive_ai: hiveAiBrakeSet,
-        extension_image_check: extensionImageCheckBrakeSet,
-      },
+      brakesSet,
     });
   }
 

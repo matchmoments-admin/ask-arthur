@@ -666,3 +666,61 @@ describe("Lane declaration — scam-engine Lanes", () => {
     }
   });
 });
+
+// review 2026-09-24: silent_zero excludes quota-limited runs (a 429 day is not
+// a broken lane), which left a PERSISTENT quota loss paging nowhere. It now has
+// its own, longer depth.
+describe("classifyLaneHealth — persistent vendor quota", () => {
+  const quotaRun = {
+    pool: 200,
+    rechecked: 0,
+    submitted: 0,
+    submit_failed: 0,
+    rate_limited: 50,
+  };
+  it("pages quota_exhausted after 4 all-429 recheck runs (~24h)", () => {
+    const rows = [
+      ...without("recheck_batch"),
+      ...[1, 7, 13, 19].map((h) =>
+        outcomeRow("shopfront-clone-lifecycle-recheck", h, 0, quotaRun),
+      ),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-lifecycle-recheck",
+        kind: "quota_exhausted",
+      }),
+    ]);
+  });
+
+  it("stays quiet for 3 (one bad quota day is not a page)", () => {
+    const rows = [
+      ...without("recheck_batch"),
+      ...[1, 7, 13].map((h) =>
+        outcomeRow("shopfront-clone-lifecycle-recheck", h, 0, quotaRun),
+      ),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 19, 50, {
+        pool: 200,
+        rechecked: 50,
+        submitted: 47,
+        submit_failed: 3,
+      }),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
+  });
+
+  it("pages the daily submit lane after 2 all-429 runs", () => {
+    const run = { submitted: 0, submit_failed: 0, rate_limited: 30, dormant_retired: 0 };
+    const rows = [
+      ...without("submit_batch"),
+      outcomeRow("shopfront-clone-urlscan-submit", 21, 30, run),
+      outcomeRow("shopfront-clone-urlscan-submit", 45, 30, run),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-urlscan-submit",
+        kind: "quota_exhausted",
+      }),
+    ]);
+  });
+});
