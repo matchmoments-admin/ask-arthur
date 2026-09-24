@@ -50,9 +50,9 @@ jobs:
     outputs:
       title: ${{ steps.meta.outputs.title }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -71,14 +71,18 @@ jobs:
 
       - name: Stage caption
         id: meta
+        env:
+          TITLE_INPUT: ${{ inputs.title }}
         run: |
           mkdir -p apps/web/out
           cp docs/linkedin/hub-launch-caption.txt apps/web/out/caption.txt
-          echo "title=${{ inputs.title }}" >> "$GITHUB_OUTPUT"
+          # Input passed via env (never interpolated into the script); newlines
+          # stripped so it stays one GITHUB_OUTPUT line.
+          printf 'title=%s\n' "$(printf '%s' "$TITLE_INPUT" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
           echo "Caption: $(wc -c < apps/web/out/caption.txt) bytes"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: hub-carousel
           path: apps/web/out
@@ -153,16 +157,16 @@ jobs:
     # reviewer is already configured — see the note at the top of this file.
     environment: clone-watch-linkedin
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: hub-carousel
           path: apps/web/out
@@ -177,11 +181,13 @@ jobs:
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           LINKEDIN_ORG_URN: ${{ secrets.LINKEDIN_ORG_URN }}
           TITLE: ${{ needs.prepare.outputs.title }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORMAT: ${{ inputs.format }}
         run: |
           set -o pipefail
           DRY=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
-          if [ "${{ inputs.format }}" = "document" ]; then
+          if [ "$DRY_RUN" = "true" ]; then DRY="--dry-run"; fi
+          if [ "$FORMAT" = "document" ]; then
             SHAPE=(--pdf=out/ask-arthur-hub.pdf)
           else
             # Card title/description are sent explicitly rather than left to

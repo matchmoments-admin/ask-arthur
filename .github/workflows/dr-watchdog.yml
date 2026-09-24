@@ -30,6 +30,11 @@ on:
     - cron: "0 19 * * *"
   workflow_dispatch: {}
 
+# Least privilege: this workflow only reads the repo; it never writes back
+# through GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -141,6 +146,8 @@ jobs:
       # here is also a second, passive record for anyone reading the Actions tab.
       - name: Fail the run if DR is unhealthy
         if: steps.check.outputs.verdict == 'fail'
+        env:
+          DETAIL: ${{ steps.check.outputs.detail }}
         run: |
-          echo "::error::${{ steps.check.outputs.detail }}"
+          echo "::error::${DETAIL}"
           exit 1
