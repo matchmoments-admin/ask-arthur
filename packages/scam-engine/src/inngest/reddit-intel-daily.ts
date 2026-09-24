@@ -694,20 +694,22 @@ export const redditIntelDaily = inngest.createFunction(
     // $10). Returning early here prevents continued Sonnet/Voyage burn
     // until the brake expires (24h later). Operator overrides via DELETE
     // FROM feature_brakes WHERE feature='reddit_intel'.
-    // Un-stepped brake read (ADR-0019: single-query bookkeeping rides outside
-    // a step, precedent feed-items-embed.ts). It was its own step — one
-    // Inngest step per run for a cheap idempotent SELECT. A replay re-reads
-    // it, so a brake set mid-run stops the remaining steps: the brake's intent.
-    if (await isRedditIntelBraked()) {
-      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
-    }
-
     // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
     // retry — memoising it as a durable step only cost an Inngest execution.
     const data = parseRedditIntelBatchReadyData(event.data);
 
     // ── Step 1: load post bodies from feed_items ─────────────────────────
-    const posts = await step.run("load-posts", async () => {
+    // The brake read rides INSIDE the first work step (ADR-0019 bookkeeping
+    // rule) so it is memoised. It was briefly an un-stepped read (#1196),
+    // which re-ran on every replay: a brake set mid-run then returned
+    // `paused` AFTER the paid step but BEFORE its persist/log-cost step,
+    // discarding paid work (re-paid next run) and hiding that run's spend
+    // from the very cost row the brake reads. Memoised, a mid-run brake takes
+    // effect on the NEXT run instead. The braked sentinel is an object; the
+    // step's normal result stays an array, so a replay of a run memoised by
+    // the older code still reads correctly.
+    const loaded = await step.run("load-posts", async () => {
+      if (await isRedditIntelBraked()) return { paused: true as const };
       const supabase = createServiceClient();
       if (!supabase) throw new Error("Supabase service client unavailable");
 
@@ -740,6 +742,10 @@ export const redditIntelDaily = inngest.createFunction(
       );
       return (rows ?? []).filter((r) => !alreadyClassified.has(r.id as number));
     });
+    if (!Array.isArray(loaded)) {
+      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
+    }
+    const posts = loaded;
 
     if (posts.length === 0) {
       // NOTHING NEW TO CLASSIFY IS NOT NOTHING TO DO.

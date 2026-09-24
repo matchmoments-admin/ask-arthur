@@ -804,14 +804,6 @@ export const redditIntelCluster = inngest.createFunction(
         return { skipped: true, reason: "redditIntelIngest flag off" };
       }
 
-      // Un-stepped brake read (ADR-0019: single-query bookkeeping rides outside
-      // a step, precedent feed-items-embed.ts). It was its own step — one
-      // Inngest step per run for a cheap idempotent SELECT. A replay re-reads
-      // it, so a brake set mid-run stops the remaining steps: the brake's intent.
-      if (await isRedditIntelBraked()) {
-        return { paused: true, reason: "feature_brakes.reddit_intel is set" };
-      }
-
       // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
       // retry — memoising it as a durable step only cost an Inngest execution.
       //
@@ -826,6 +818,11 @@ export const redditIntelCluster = inngest.createFunction(
         "cluster-batch",
         CLUSTER_BATCH_WALL_CLOCK_MS,
         async (budget) => {
+          // Brake read inside the memoised step — see reddit-intel-daily's
+          // load-posts for why (#1196's un-stepped read re-ran on replay).
+          // `paused` is absent from results memoised by older code, so those
+          // replays read as not paused.
+          if (await isRedditIntelBraked()) return { paused: true as const };
           const supabase = createServiceClient();
           if (!supabase) throw new Error("Supabase service client unavailable");
 
@@ -980,6 +977,10 @@ export const redditIntelCluster = inngest.createFunction(
           };
         },
       );
+
+      if ("paused" in batch) {
+        return { paused: true, reason: "feature_brakes.reddit_intel is set" };
+      }
 
       if (batch.postsConsidered === 0) {
         logger.info("reddit-intel-cluster: nothing to cluster", {

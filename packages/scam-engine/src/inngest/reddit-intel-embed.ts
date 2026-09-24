@@ -154,14 +154,6 @@ export const redditIntelEmbed = inngest.createFunction(
       return { skipped: true, reason: "redditIntelIngest flag off" };
     }
 
-    // Un-stepped brake read (ADR-0019: single-query bookkeeping rides outside
-    // a step, precedent feed-items-embed.ts). It was its own step — one
-    // Inngest step per run for a cheap idempotent SELECT. A replay re-reads
-    // it, so a brake set mid-run stops the remaining steps: the brake's intent.
-    if (await isRedditIntelBraked()) {
-      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
-    }
-
     // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
     // retry — memoising it as a durable step only cost an Inngest execution.
     //
@@ -171,7 +163,17 @@ export const redditIntelEmbed = inngest.createFunction(
     const data = resolveRedditIntelSummarisedData(event?.data);
 
     // ── Step 1: load rows that lack embeddings ───────────────────────────
-    const rows = await step.run("load-unembedded", async () => {
+    // The brake read rides INSIDE the first work step (ADR-0019 bookkeeping
+    // rule) so it is memoised. It was briefly an un-stepped read (#1196),
+    // which re-ran on every replay: a brake set mid-run then returned
+    // `paused` AFTER the paid step but BEFORE its persist/log-cost step,
+    // discarding paid work (re-paid next run) and hiding that run's spend
+    // from the very cost row the brake reads. Memoised, a mid-run brake takes
+    // effect on the NEXT run instead. The braked sentinel is an object; the
+    // step's normal result stays an array, so a replay of a run memoised by
+    // the older code still reads correctly.
+    const loaded = await step.run("load-unembedded", async () => {
+      if (await isRedditIntelBraked()) return { paused: true as const };
       const supabase = createServiceClient();
       if (!supabase) throw new Error("Supabase service client unavailable");
 
@@ -213,6 +215,10 @@ export const redditIntelEmbed = inngest.createFunction(
       }
       return (rows ?? []) as IntelRowForEmbed[];
     });
+    if (!Array.isArray(loaded)) {
+      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
+    }
+    const rows = loaded;
 
     if (rows.length === 0) {
       logger.info("reddit-intel-embed: nothing to embed", {

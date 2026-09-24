@@ -62,6 +62,14 @@ _Avoid_: "job", "worker", "cron" for a specific function (a cron is the trigger,
 The one `cost_telemetry` row a Lane writes per run, quiet or not, through `recordLaneOutcome` (`packages/scam-engine/src/lane-outcome.ts`). `units` and the typed `metadata` keys are the Lane's contract with the silent-zero detector; `metadata.reason` marks a quiet run (`nothing_due`, `no_gated_candidates`, `nothing_pending`, `daily_cap_reached`, `none_pending_or_cap`, `all_dead`, `bulk_submit_failed`). Skip-paths (flag off, brake, cooldown, no DB) write no Outcome Row on purpose, so a disabled Lane reads as _absent_. Distinct from the Lane's other `cost_telemetry` rows (per-item spend such as `recheck_submit` or the per-alert Claude `classify` rows, and `-error` rows), which are not read as outcomes.
 _Avoid_: "log line", "telemetry event", "cost row" (ambiguous — a Lane writes several) for the per-run row.
 
+**Lane declaration** (clone-watch, ADR-0025 amendment 2026-09-24):
+A Lane's run conditions declared once in `LANE_SHAPES` (`apps/web/lib/laneHealth.ts`): its cron triggers (`crons`, read by `laneCrons`) and its flag gate (`flags`, read by `laneGate`), with the health window derived from the crons. Its brake key lives beside its Outcome Row key in `LANES`. The Lane and the health digest read the same declaration, so they cannot disagree about whether or when it should run.
+_Avoid_: "config", "schedule" alone (the declaration is the schedule AND the gate).
+
+**Parked lane** (clone-watch):
+A Lane whose cron trigger is removed while its flags are dark, keeping only its manual-trigger event, so a dark flag stops costing scheduled runs. Its restore schedule stays in its Lane declaration; un-parking = re-adding `...laneCrons(lane)` to the trigger, then flipping the flags (a flag flipped without it pages `absent`).
+_Avoid_: "disabled" (a disabled Lane may still have its cron), "paused" (that is a brake).
+
 **Scam Cluster**:
 A group of Scam Reports linked by shared Scam Entities, text similarity, or a common impersonated brand. Tracks aggregate member count and total reported loss.
 _Avoid_: group, campaign, ring.

@@ -126,10 +126,12 @@ function buildMessage(
         "🚫 <b>Clone-watch lane wrote no outcome row (not running, or skipped without logging):</b>",
       braked: "🛑 <b>Clone-watch lane braked:</b>",
       brake_unknown: "❓ <b>Clone-watch brake state unreadable:</b>",
+      quota_exhausted: "⛔ <b>Clone-watch lane stopped by a vendor quota:</b>",
       silent_zero: "🕳️ <b>Clone-watch lane running but doing nothing:</b>",
     };
     for (const kind of [
       "brake_unknown",
+      "quota_exhausted",
       "absent",
       "braked",
       "silent_zero",

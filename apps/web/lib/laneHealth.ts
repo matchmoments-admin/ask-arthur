@@ -59,7 +59,9 @@ export type LaneProblemKind =
   /** `feature_brakes` says the lane is paused right now. */
   | "braked"
   /** `feature_brakes` could not be read, so no lane's brake could be judged. */
-  | "brake_unknown";
+  | "brake_unknown"
+  /** Every recent run was stopped by the vendor's quota (e.g. urlscan 429s). */
+  | "quota_exhausted";
 
 export interface LaneProblem {
   lane: string;
@@ -130,6 +132,15 @@ interface Shape<L extends LaneId> {
   shape: string;
   /** True when this row is "did nothing while reporting success". */
   silentZero: (o: Seen<L>) => boolean;
+  /**
+   * A vendor quota wall that PERSISTS. `silentZero` deliberately excludes
+   * quota-limited runs (a 429 day is not a broken lane), which left a
+   * permanent quota loss — a downgraded key, a plan change — paging nowhere:
+   * every run all-429, rows never stamped, nothing silent_zero
+   * (review 2026-09-24). Judged over its OWN depth, longer than
+   * `consecutive`, so one bad quota day stays quiet.
+   */
+  quotaExhausted?: { consecutive: number; test: (o: Seen<L>) => boolean };
 }
 
 const H = 3_600_000;
@@ -160,6 +171,13 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       (n(o, "rechecked") > 0 &&
         n(o, "submitted") === 0 &&
         n(o, "submit_failed") >= n(o, "rechecked")),
+
+    // 4 runs ≈ 24h of the 6-hourly cadence with nothing submitted and urlscan
+    // refusing on quota.
+    quotaExhausted: {
+      consecutive: 4,
+      test: (o) => n(o, "rate_limited") > 0 && n(o, "submitted") === 0,
+    },
   },
   "shopfront-clone-urlscan-submit": {
     crons: ["0 9 * * *"],
@@ -170,6 +188,12 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       n(o, "units") > 0 &&
       n(o, "submitted") === 0 &&
       n(o, "rate_limited") === 0,
+
+    // 2 daily runs with nothing submitted and urlscan refusing on quota.
+    quotaExhausted: {
+      consecutive: 2,
+      test: (o) => n(o, "rate_limited") > 0 && n(o, "submitted") === 0,
+    },
   },
   "shopfront-clone-urlscan-retrieve": {
     crons: ["10 3,9,12,15,21 * * *"],
@@ -448,6 +472,19 @@ function allSilentZero<L extends LaneId>(
   return recent.every((r) => shape.silentZero(seenOf<L>(r)));
 }
 
+/** Depth of the quota wall when the most recent `quotaExhausted.consecutive`
+ *  rows all hit it, else null. */
+function quotaExhaustedRuns<L extends LaneId>(
+  lane: L,
+  mine: LaneCostRow[],
+): number | null {
+  const q = (LANE_SHAPES[lane] as Shape<L>).quotaExhausted;
+  if (!q) return null;
+  const recent = mine.slice(0, q.consecutive);
+  if (recent.length < q.consecutive) return null;
+  return recent.every((r) => q.test(seenOf<L>(r))) ? recent.length : null;
+}
+
 function rowsFor(
   rows: LaneCostRow[],
   feature: string,
@@ -541,6 +578,16 @@ export function classifyLaneHealth(
     );
     if (absent) {
       problems.push(absent);
+      continue;
+    }
+
+    const quota = quotaExhaustedRuns(lane, mine);
+    if (quota !== null) {
+      problems.push({
+        lane,
+        kind: "quota_exhausted",
+        detail: `vendor quota exhausted ${quota} consecutive runs (nothing submitted)`,
+      });
       continue;
     }
 

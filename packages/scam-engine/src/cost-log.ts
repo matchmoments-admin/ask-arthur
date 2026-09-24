@@ -69,7 +69,12 @@ export async function logCost(args: CostLogArgs): Promise<void> {
   const supabase = createServiceClient();
   if (!supabase) return;
   try {
-    await supabase.from("cost_telemetry").insert({
+    // supabase-js RETURNS a PostgREST error rather than throwing, so the catch
+    // below only ever saw network throws: a rejected insert (constraint, RLS,
+    // timeout) vanished silently. That row is often a Lane's Outcome Row, so a
+    // lost write read as the Lane being "absent" with nothing to explain why
+    // (review 2026-09-24).
+    const { error } = await supabase.from("cost_telemetry").insert({
       feature: args.feature,
       provider: args.provider,
       operation: args.operation,
@@ -77,6 +82,13 @@ export async function logCost(args: CostLogArgs): Promise<void> {
       estimated_cost_usd: args.estimatedCostUsd,
       metadata: args.metadata ?? {},
     });
+    if (error) {
+      logger.warn("logCost insert rejected", {
+        feature: args.feature,
+        operation: args.operation,
+        error: error.message,
+      });
+    }
   } catch (err) {
     logger.warn("logCost insert failed", {
       feature: args.feature,
