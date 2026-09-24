@@ -107,8 +107,12 @@ describe("Haiku adapter (ADR-0026 rollback)", () => {
     await expect(classifyAlert(sb, ALERT, "haiku")).rejects.toThrow("db down");
     expect(rows("shopfront_clone_preclassify_error")).toEqual([
       expect.objectContaining({
-        operation: "persist_error",
-        metadata: expect.objectContaining({ alert_id: 7, error_message: "db down" }),
+        operation: "classify_error",
+        metadata: expect.objectContaining({
+          stage: "persist",
+          alert_id: 7,
+          error_message: "db down",
+        }),
       }),
     ]);
     expect(rows("shopfront_clone_preclassify")).toHaveLength(0);

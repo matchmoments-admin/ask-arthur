@@ -234,11 +234,14 @@ export async function classifyAlert(
     await logCostAsync({
       feature: PRECLASSIFY_ERROR_FEATURE,
       provider: "anthropic",
-      operation: "persist_error",
+      // Same operation as the vendor-failure row and the Jev adapter's
+      // failures; `stage` says which half failed.
+      operation: "classify_error",
       units: 0,
       unitCostUsd: 0,
       requestId: `clone-watch-preclassify:${data.alertId}`,
       metadata: {
+        stage: "persist",
         alert_id: data.alertId,
         brand: data.brand,
         error_message: error.message.slice(0, 500),

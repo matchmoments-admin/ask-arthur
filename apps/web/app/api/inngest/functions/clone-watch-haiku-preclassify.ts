@@ -154,7 +154,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // per batch, not two. Fail-closed — a paid vendor call. Memoised with
       // the results, so a replay does not re-read it. `mode` is read once
       // here too, so the Outcome Row's `mode` is the one every alert used.
-      const batch = await budgetedStep(
+      const memoised = await budgetedStep(
         step,
         "classify-batch",
         BATCH_WALL_CLOCK_MS,
@@ -181,6 +181,17 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
           return { braked: false as const, mode, results: out };
         },
       );
+      // A run memoised by the previous code (before the brake fold) returned
+      // the bare results array from this same step name; replaying it after
+      // a deploy must not read `.results` of an array. Treat it as an
+      // unbraked batch in the current mode.
+      const batch = Array.isArray(memoised)
+        ? {
+            braked: false as const,
+            mode: preclassifyMode(),
+            results: memoised as AlertResult[],
+          }
+        : memoised;
 
       if (batch.braked) {
         await step.run("log-outcome", () =>
