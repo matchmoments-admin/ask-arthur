@@ -29,5 +29,11 @@ export function safeNextPath(
     return fallback;
   }
   if (url.origin !== BASE) return fallback;
-  return `${url.pathname}${url.search}${url.hash}`;
+  const out = `${url.pathname}${url.search}${url.hash}`;
+  // Re-check AFTER normalisation: dot segments can collapse a safe-looking
+  // input into a protocol-relative one ("/.//evil" → "//evil"), which a caller
+  // joining it to an origin resolves off-site. The returned path must itself
+  // pass the same test and be a fixed point.
+  if (out.startsWith("//") || out.includes("\\")) return fallback;
+  return out;
 }
