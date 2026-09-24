@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
 import { gateOrRedirect } from "@/lib/featureGate";
 import LoginForm from "./LoginForm";
+import { safeNextPath } from "@/lib/safe-redirect";
 
 export const metadata = {
   title: "Sign In — Ask Arthur",
@@ -48,7 +49,7 @@ export default async function LoginPage({
           Welcome back. Continue to your dashboard.
         </p>
       </div>
-      <LoginForm redirectTo={next} />
+      <LoginForm redirectTo={safeNextPath(next)} />
       <div className="mt-7 pt-5 border-t" style={{ borderColor: "#eef0f3" }}>
         <p className="text-center text-sm text-slate-500">
           Don&apos;t have an account?{" "}
