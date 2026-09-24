@@ -114,21 +114,26 @@ jobs:
           echo "::notice::SHA-256: ${SHA256}"
 
       - name: Upload to R2 (Object Lock Compliance enforced bucket-wide)
+        env:
+          KEY: ${{ steps.dump.outputs.key }}
+          LOCAL_PATH: ${{ steps.dump.outputs.local_path }}
+          DUMP_SHA256: ${{ steps.dump.outputs.sha256 }}
+          DUMP_SIZE: ${{ steps.dump.outputs.size_bytes }}
         run: |
           set -euo pipefail
-          KEY="${{ steps.dump.outputs.key }}"
           aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
             s3 cp \
-            "${{ steps.dump.outputs.local_path }}" \
+            "${LOCAL_PATH}" \
             "s3://${R2_DR_BUCKET}/${KEY}" \
-            --metadata "sha256=${{ steps.dump.outputs.sha256 }},size_bytes=${{ steps.dump.outputs.size_bytes }}"
+            --metadata "sha256=${DUMP_SHA256},size_bytes=${DUMP_SIZE}"
           echo "::notice::Uploaded to s3://${R2_DR_BUCKET}/${KEY}"
 
       - name: Verify upload (HEAD request returns expected sha256 metadata)
+        env:
+          KEY: ${{ steps.dump.outputs.key }}
+          EXPECTED_SHA: ${{ steps.dump.outputs.sha256 }}
         run: |
           set -euo pipefail
-          KEY="${{ steps.dump.outputs.key }}"
-          EXPECTED_SHA="${{ steps.dump.outputs.sha256 }}"
           METADATA=$(aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
             s3api head-object \
             --bucket "${R2_DR_BUCKET}" \

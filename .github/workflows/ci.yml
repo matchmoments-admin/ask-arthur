@@ -79,9 +79,11 @@ jobs:
         # is unambiguous. Observed runs are 40s-3m39s, so 8 minutes is ~2x the
         # worst case.
         timeout-minutes: 8
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           pnpm turbo run lint typecheck test build \
-            --filter="...[origin/${{ github.base_ref }}]" \
+            --filter="...[origin/${BASE_REF}]" \
             --summarize
 
       - name: Lint / Typecheck / Test / Build (main — full, warms cache)

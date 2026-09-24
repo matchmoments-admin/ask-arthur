@@ -62,9 +62,9 @@ concurrency:
   group: promptfoo-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# No step writes to the PR (the report is an artifact), so read-only suffices.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   eval:
@@ -92,7 +92,7 @@ jobs:
             echo "::error::Add the secret in repo settings. A control that cannot run has not passed."
             exit 1
           fi
-          pnpm dlx promptfoo@latest eval \
+          pnpm dlx promptfoo@0.123.1 eval \
             --config evals/promptfooconfig.yaml \
             --output evals/output.json
 

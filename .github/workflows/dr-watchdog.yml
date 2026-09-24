@@ -146,6 +146,8 @@ jobs:
       # here is also a second, passive record for anyone reading the Actions tab.
       - name: Fail the run if DR is unhealthy
         if: steps.check.outputs.verdict == 'fail'
+        env:
+          DETAIL: ${{ steps.check.outputs.detail }}
         run: |
-          echo "::error::${{ steps.check.outputs.detail }}"
+          echo "::error::${DETAIL}"
           exit 1

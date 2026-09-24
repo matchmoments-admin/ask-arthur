@@ -1,5 +1,12 @@
 # Keeps the SHA-pinned GitHub Actions current: Dependabot proposes a PR that
 # bumps both the commit SHA and the trailing `# vX` comment.
+#
+# Python: Dependabot's pip ecosystem updates requirements.txt (the version
+# ranges) in each directory below. It does NOT regenerate the hash-locked
+# requirements.lock.txt that CI installs (that file is produced by
+# `uv pip compile --generate-hashes`, see its header). So a Dependabot pip PR
+# is a prompt, not a complete change: regenerate the lock in the same PR, or
+# CI keeps installing the previously locked versions.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -8,4 +15,18 @@ updates:
       interval: weekly
     groups:
       actions:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /pipeline/scrapers
+    schedule:
+      interval: weekly
+    groups:
+      scrapers:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /pipeline/investigation
+    schedule:
+      interval: weekly
+    groups:
+      investigation:
         patterns: ["*"]
