@@ -11,6 +11,7 @@ import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
 import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { escapeHtml } from "@/lib/escape-html";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -214,16 +215,23 @@ export async function POST(
     // the 502 in-UI, but cold-outreach failures — bad address, Resend reject —
     // are worth a proactive ping, especially for a REAL (non-shadow) send).
     try {
-      await sendAdminTelegramMessage(
+      const sent = await sendAdminTelegramMessage(
         [
           `🚨 <b>Brand-stewardship send FAILED</b>`,
           ``,
-          `Brand: <b>${row.brand_name}</b>`,
-          `Recipient: <code>${recipient}</code>${isShadow ? " (shadow)" : " (REAL)"}`,
-          `Reason: <code>${reason.slice(0, 200)}</code>`,
-          `Row id: <code>${id}</code> — marked <code>failed</code>. Review at askarthur.au/admin/brand-stewardship`,
+          `Brand: <b>${escapeHtml(String(row.brand_name ?? ""))}</b>`,
+          `Recipient: <code>${escapeHtml(String(recipient))}</code>${isShadow ? " (shadow)" : " (REAL)"}`,
+          `Reason: <code>${escapeHtml(reason.slice(0, 200))}</code>`,
+          `Row id: <code>${escapeHtml(String(id))}</code> — marked <code>failed</code>. Review at askarthur.au/admin/brand-stewardship`,
         ].join("\n"),
       );
+      if (!sent.ok) {
+        logger.warn("brand-stewardship send: telegram alert not delivered", {
+          id,
+          reason: sent.reason,
+          error: sent.error,
+        });
+      }
     } catch (tgErr) {
       logger.error("brand-stewardship send: telegram alert failed", {
         id,

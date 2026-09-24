@@ -19,6 +19,7 @@ import { validateExtensionRequest } from "../_lib/auth";
 import { checkImageCheckRateLimit } from "../_lib/image-rate-limit";
 import { logCost, claudeHaikuCostUsd, PRICING } from "@/lib/cost-telemetry";
 import { generateCheckRef } from "@/lib/check-ref";
+import { pageHost } from "@/lib/page-host";
 
 // Right-click "Check this image" — user-driven AI-generation/deepfake scan of
 // an arbitrary image URL. Unlike analyze-ad (Facebook-CDN allowlist, ad-text
@@ -239,7 +240,7 @@ export async function POST(req: NextRequest) {
                       ai_confidence: hive.aiConfidence,
                       deepfake_confidence: hive.deepfakeConfidence,
                       generator_source: hive.generatorSource,
-                      landing_url: pageUrl ?? null,
+                      landing_url: pageHost(pageUrl),
                     });
                   if (insertErr) {
                     logger.error("Failed to store image-check deepfake detection", {
@@ -277,7 +278,8 @@ export async function POST(req: NextRequest) {
         check_ref: checkRef,
         install_id_hash: auth.installIdHash,
         image_url: imageUrl,
-        page_url: pageUrl ?? null,
+        // Origin only: the evidence record says where, never which thread.
+        page_url: pageHost(pageUrl),
         image_sha256: imageSha256,
         ai_confidence: hive.aiConfidence,
         deepfake_confidence: hive.deepfakeConfidence,

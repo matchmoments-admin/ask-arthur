@@ -19,6 +19,7 @@ import SubscribeForm from "@/components/SubscribeForm";
 import Pill from "@/components/Pill";
 import type { Metadata } from "next";
 import { ogImages, OG_BASE } from "@/lib/og";
+import { jsonLdScript } from "@/lib/json-ld";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -169,7 +170,7 @@ export default async function BlogPostPage({ params }: PageProps) {
       <PageviewBeacon slug={slug} />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(jsonLd) }}
       />
 
       {/* Breadcrumb — minimal */}

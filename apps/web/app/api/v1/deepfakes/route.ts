@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { pageHost } from "@/lib/page-host";
 
 function parsePeriodDays(period: string | null): number {
   if (!period) return 30;
@@ -60,7 +61,11 @@ export async function GET(req: NextRequest) {
             total: detections?.length ?? 0,
             generated_at: new Date().toISOString(),
           },
-          detections: detections ?? [],
+          // landing_url is shown origin-only (older rows stored full URLs).
+          detections: (detections ?? []).map((d) => ({
+            ...d,
+            landing_url: pageHost((d as { landing_url?: string | null }).landing_url),
+          })),
         },
         {
           headers: {

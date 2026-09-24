@@ -3,6 +3,7 @@ import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { parsePeriodDays } from "@/lib/v1-params";
+import { pageHost, urlWithoutQuery } from "@/lib/page-host";
 
 // B2B / law-enforcement feed over image_check_records (image-check v2 PR 6,
 // ADR-0022). A NEW route rather than an extension of /api/v1/deepfakes —
@@ -84,7 +85,15 @@ export async function GET(req: NextRequest) {
           total: checks?.length ?? 0,
           generated_at: new Date().toISOString(),
         },
-        checks: checks ?? [],
+        // Older rows stored the full page URL; the feed exposes only its origin.
+        checks: (checks ?? []).map((c) => {
+          const row = c as { page_url?: string | null; image_url?: string | null };
+          return {
+            ...c,
+            page_url: pageHost(row.page_url),
+            image_url: urlWithoutQuery(row.image_url),
+          };
+        }),
       },
       {
         headers: {

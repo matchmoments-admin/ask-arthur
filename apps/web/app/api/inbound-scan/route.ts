@@ -313,6 +313,12 @@ export async function POST(req: NextRequest) {
   //                        by storeUnavailable(); process the email
   //                        anyway. allowed will be true under fail-open.
   //   - ok               → continue.
+  // Deliberately fail-OPEN (reviewed 2026-09-24): returning 5xx here does not
+  // defer the email — the worker's 5xx branch only calls
+  // QUARANTINE_FORWARDER.send on an already-consumed stream with no configured
+  // destination, so a 503 would silently drop the user's mail. A per-sender
+  // limiter is also not a sender-spoofing control; that fix is replying only
+  // to authenticated (DMARC-passing) senders, tracked separately.
   const rate = await checkInboundScanRateLimit(sender.email, "open");
   if (rate.reason === "exceeded") {
     // Polite reply — quota hit is a UX problem, not an attack.

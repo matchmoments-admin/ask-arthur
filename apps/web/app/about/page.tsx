@@ -7,6 +7,7 @@ import ChartsSection from "@/components/charts/ChartsSection";
 import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
 import { getChartData, getWorldStats } from "@/lib/dashboard/public-stats";
 import { OG_BASE } from "@/lib/og";
+import { jsonLdScript } from "@/lib/json-ld";
 
 export const revalidate = 3600;
 
@@ -92,7 +93,7 @@ export default async function AboutPage() {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(aboutJsonLd).replace(/</g, "\\u003c"),
+          __html: jsonLdScript(aboutJsonLd),
         }}
       />
 

@@ -4,6 +4,7 @@ import ScamChecker from "@/components/ScamChecker";
 import ScamCounter from "@/components/ScamCounter";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import { jsonLdScript } from "@/lib/json-ld";
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -72,7 +73,7 @@ export default function Home() {
       <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16">
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: jsonLdScript(jsonLd) }}
         />
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-10 leading-tight text-center">
           Suspicious message, email or image? Just Ask Arthur

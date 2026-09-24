@@ -4,6 +4,8 @@
 // chrome-extension:// origins directly; serving the widget from our own domain
 // is the supported workaround.
 
+import { isBridgeMessage } from "@/lib/turnstile-bridge";
+
 declare const __TURNSTILE_BRIDGE_URL__: string;
 
 const iframe = document.getElementById("turnstile-frame") as HTMLIFrameElement | null;
@@ -12,6 +14,8 @@ if (iframe) {
 }
 
 window.addEventListener("message", (event) => {
+  // Only the bridge iframe we created may talk to us.
+  if (!isBridgeMessage(event, __TURNSTILE_BRIDGE_URL__, iframe?.contentWindow)) return;
   if (!event.data || typeof event.data !== "object") return;
   const data = event.data as { type?: string; token?: string; reason?: string };
 
