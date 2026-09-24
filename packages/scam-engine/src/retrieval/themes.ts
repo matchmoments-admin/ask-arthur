@@ -1,6 +1,7 @@
 // getRelevantThemes — surfaces the top-K Reddit-intel themes whose
 // centroid is closest to the user's submission text. Output is fed
-// into the Haiku system prompt at analyze time so the classifier can
+// into the analyze prompt (a delimited untrusted block in the user turn —
+// see analyzeWithClaude) so the classifier can
 // name a known scam pattern (e.g. "PayID 'relative will collect'")
 // instead of having to derive it from scratch each call.
 //
@@ -134,12 +135,24 @@ export async function getRelevantThemes(
   }
 }
 
+/** Per-field caps for the prompt block. Theme text is model-written from
+ *  community posts; the caps bound how much of it reaches the analyze prompt. */
+export const THEME_PROMPT_CAPS = { title: 120, narrative: 400, modus: 200 } as const;
+
+function cap(value: string, max: number): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 /**
- * Render a list of themes as a system-prompt-ready Markdown block.
+ * Render a list of themes as a compact block for the analyze prompt.
  * Returns an empty string when the list is empty so the caller can
  * unconditionally template it in.
  *
- * Format (kept terse — Haiku context is precious):
+ * The result is DATA: analyzeWithClaude wraps it in a delimited untrusted
+ * block in the user turn (it is derived from public forum posts), and owns
+ * the instruction about how to use it. Fields are whitespace-flattened and
+ * capped (THEME_PROMPT_CAPS).
  *
  *   RECENT AUSTRALIAN SCAM PATTERNS (last 30 days, community-reported):
  *   - "PayID 'relative will collect'": <narrative>. Targets: PayID, ANZ.
@@ -149,27 +162,33 @@ export async function getRelevantThemes(
 export function renderThemesForPrompt(themes: RelevantTheme[]): string {
   if (themes.length === 0) return "";
   const lines: string[] = [
-    "",
     "RECENT AUSTRALIAN SCAM PATTERNS (last 30 days, community-reported):",
   ];
   for (const t of themes) {
     const brands =
       t.representativeBrands.length > 0
-        ? ` Targets: ${t.representativeBrands.slice(0, 3).join(", ")}.`
+        ? ` Targets: ${t.representativeBrands
+            .slice(0, 3)
+            .map((b) => cap(b, 60))
+            .join(", ")}.`
         : "";
-    const narrative = t.narrative ? ` ${t.narrative}` : "";
+    const narrative = t.narrative
+      ? ` ${cap(t.narrative, THEME_PROMPT_CAPS.narrative)}`
+      : "";
     const modus = t.modusOperandi
-      ? `\n  Modus operandi: ${t.modusOperandi}`
+      ? `\n  Modus operandi: ${cap(t.modusOperandi, THEME_PROMPT_CAPS.modus)}`
       : "";
     const tactics =
       t.topTacticTags.length > 0
-        ? `\n  Common tactics: ${t.topTacticTags.slice(0, 4).join(", ")}`
+        ? `\n  Common tactics: ${t.topTacticTags
+            .slice(0, 4)
+            .map((x) => cap(x, 40))
+            .join(", ")}`
         : "";
-    lines.push(`- "${t.title}":${narrative}${brands}${modus}${tactics}`);
+    lines.push(
+      `- "${cap(t.title, THEME_PROMPT_CAPS.title)}":${narrative}${brands}${modus}${tactics}`,
+    );
   }
-  lines.push(
-    "If the user's message matches one of these patterns, name it in the summary using the title above.",
-  );
   return lines.join("\n");
 }
 
