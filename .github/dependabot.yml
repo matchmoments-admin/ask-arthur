@@ -1,0 +1,11 @@
+# Keeps the SHA-pinned GitHub Actions current: Dependabot proposes a PR that
+# bumps both the commit SHA and the trailing `# vX` comment.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

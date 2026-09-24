@@ -34,6 +34,11 @@ on:
                           # 02:30 retention pipeline finishes its work)
   workflow_dispatch: {}
 
+# Least privilege: this workflow only reads the repo; it never writes back
+# through GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   dump:
     if: github.event_name == 'workflow_dispatch' || vars.ENABLE_DR_DUMP == 'true'

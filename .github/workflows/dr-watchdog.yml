@@ -30,6 +30,11 @@ on:
     - cron: "0 19 * * *"
   workflow_dispatch: {}
 
+# Least privilege: this workflow only reads the repo; it never writes back
+# through GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
