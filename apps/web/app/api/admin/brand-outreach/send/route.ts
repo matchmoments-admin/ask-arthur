@@ -13,6 +13,7 @@ import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { outreachIdempotencyKey } from "@/lib/email/brand-outreach";
 import { getBrandCloneSample } from "@/lib/email/brand-outreach-pilot";
 import BrandOutreachPilot from "@/emails/BrandOutreachPilot";
+import { escapeHtml } from "@/lib/escape-html";
 
 export const dynamic = "force-dynamic";
 
@@ -197,15 +198,21 @@ export async function POST(req: NextRequest) {
       reason,
     });
     try {
-      await sendAdminTelegramMessage(
+      const sent = await sendAdminTelegramMessage(
         [
           `🚨 <b>Brand outreach send FAILED</b>`,
           ``,
-          `Brand: <b>${body.brandName}</b>`,
-          `Recipient: <code>${recipient}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
-          `Reason: <code>${reason.slice(0, 200)}</code>`,
+          `Brand: <b>${escapeHtml(body.brandName)}</b>`,
+          `Recipient: <code>${escapeHtml(recipient)}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
+          `Reason: <code>${escapeHtml(reason.slice(0, 200))}</code>`,
         ].join("\n"),
       );
+      if (!sent.ok) {
+        logger.warn("brand-outreach send: telegram alert not delivered", {
+          reason: sent.reason,
+          error: sent.error,
+        });
+      }
     } catch (tgErr) {
       logger.error("brand-outreach send: telegram alert failed", {
         error: String(tgErr),
@@ -248,15 +255,21 @@ export async function POST(req: NextRequest) {
   // Log every send to the founder's channel — a REAL outreach in particular
   // should never happen silently.
   try {
-    await sendAdminTelegramMessage(
+    const sent = await sendAdminTelegramMessage(
       [
         `${isShadow ? "🧪" : "📨"} <b>Brand outreach ${isShadow ? "TEST" : "SENT"}</b>`,
         ``,
-        `Brand: <b>${body.brandName}</b>`,
-        `Recipient: <code>${recipient}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
-        `Subject: ${subject}`,
+        `Brand: <b>${escapeHtml(body.brandName)}</b>`,
+        `Recipient: <code>${escapeHtml(recipient)}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
+        `Subject: ${escapeHtml(subject)}`,
       ].join("\n"),
     );
+    if (!sent.ok) {
+      logger.warn("brand-outreach send: telegram confirm not delivered", {
+        reason: sent.reason,
+        error: sent.error,
+      });
+    }
   } catch (tgErr) {
     logger.error("brand-outreach send: telegram confirm failed", {
       error: String(tgErr),

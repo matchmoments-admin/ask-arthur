@@ -24,21 +24,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
-  // Per-inviter quota: each call sends an email from the Ask Arthur sender.
-  const rl = await checkOrgInviteSendRateLimit(user.id);
-  if (!rl.allowed) {
-    return NextResponse.json(
-      { error: rl.message ?? "Too many invitations sent. Try again later." },
-      {
-        status: 429,
-        headers: rl.resetAt
-          ? { "Retry-After": Math.max(1, Math.ceil((rl.resetAt.getTime() - Date.now()) / 1000)).toString() }
-          : undefined,
-      },
-    );
+  // Validate before charging the send quota, so a malformed or refused request
+  // doesn't use up the inviter's allowance.
+  const body = await req.json().catch(() => null);
+  if (body === null) {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
-  const body = await req.json();
   const parsed = InviteSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -52,6 +43,20 @@ export async function POST(req: NextRequest) {
   // Only the owner grants admin — the same rule the members PATCH enforces.
   if (role === "admin" && org.memberRole !== "owner") {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
+
+  // Per-inviter quota: each call sends an email from the Ask Arthur sender.
+  const rl = await checkOrgInviteSendRateLimit(user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: rl.message ?? "Too many invitations sent. Try again later." },
+      {
+        status: 429,
+        headers: rl.resetAt
+          ? { "Retry-After": Math.max(1, Math.ceil((rl.resetAt.getTime() - Date.now()) / 1000)).toString() }
+          : undefined,
+      },
+    );
   }
 
   const supabase = createServiceClient();

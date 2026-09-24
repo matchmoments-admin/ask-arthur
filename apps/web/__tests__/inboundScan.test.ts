@@ -248,31 +248,44 @@ describe("/api/inbound-scan — rate-limit branches", () => {
     expect(analyzeForBotMock).not.toHaveBeenCalled();
   });
 
-  it("on Upstash store_unavailable processes the email anyway + logs error", async () => {
+  it("on Upstash store_unavailable (fail-closed) returns 503, scans nothing and sends nothing", async () => {
     checkRateLimitMock.mockResolvedValue({
-      allowed: true, // fail-open
-      remaining: 99,
+      allowed: false, // fail-closed — the production default
+      remaining: 0,
       resetAt: null,
       reason: "store_unavailable",
-    });
-    analyzeForBotMock.mockResolvedValueOnce({
-      verdict: "SUSPICIOUS",
-      confidence: 0.6,
-      summary: "Likely phishing.",
-      redFlags: [],
-      nextSteps: [],
     });
 
     const { POST } = await loadRoute();
     const res = await POST(makeRequest(makePayload()));
 
-    expect(res.status).toBe(200);
-    expect(analyzeForBotMock).toHaveBeenCalledTimes(1);
-    // Operator-visible breadcrumb for the infrastructure blip.
+    // 5xx → the email worker quarantines the message for manual replay.
+    expect(res.status).toBe(503);
+    expect(analyzeForBotMock).not.toHaveBeenCalled();
+    expect(resendSendMock).not.toHaveBeenCalled();
     expect(loggerMock.error).toHaveBeenCalledWith(
-      "inbound-scan: rate limit store unavailable — processing anyway",
+      "inbound-scan: rate limit store unavailable — deferring to quarantine",
       expect.objectContaining({ sender: "user@gmail.com" }),
     );
+  });
+
+  it("uses the default (fail-closed in production) limiter mode", async () => {
+    checkRateLimitMock.mockResolvedValue({
+      allowed: true,
+      remaining: 2,
+      resetAt: null,
+      reason: "ok",
+    });
+    analyzeForBotMock.mockResolvedValueOnce({
+      verdict: "SAFE",
+      confidence: 0.9,
+      summary: "Looks fine.",
+      redFlags: [],
+      nextSteps: [],
+    });
+    const { POST } = await loadRoute();
+    await POST(makeRequest(makePayload()));
+    expect(checkRateLimitMock).toHaveBeenCalledWith("user@gmail.com");
   });
 });
 

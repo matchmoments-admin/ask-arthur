@@ -176,7 +176,12 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // refusing on quota.
     quotaExhausted: {
       consecutive: 4,
-      test: (o) => n(o, "rate_limited") > 0 && n(o, "submitted") === 0,
+      // Pure quota only: a run that also had genuine submit failures is a
+      // broken lane, not a quota wall, and must reach silent_zero instead.
+      test: (o) =>
+        n(o, "rate_limited") > 0 &&
+        n(o, "submitted") === 0 &&
+        n(o, "submit_failed") === 0,
     },
   },
   "shopfront-clone-urlscan-submit": {
@@ -192,7 +197,12 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // 2 daily runs with nothing submitted and urlscan refusing on quota.
     quotaExhausted: {
       consecutive: 2,
-      test: (o) => n(o, "rate_limited") > 0 && n(o, "submitted") === 0,
+      // Pure quota only: a run that also had genuine submit failures is a
+      // broken lane, not a quota wall, and must reach silent_zero instead.
+      test: (o) =>
+        n(o, "rate_limited") > 0 &&
+        n(o, "submitted") === 0 &&
+        n(o, "submit_failed") === 0,
     },
   },
   "shopfront-clone-urlscan-retrieve": {

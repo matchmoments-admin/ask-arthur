@@ -709,6 +709,30 @@ describe("classifyLaneHealth — persistent vendor quota", () => {
     expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
   });
 
+  // Quota must not mask a broken lane: runs with genuine submit failures as
+  // well as 429s are silent_zero, never quota_exhausted.
+  it("reports mixed 429 + real-failure runs as silent_zero, not quota", () => {
+    const mixed = {
+      pool: 200,
+      rechecked: 20,
+      submitted: 0,
+      submit_failed: 20,
+      rate_limited: 30,
+    };
+    const rows = [
+      ...without("recheck_batch"),
+      ...[1, 7, 13, 19].map((h) =>
+        outcomeRow("shopfront-clone-lifecycle-recheck", h, 20, mixed),
+      ),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-lifecycle-recheck",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
   it("pages the daily submit lane after 2 all-429 runs", () => {
     const run = { submitted: 0, submit_failed: 0, rate_limited: 30, dormant_retired: 0 };
     const rows = [

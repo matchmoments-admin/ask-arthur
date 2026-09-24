@@ -88,4 +88,38 @@ describe("POST /api/org/invite rate limit", () => {
     expect(res.status).toBe(403);
     expect(mocks.limit).not.toHaveBeenCalled();
   });
+
+  it("rejects invalid JSON with 400 without charging the quota", async () => {
+    const res = await POST(
+      new NextRequest("https://askarthur.au/api/org/invite", {
+        method: "POST",
+        body: "{not json",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mocks.limit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid body with 400 without charging the quota", async () => {
+    const res = await POST(
+      new NextRequest("https://askarthur.au/api/org/invite", {
+        method: "POST",
+        body: JSON.stringify({ email: "not-an-email", role: "viewer" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mocks.limit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-owner admin invite before charging the quota", async () => {
+    mocks.getOrg.mockResolvedValue({ orgId: "o1", orgName: "Acme", memberRole: "admin" });
+    const res = await POST(
+      new NextRequest("https://askarthur.au/api/org/invite", {
+        method: "POST",
+        body: JSON.stringify({ email: "new@example.com", role: "admin" }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(mocks.limit).not.toHaveBeenCalled();
+  });
 });

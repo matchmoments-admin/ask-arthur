@@ -297,23 +297,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad_sender" }, { status: 422 });
   }
 
-  // Per-sender rate limit.
-  //
-  // Pass failMode: "open" — inbound-scan is cheap (A$0.001/email Claude
-  // Haiku + in-plan Resend send) and the cost of silently dropping a
-  // legitimate user's email during a Redis blip dwarfs the cost of a
-  // brief uncapped window. The fail-open path is loud (logger.error in
-  // storeUnavailable → admin /costs dashboard + Telegram digest) so an
-  // operator notices and a daily feature_brake is still the hard ceiling.
+  // Per-sender rate limit — fail CLOSED (the default in production, per the
+  // repo's rate-limiter rule). Every processed email sends a reply from the
+  // Ask Arthur address, so an unbounded window is not "cheap"; when the store
+  // is unavailable we return 503 without scanning or replying, and the worker
+  // quarantines the message (5xx → QUARANTINE_FORWARDER) for manual replay.
   //
   // Branch on `reason`:
-  //   - exceeded         → user genuinely hit 3/day. Send polite reply.
-  //                        Do NOT silent-drop — they're a real user.
-  //   - store_unavailable → Upstash blip. Already logged at error level
-  //                        by storeUnavailable(); process the email
-  //                        anyway. allowed will be true under fail-open.
-  //   - ok               → continue.
-  const rate = await checkInboundScanRateLimit(sender.email, "open");
+  //   - exceeded          → user genuinely hit 3/day. Send polite reply.
+  //   - store_unavailable → 503, nothing sent; the email is quarantined.
+  //   - ok                → continue.
+  const rate = await checkInboundScanRateLimit(sender.email);
   if (rate.reason === "exceeded") {
     // Polite reply — quota hit is a UX problem, not an attack.
     const resendKey = process.env.RESEND_API_KEY;
@@ -356,15 +350,17 @@ export async function POST(req: NextRequest) {
     // try to quarantine. The user got a reply explaining the limit.
     return NextResponse.json({ ok: true, replySent: true, reason: "quota_exceeded" });
   }
-  if (rate.reason === "store_unavailable") {
-    // Already logged at error level by storeUnavailable. Keep going —
-    // the email will still get scanned and the user will still get a
-    // reply. Cost ceiling is the feature_brakes daily cap, not the
-    // per-sender rate limit.
-    logger.error("inbound-scan: rate limit store unavailable — processing anyway", {
+  if (!rate.allowed) {
+    // store_unavailable under fail-closed. Logged at error level already.
+    logger.error("inbound-scan: rate limit store unavailable — deferring to quarantine", {
       sender: sender.email,
     });
+    return NextResponse.json(
+      { error: "rate_limit_unavailable" },
+      { status: 503, headers: { "Retry-After": "300" } },
+    );
   }
+
 
   // Combine subject + body into a single text blob for the scam engine.
   // Subject often carries the scam pitch ("Your parcel could not be
