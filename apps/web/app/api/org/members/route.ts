@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getUser } from "@/lib/auth";
 import { getOrg } from "@/lib/org";
+import { ASSIGNABLE_ORG_ROLES } from "@/lib/org-roles";
 
 export async function GET() {
   const user = await getUser();
@@ -52,13 +53,7 @@ export async function GET() {
 
 /** Roles an admin/owner may assign. Never `owner` — ownership transfer is not a
  *  role edit. Mirrors the invite route's enum. */
-const AssignableRole = z.enum([
-  "admin",
-  "compliance_officer",
-  "fraud_analyst",
-  "developer",
-  "viewer",
-]);
+const AssignableRole = z.enum(ASSIGNABLE_ORG_ROLES);
 
 const PatchBody = z
   .object({

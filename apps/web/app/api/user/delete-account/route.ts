@@ -67,12 +67,16 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Revoke api_keys explicitly so a leaked bearer token can't outlive the account.
-    await svc
+    // Revoke api_keys explicitly so a leaked bearer token can't outlive the
+    // account: api_keys.user_id is ON DELETE SET NULL, so the auth delete below
+    // would otherwise leave an active, ownerless key. `is_active` is the column
+    // lib/apiAuth.ts checks (api_keys has no revoked_at). Checked, and done
+    // BEFORE the auth delete — a failed revoke must stop the deletion.
+    const { error: keyErr } = await svc
       .from("api_keys")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("user_id", userId)
-      .is("revoked_at", null);
+      .update({ is_active: false })
+      .eq("user_id", userId);
+    if (keyErr) throw new Error(`api key revocation failed: ${keyErr.message}`);
 
     // Detach from orgs before auth delete so the CASCADE doesn't strand the
     // organization without its last owner in a half-state.

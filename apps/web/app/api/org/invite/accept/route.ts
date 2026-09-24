@@ -5,6 +5,7 @@ import { checkOrgInviteAcceptRateLimit } from "@askarthur/utils/rate-limit";
 import { getUser } from "@/lib/auth";
 import { AuthUnavailableError } from "@/lib/auth";
 import { logger } from "@askarthur/utils/logger";
+import { isAssignableOrgRole } from "@/lib/org-roles";
 
 const AcceptSchema = z.object({
   token: z.string().min(1),
@@ -94,6 +95,17 @@ export async function POST(req: NextRequest) {
       { error: "This invitation was sent to a different email address" },
       { status: 403 },
     );
+  }
+
+  // Only a grantable role can be accepted. Invitations are created by the
+  // invite route, but the row is the source of truth here, so the role is
+  // re-checked before it becomes a membership (never `owner`).
+  if (!isAssignableOrgRole(invitation.role)) {
+    logger.warn("org invite with non-assignable role refused", {
+      userId: user.id,
+      invitationId: invitation.id,
+    });
+    return NextResponse.json({ error: "Invalid or expired invitation" }, { status: 403 });
   }
 
   if (invitation.accepted_at) {
