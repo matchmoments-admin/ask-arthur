@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { Public_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { OG_DEFAULT_IMAGE, OG_DEFAULT_IMAGE_URL } from "@/lib/og";
 import PlausibleProvider from "next-plausible";
 import { AxiomWebVitals } from "next-axiom";
 import "./globals.css";
 
-const publicSans = Public_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+const publicSans = localFont({
+  src: [
+    { path: "./fonts/public-sans-latin-400-800-normal.woff2", weight: "400 800", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-public-sans",
 });
