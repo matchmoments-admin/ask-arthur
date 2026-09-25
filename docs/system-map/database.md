@@ -2,6 +2,8 @@
 
 Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain areas, 121 migrations (v2 → v122), 71 RPCs (all `SECURITY DEFINER`), 9 triggers, 11 archive shadows, 3 partitioned shells.
 
+**Privileges (v321/v322/v324):** new `public` objects get no `anon`/`authenticated` privileges and no `PUBLIC` EXECUTE by default (v324 `ALTER DEFAULT PRIVILEGES FOR ROLE postgres`); migrations GRANT explicitly. The account tables (`api_keys`, `user_profiles`, `org_members`, `org_invitations`, `organizations`, `subscriptions`, `extension_subscriptions`, `family_*`, `phone_footprint_monitors`) have no user INSERT/UPDATE (v321/v322) — writes go through the service role or SECURITY DEFINER functions. Rules + lint: `supabase/CLAUDE.md` §7, `apps/web/__tests__/migrationLint.test.ts`.
+
 **Hot-table notation:** `[hot ⚠]` = write-frequent. New large indexes (HNSW, large GIN, BRIN over wide ranges) **must** go on a 1:1 sibling table per [ADR-0005](../adr/0005-pgvector-index-policy.md). See `CLAUDE.md` Critical Rules for the chunking + index-on-sibling rationale (born from incident 2026-05-09).
 
 ---

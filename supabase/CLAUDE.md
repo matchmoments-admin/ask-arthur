@@ -48,6 +48,26 @@ Migrations that rewrite tables, take >1 min, or hold locks on a hot table must b
 
 `acnc_charities`, `scam_reports`, `verified_scams`, `feedback_triage_queue`, `feed_items`, `scam_entities`. Any UPDATE/DELETE/UPSERT against >5K rows on these tables must be chunked at ≤5K rows/iteration with a finite `statement_timeout`. Reference: incident 2026-05-09; pattern in `pipeline/scrapers/acnc_register.py`.
 
+### 7. New objects get no anon/authenticated privileges — GRANT explicitly (v324)
+
+Since v324 (`ALTER DEFAULT PRIVILEGES FOR ROLE postgres`), tables, sequences and functions
+created in `public` get **no** privileges for `anon` / `authenticated` and no `EXECUTE` for
+`PUBLIC`. Before v324 every new table was writable through PostgREST the moment it existed
+(v321/v322 had to claw grants back). So:
+
+- A table the app reads with a user-scoped client needs an explicit
+  `GRANT SELECT [ (columns) ] ON public.x TO authenticated` — grant columns, not the table,
+  when some columns are server-owned. Writes from users are the exception; server writes use
+  the service role, which keeps its default privileges.
+- Every new table still needs `ALTER TABLE … ENABLE ROW LEVEL SECURITY` (defence in depth).
+- Every `SECURITY DEFINER` function needs `REVOKE ALL ON FUNCTION … FROM PUBLIC, anon,
+authenticated` plus an explicit `GRANT EXECUTE … TO service_role` (or the role that calls it).
+  `CREATE OR REPLACE` keeps an existing function's ACL, but a changed signature is a NEW
+  function — the explicit REVOKE covers both.
+
+`apps/web/__tests__/migrationLint.test.ts` enforces the RLS and REVOKE rules for every
+migration at or after v324 (historical files are exempt — they are immutable).
+
 ## Naming convention
 
 ```
