@@ -10,14 +10,24 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 // hoisted, `createMock` would be undefined at factory-evaluation time.
 
 const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
-vi.mock("@anthropic-ai/sdk", () => {
-  // ocrLanyard does `new Anthropic()`. vi.fn().mockImplementation() returns
-  // an arrow function which can't be `new`'d, so use a real class instead.
-  class MockAnthropic {
-    messages = { create: createMock };
-  }
-  return { default: MockAnthropic };
-});
+// ocrLanyard calls callClaudeJson (the one model-call Module). The mock runs
+// the model reply through the same fence-stripping JSON parse the Module's
+// text path uses, so these cases keep exercising real output shapes.
+vi.mock("@askarthur/scam-engine/anthropic", () => ({
+  callClaudeJson: async (opts: unknown) => {
+    const res = await createMock(opts);
+    const text = res.content.find((b: { type: string }) => b.type === "text")?.text ?? "";
+    const cleaned = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+    const parsed = JSON.parse(cleaned); // throws on prose, like the Module
+    const result = (opts as { schema: { parse: (v: unknown) => unknown } }).schema.parse(parsed);
+    return {
+      result,
+      usage: { inputTokens: 900, outputTokens: 60, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      estimatedCostUsd: 0.0012,
+      modelId: "claude-haiku-4-5-20251001",
+    };
+  },
+}));
 
 import { ocrLanyard } from "../ocr-lanyard";
 
@@ -128,20 +138,26 @@ describe("ocrLanyard", () => {
     expect(out.extracted).toBe(true); // charity_name is enough
   });
 
-  it("sends the image first, then the fixed instruction (vision request shape)", async () => {
+  it("sends the image as an image part with the fixed instruction as trusted text", async () => {
     createMock.mockResolvedValue({
       content: [{ type: "text", text: '{"charity_name":"Real Charity"}' }],
     });
-    await ocrLanyard("aW1n", "image/png");
-    const req = createMock.mock.calls[0][0];
-    expect(req.model).toBe("claude-haiku-4-5-20251001");
-    expect(req.max_tokens).toBe(400);
-    const [image, text] = req.messages[0].content;
-    expect(image).toEqual({
-      type: "image",
-      source: { type: "base64", media_type: "image/png", data: "aW1n" },
-    });
-    expect(text.type).toBe("text");
-    expect(text.text).toMatch(/^Read the visible text in this image/);
+    const out = await ocrLanyard("aW1n", "image/png");
+    const opts = createMock.mock.calls[0][0];
+    expect(opts.model).toBe("HAIKU_4_5");
+    expect(opts.maxTokens).toBe(400);
+    expect(opts.images).toEqual([{ mediaType: "image/png", base64: "aW1n" }]);
+    expect(opts.userIsTrusted).toBe(true);
+    expect(opts.user).toMatch(/^Read the visible text in this image/);
+    // Usage + cost surface to the caller for cost telemetry.
+    expect(out.usage).toEqual({ inputTokens: 900, outputTokens: 60 });
+    expect(out.estimatedCostUsd).toBe(0.0012);
+  });
+
+  it("returns no usage/cost on a failed call (no spend to log)", async () => {
+    createMock.mockRejectedValue(new Error("network down"));
+    const out = await ocrLanyard("data", "image/jpeg");
+    expect(out.usage).toBeUndefined();
+    expect(out.estimatedCostUsd).toBeUndefined();
   });
 });

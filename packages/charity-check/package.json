@@ -6,11 +6,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
     "@askarthur/scam-engine": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
-    "@askarthur/utils": "workspace:*"
+    "@askarthur/utils": "workspace:*",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "typescript": "^5",

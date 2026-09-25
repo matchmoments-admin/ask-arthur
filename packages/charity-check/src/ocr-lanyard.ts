@@ -40,6 +40,11 @@ export interface LanyardExtraction {
   notes?: string;
   /** True when the model successfully extracted at least one field. */
   extracted: boolean;
+  /** Present only when the model call completed (success or unparseable
+   *  output) — the caller logs cost from these; absent on a failed call. */
+  usage?: { inputTokens: number; outputTokens: number };
+  estimatedCostUsd?: number;
+  modelId?: string;
 }
 
 const SYSTEM_PROMPT = `You read photos of Australian charity fundraiser materials — ID badges, lanyards, flyers, donation request cards. Extract structured fields STRICTLY from what's visibly printed in the image. Never invent or infer.
@@ -133,7 +138,15 @@ export async function ocrLanyard(
       cacheSystem: false,
       requestId: "charity-check:ocr-lanyard",
     });
-    return normalizeExtraction(out.result);
+    return {
+      ...normalizeExtraction(out.result),
+      usage: {
+        inputTokens: out.usage.inputTokens,
+        outputTokens: out.usage.outputTokens,
+      },
+      estimatedCostUsd: out.estimatedCostUsd,
+      modelId: out.modelId,
+    };
   } catch (err) {
     logger.warn("ocr-lanyard: Claude call failed", { error: String(err) });
     return { extracted: false };

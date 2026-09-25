@@ -75,6 +75,22 @@ describe("enrich-vulnerability classifyAuContext", () => {
     expect(req.model).toBe("claude-haiku-4-5-20251001");
   });
 
+  it.each([
+    ["an array", "[1,2,3]"],
+    ["a string", '"CBA"'],
+    ["null", "null"],
+    ["wrong-typed fields", '{"banks_affected":{"x":1},"gov_affected":"yes","essential_eight_relevance":7}'],
+  ])("writes defaults for %s instead of throwing", async (_label, reply) => {
+    createMock.mockResolvedValue(textReply(reply));
+    const out = await classifyAuContext(vuln);
+    expect(out.result).toEqual({
+      banks_affected: [],
+      gov_affected: false,
+      essential_eight_relevance: null,
+      cps234_relevance: false,
+    });
+  });
+
   it("degrades a malformed field to the previous defaults instead of failing", async () => {
     createMock.mockResolvedValue(textReply('{"banks_affected":"CBA"}'));
     const out = await classifyAuContext(vuln);

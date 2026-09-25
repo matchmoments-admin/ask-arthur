@@ -206,8 +206,13 @@ export interface CallClaudeJsonOptions<T> {
   timeoutMs?: number;
   /** Apply `cache_control: ephemeral` to system prompt. Default true. */
   cacheSystem?: boolean;
-  /** Skip the injection sandwich on `user`. Default false, and there is
-   *  currently no caller that sets it — both that did were wrong.
+  /** Skip the injection sandwich on `user`. Default false. The one current
+   *  caller is charity-check's ocr-lanyard, whose `user` string is a fixed
+   *  code constant (the instruction "read the visible text in this image…")
+   *  with no third-party bytes in it; its untrusted input is the IMAGE, which
+   *  is sent as an image part and is never wrapped or escaped by this
+   *  function under any setting (see `images`). Two earlier callers set this
+   *  wrongly and were removed:
    *
    *  "Your own JSON envelope" is NOT the test, and phrasing it that way is
    *  what justified both removals: an envelope you built can still carry
@@ -303,10 +308,11 @@ export async function callClaudeJson<T>(
 
   // Sandwich defence: nonce-tagged delimiter + explicit pre/post instruction
   // (shared with claude.ts::analyzeWithClaude via buildInjectionSandwich).
-  // Applied to every caller — `userIsTrusted` exists but nothing sets it, and
-  // the two call sites that did were both wrong about their own input (see
-  // the field's JSDoc). Judge the escape hatch on provenance, not on whether
-  // the string happens to be JSON.
+  // Applied to every caller except ocr-lanyard, whose `user` is a fixed code
+  // constant (see the field's JSDoc); two earlier callers that set
+  // `userIsTrusted` were wrong about their own input. Judge the escape hatch
+  // on provenance, not on whether the string happens to be JSON. Images are
+  // never wrapped here — they are separate content parts.
   // No scrubPii here: this wrapper's callers pass non-PII envelopes, matching
   // the pre-refactor behaviour (which never scrubbed).
   const userContent =
