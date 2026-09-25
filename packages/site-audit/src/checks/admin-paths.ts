@@ -1,6 +1,6 @@
 // Exposed admin path detection — HEAD requests to common sensitive paths
 
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import type { CheckResult } from "../types";
 
 // Common paths that should not be publicly accessible
@@ -43,11 +43,11 @@ export async function checkExposedAdminPaths(
   const checks = ADMIN_PATHS.map(async (path) => {
     try {
       const url = new URL(path, baseUrl).href;
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         method: "HEAD",
-        redirect: "follow",
-        signal: AbortSignal.timeout(timeoutMs),
-        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
+        redirect: "follow-checked",
+        as: "none",
+        timeoutMs,
       });
 
       // 2xx response means the path is accessible

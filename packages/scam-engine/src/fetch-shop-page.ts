@@ -10,27 +10,14 @@
 // never the request path. Never throws — every failure mode yields
 // { html: null, error }.
 //
-// Hard requirements:
-//   - SSRF guard via isPrivateURL on the initial URL AND on every redirect
-//     hop. Redirects are followed manually (redirect: "manual") so each
-//     Location is validated BEFORE it is fetched — a redirect into an
-//     internal host is the classic SSRF bypass that redirect: "follow"
-//     would silently issue mid-chain. Mirrors redirect-resolver.ts's
-//     per-hop check.
-//   - Resolution-time SSRF guard via `ssrfSafeDispatcher`. isPrivateURL is
-//     purely syntactic and lets a hostname through that A-records to a
-//     private IP (e.g. `rebind.example.com → 127.0.0.1`), AND it cannot
-//     defend against DNS rebinding where the host resolves to a public IP
-//     at check-time and a private IP at fetch-time. The dispatcher hooks
-//     undici's per-connection lookup and rejects the resolved IP if it is
-//     private — closing both windows. Issue #353.
-//   - Finite total timeout across the whole redirect chain.
-//   - Bounded redirect count.
-//   - Response-body size cap — never read an unbounded body into memory.
+// Transport: `safeFetch` (./safe-fetch) owns the guard on every redirect hop,
+// the SSRF-safe dispatcher, the chain-wide timeout, the redirect bound and
+// the streamed byte cap (truncating — the ABN is near the top or footer of a
+// page, so a truncated page is still useful). This file keeps only the shop-
+// check policy and the legacy error vocabulary (`legacyFetchError`).
 
 import { logger } from "@askarthur/utils/logger";
-import { isPrivateURL } from "./safebrowsing";
-import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
+import { safeFetch, type SafeFetchResult } from "./safe-fetch";
 
 // Default total budget across the whole redirect chain (not per-hop) — a
 // caller may pass a smaller `budgetMs`. Keeps the shop-signal-enrich
@@ -72,139 +59,69 @@ export async function fetchShopPage(
   url: string,
   budgetMs: number = TIMEOUT_MS,
 ): Promise<ShopPageFetch> {
-  if (isPrivateURL(url)) {
-    return {
-      html: null,
-      finalUrl: null,
-      status: null,
-      error: "blocked-private-url",
-    };
+  const r = await safeFetch(url, {
+    method: "GET",
+    headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
+    timeoutMs: budgetMs,
+    maxBytes: MAX_BYTES,
+    // The ABN sits in the page head/footer copy — keep the first MAX_BYTES.
+    truncate: true,
+    redirect: "follow-checked",
+    maxRedirects: MAX_REDIRECTS,
+    as: "text",
+  });
+  if (r.ok) {
+    return { html: r.body, finalUrl: r.finalUrl, status: r.status, error: null };
   }
-
-  const deadline = Date.now() + budgetMs;
-  let currentUrl = url;
-
-  try {
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        return { html: null, finalUrl: null, status: null, error: "timeout" };
-      }
-
-      const res = await fetch(currentUrl, {
-        method: "GET",
-        redirect: "manual",
-        headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
-        signal: AbortSignal.timeout(remaining),
-        // `dispatcher` is undici-specific (Node 22's fetch is undici);
-        // not in lib.dom RequestInit. The cast is intentional.
-        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-      });
-
-      // ── Redirect hop ──────────────────────────────────────────────────
-      // redirect: "manual" hands us the raw 3xx so the Location target can
-      // be validated before it is fetched. A redirect into a private host
-      // is the SSRF bypass — refuse it; the internal host is never contacted.
-      if (res.status >= 300 && res.status < 400) {
-        // Drain the (small) redirect body so undici can reuse the socket.
-        await res.body?.cancel().catch(() => {});
-
-        const location = res.headers.get("location");
-        if (!location) {
-          return {
-            html: null,
-            finalUrl: currentUrl,
-            status: res.status,
-            error: "redirect-no-location",
-          };
-        }
-        let next: string;
-        try {
-          next = new URL(location, currentUrl).href;
-        } catch {
-          return {
-            html: null,
-            finalUrl: currentUrl,
-            status: res.status,
-            error: "invalid-redirect",
-          };
-        }
-        if (isPrivateURL(next)) {
-          logger.warn("fetchShopPage blocked a private-host redirect", {
-            from: currentUrl,
-            to: next,
-          });
-          return {
-            html: null,
-            finalUrl: next,
-            status: res.status,
-            error: "blocked-private-redirect",
-          };
-        }
-        currentUrl = next;
-        continue;
-      }
-
-      // ── Final response ────────────────────────────────────────────────
-      if (!res.ok) {
-        return {
-          html: null,
-          finalUrl: currentUrl,
-          status: res.status,
-          error: `http-${res.status}`,
-        };
-      }
-
-      const body = res.body;
-      if (!body) {
-        return {
-          html: null,
-          finalUrl: currentUrl,
-          status: res.status,
-          error: "empty-body",
-        };
-      }
-
-      // Read the stream chunk by chunk, stopping at the size cap.
-      const reader = body.getReader();
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      while (total < MAX_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          total += value.byteLength;
-        }
-      }
-      await reader.cancel().catch(() => {});
-
-      const buf = new Uint8Array(Math.min(total, MAX_BYTES));
-      let offset = 0;
-      for (const chunk of chunks) {
-        const room = buf.length - offset;
-        if (room <= 0) break;
-        buf.set(chunk.subarray(0, room), offset);
-        offset += Math.min(chunk.byteLength, room);
-      }
-
-      const html = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-      return { html, finalUrl: currentUrl, status: res.status, error: null };
-    }
-
-    // Loop exhausted — every iteration was a redirect.
-    return {
-      html: null,
-      finalUrl: currentUrl,
-      status: null,
-      error: "too-many-redirects",
-    };
-  } catch (err) {
-    const error =
-      err instanceof DOMException && err.name === "TimeoutError"
-        ? "timeout"
-        : "network-error";
-    logger.warn("fetchShopPage failed", { url, error, detail: String(err) });
-    return { html: null, finalUrl: null, status: null, error };
+  const error = legacyFetchError(r);
+  if (r.reason === "blocked" && r.detail === "private-redirect") {
+    logger.warn("fetchShopPage blocked a private-host redirect", { to: r.finalUrl });
+  } else if (r.reason === "timeout" || r.reason === "network") {
+    logger.warn("fetchShopPage failed", { url, error, detail: r.detail });
   }
+  return {
+    html: null,
+    finalUrl: keepsFinalUrl(r) ? r.finalUrl : null,
+    status: r.status,
+    error,
+  };
+}
+
+/**
+ * The error vocabulary shop-signal and the review fetcher have always
+ * reported (their callers and tests key on these strings), mapped from a
+ * `safeFetch` failure.
+ */
+export function legacyFetchError(r: Extract<SafeFetchResult<unknown>, { ok: false }>): string {
+  switch (r.reason) {
+    case "blocked":
+      if (r.detail === "private-url") return "blocked-private-url";
+      if (r.detail === "private-redirect") return "blocked-private-redirect";
+      return "network-error"; // refused at connect (resolved to a private IP)
+    case "redirects":
+      if (r.detail === "no-location") return "redirect-no-location";
+      if (r.detail === "invalid-location") return "invalid-redirect";
+      return "too-many-redirects"; // limit, or a loop (which used to run to the limit)
+    case "http":
+      return `http-${r.status}`;
+    case "no_body":
+      return "empty-body";
+    case "too_large":
+      return "body-too-large";
+    case "invalid_json":
+      return "invalid-json";
+    case "timeout":
+      return "timeout";
+    default:
+      return "network-error";
+  }
+}
+
+function keepsFinalUrl(r: Extract<SafeFetchResult<unknown>, { ok: false }>): boolean {
+  return (
+    r.reason === "http" ||
+    r.reason === "redirects" ||
+    r.reason === "no_body" ||
+    (r.reason === "blocked" && r.detail === "private-redirect")
+  );
 }

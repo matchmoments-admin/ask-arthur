@@ -1,8 +1,8 @@
 // Review-app JSON fetcher — Deep Shop Check Stage 1 (reviews signal).
 //
-// A sibling of fetch-shop-page.ts: same SSRF posture (isPrivateURL pre-check +
-// per-redirect-hop check + ssrfSafeDispatcher for DNS-rebind defence + finite
-// budget + byte cap), but it parses a JSON body instead of returning HTML.
+// A sibling of fetch-shop-page.ts: same transport (`safeFetch` — per-hop
+// guard, SSRF-safe dispatcher, finite budget, byte cap), but it parses a JSON
+// body instead of returning HTML.
 // Kept separate because fetch-shop-page.ts's contract is explicitly "return
 // HTML for the ABN scan" and callers destructure `.html`.
 //
@@ -17,8 +17,8 @@
 // error }.
 
 import { logger } from "@askarthur/utils/logger";
-import { isPrivateURL } from "./safebrowsing";
-import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
+import { legacyFetchError } from "./fetch-shop-page";
+import { safeFetch } from "./safe-fetch";
 
 const TIMEOUT_MS = 6_000;
 const MAX_REDIRECTS = 5;
@@ -48,118 +48,21 @@ export async function fetchReviewApiJson(
   url: string,
   budgetMs: number = TIMEOUT_MS,
 ): Promise<ReviewApiFetch> {
-  if (isPrivateURL(url)) {
-    return { data: null, status: null, error: "blocked-private-url" };
+  const r = await safeFetch(url, {
+    method: "GET",
+    headers: { "User-Agent": BROWSER_UA, Accept: "application/json,*/*" },
+    timeoutMs: budgetMs,
+    maxBytes: MAX_BYTES,
+    redirect: "follow-checked",
+    maxRedirects: MAX_REDIRECTS,
+    as: "json",
+  });
+  if (r.ok) return { data: r.body, status: r.status, error: null };
+  const error = legacyFetchError(r);
+  if (r.reason === "blocked" && r.detail === "private-redirect") {
+    logger.warn("fetchReviewApiJson blocked a private-host redirect", { to: r.finalUrl });
+  } else if (r.reason === "timeout" || r.reason === "network") {
+    logger.warn("fetchReviewApiJson failed", { url, error, detail: r.detail });
   }
-
-  const deadline = Date.now() + budgetMs;
-  let currentUrl = url;
-
-  try {
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        return { data: null, status: null, error: "timeout" };
-      }
-
-      const res = await fetch(currentUrl, {
-        method: "GET",
-        redirect: "manual",
-        headers: { "User-Agent": BROWSER_UA, Accept: "application/json,*/*" },
-        signal: AbortSignal.timeout(remaining),
-        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-      });
-
-      // Redirect hop — validate the Location target before fetching it.
-      if (res.status >= 300 && res.status < 400) {
-        await res.body?.cancel().catch(() => {});
-        const location = res.headers.get("location");
-        if (!location) {
-          return {
-            data: null,
-            status: res.status,
-            error: "redirect-no-location",
-          };
-        }
-        let next: string;
-        try {
-          next = new URL(location, currentUrl).href;
-        } catch {
-          return { data: null, status: res.status, error: "invalid-redirect" };
-        }
-        if (isPrivateURL(next)) {
-          logger.warn("fetchReviewApiJson blocked a private-host redirect", {
-            from: currentUrl,
-            to: next,
-          });
-          return {
-            data: null,
-            status: res.status,
-            error: "blocked-private-redirect",
-          };
-        }
-        currentUrl = next;
-        continue;
-      }
-
-      if (!res.ok) {
-        await res.body?.cancel().catch(() => {});
-        return { data: null, status: res.status, error: `http-${res.status}` };
-      }
-
-      const body = res.body;
-      if (!body) {
-        return { data: null, status: res.status, error: "empty-body" };
-      }
-
-      // Read the stream chunk by chunk, stopping at the size cap.
-      const reader = body.getReader();
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      let overflow = false;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          total += value.byteLength;
-          if (total > MAX_BYTES) {
-            overflow = true;
-            break;
-          }
-          chunks.push(value);
-        }
-      }
-      await reader.cancel().catch(() => {});
-      if (overflow) {
-        return { data: null, status: res.status, error: "body-too-large" };
-      }
-
-      const buf = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        buf.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-
-      try {
-        return { data: JSON.parse(text), status: res.status, error: null };
-      } catch {
-        return { data: null, status: res.status, error: "invalid-json" };
-      }
-    }
-
-    return { data: null, status: null, error: "too-many-redirects" };
-  } catch (err) {
-    const error =
-      err instanceof DOMException && err.name === "TimeoutError"
-        ? "timeout"
-        : "network-error";
-    logger.warn("fetchReviewApiJson failed", {
-      url,
-      error,
-      detail: String(err),
-    });
-    return { data: null, status: null, error };
-  }
+  return { data: null, status: r.status, error };
 }

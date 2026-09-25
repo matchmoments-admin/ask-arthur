@@ -12,7 +12,10 @@ vi.mock("@askarthur/utils/rate-limit", () => ({
 }));
 vi.mock("@askarthur/scam-engine/local-intel", () => ({ analyzeEmail: vi.fn() }));
 vi.mock("@askarthur/scam-engine/whois", () => ({ lookupWhois: vi.fn() }));
-vi.mock("@askarthur/scam-engine/ssrf-guard", () => ({ assertSafeURL: () => {} }));
+vi.mock("@askarthur/scam-engine/ssrf-guard", () => ({
+  assertSafeURL: () => {},
+  checkOutboundUrl: (u: string) => ({ ok: true, url: new URL(u) }),
+}));
 vi.mock("@askarthur/scam-engine/ssrf-dispatcher", () => ({ ssrfSafeDispatcher: {} }));
 
 import { POST } from "@/app/api/persona-check/route";

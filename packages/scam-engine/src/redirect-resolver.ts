@@ -3,7 +3,7 @@
 
 import { logger } from "@askarthur/utils/logger";
 import { isPrivateURL } from "./safebrowsing";
-import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
+import { safeFetch } from "./safe-fetch";
 import { extractDomain } from "./url-normalize";
 import type { RedirectHop, RedirectChain } from "@askarthur/types";
 
@@ -162,34 +162,29 @@ export async function resolveRedirectChain(
     }
 
     const hopStart = Date.now();
-    let response: Response;
-
-    try {
-      // Try HEAD first (cheaper). The ssrfSafeDispatcher validates the
-      // DNS-resolved IP of every connection, closing the rebinding /
-      // hostname→private-IP window the per-hop isPrivateURL check can't catch.
-      response = await fetch(currentUrl, {
-        method: "HEAD",
+    // One request per hop through safeFetch in "manual" mode: it applies the
+    // same guard plus the SSRF-safe dispatcher (a name resolving to a private
+    // IP is refused at connect) and never reads the body. The chain walk and
+    // its analysis stay here. HEAD first (cheaper), GET on 405.
+    const hop = (method: "HEAD" | "GET") =>
+      safeFetch(currentUrl, {
+        method,
         redirect: "manual",
+        as: "none",
+        timeoutMs: config.perHopTimeoutMs,
         headers: { "User-Agent": config.userAgent },
-        signal: AbortSignal.timeout(config.perHopTimeoutMs),
-        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
+        okStatus: () => true,
       });
-
-      // If HEAD returns 405 Method Not Allowed, fallback to GET
-      if (response.status === 405) {
-        response = await fetch(currentUrl, {
-          method: "GET",
-          redirect: "manual",
-          headers: { "User-Agent": config.userAgent },
-          signal: AbortSignal.timeout(config.perHopTimeoutMs),
-          ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-        });
-      }
-    } catch (err) {
-      error = `Fetch failed: ${err instanceof Error ? err.message : String(err)}`;
+    let result = await hop("HEAD");
+    if (result.ok && result.status === 405) result = await hop("GET");
+    if (!result.ok) {
+      error =
+        result.reason === "blocked"
+          ? "Redirect to private/internal address blocked"
+          : `Fetch failed: ${result.detail}`;
       break;
     }
+    const response = { status: result.status, headers: result.headers };
 
     const latencyMs = Date.now() - hopStart;
     const statusCode = response.status;

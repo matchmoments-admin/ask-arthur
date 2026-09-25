@@ -1,6 +1,6 @@
 // Open redirect detection — test common redirect parameters for offsite redirects
 
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import type { CheckResult } from "../types";
 
 const REDIRECT_PARAMS = ["url", "redirect", "next", "return", "returnTo", "redirect_uri", "goto"];
@@ -20,14 +20,15 @@ export async function checkOpenRedirect(
       const testUrl = new URL(baseUrl);
       testUrl.searchParams.set(param, EVIL_TARGET);
 
-      const res = await fetch(testUrl.href, {
+      const res = await safeFetch(testUrl.href, {
         method: "HEAD",
+        // We inspect the Location ourselves — never follow it.
         redirect: "manual",
-        signal: AbortSignal.timeout(REDIRECT_TIMEOUT_MS),
-        // Same connect-time guard as the sibling checks (redirect-chain,
-        // admin-paths, security-txt): the host is re-resolved per request.
-        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
+        as: "none",
+        timeoutMs: REDIRECT_TIMEOUT_MS,
+        okStatus: () => true,
       });
+      if (!res.ok) return;
 
       // Check if response is a redirect pointing to evil target
       if (res.status >= 300 && res.status < 400) {

@@ -1,6 +1,6 @@
 // Redirect chain analysis — follows redirects manually to detect suspicious chains
 
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import type { CheckResult, RedirectHop } from "../types";
 
 const MAX_HOPS = 10;
@@ -15,21 +15,19 @@ export async function checkRedirectChain(
 
   try {
     for (let i = 0; i < MAX_HOPS; i++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      let res: Response;
-      try {
-        res = await fetch(current, {
-          method: "GET",
-          redirect: "manual",
-          headers: { "User-Agent": "AskArthur-SiteAudit/1.0" },
-          signal: controller.signal,
-          ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-        });
-      } finally {
-        clearTimeout(timer);
-      }
+      // One request per hop via safeFetch: the guard runs on every hop
+      // (including a Location pointing at a private host) plus the SSRF-safe
+      // dispatcher at connect. This check records the chain itself.
+      const r = await safeFetch(current, {
+        method: "GET",
+        redirect: "manual",
+        as: "none",
+        timeoutMs,
+        headers: { "User-Agent": "AskArthur-SiteAudit/1.0" },
+        okStatus: () => true,
+      });
+      if (!r.ok) throw new Error(r.reason === "blocked" ? "redirect to a private or internal address blocked" : r.detail);
+      const res = { status: r.status, headers: r.headers };
 
       const hop: RedirectHop = {
         url: current,

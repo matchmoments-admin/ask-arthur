@@ -4,7 +4,7 @@
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "./cost-log";
-import { isPrivateIP } from "./private-ip";
+import { checkOutboundUrl } from "./ssrf-guard";
 
 // URL reputation cache — threat data changes slowly, no need to re-check every request.
 // Naming is historical: MALICIOUS verdicts use SAFE_BROWSING_CACHE_TTL (short — we
@@ -44,50 +44,13 @@ export interface URLCheckResult {
   sources: string[];
 }
 
-// SSRF protection: private/internal IP ranges live in the shared ./private-ip
-// classifier (isPrivateIP) — the single source of truth so the IPv4 + IPv6
-// blocklists can't drift between this syntactic layer and the ssrf-dispatcher.
-const BLOCKED_HOSTNAMES = [
-  "localhost",
-  "metadata.google.internal", // GCP metadata
-  "instance-data", // AWS metadata alias
-];
-
-/** Check if a URL points to a private/internal resource (SSRF protection) */
+/**
+ * Check if a URL points to a private/internal resource (SSRF protection).
+ * The boolean form of `ssrf-guard.checkOutboundUrl` — ONE blocklist, so this
+ * syntactic layer, `assertSafeURL` and `safeFetch` cannot drift apart.
+ */
 export function isPrivateURL(urlString: string): boolean {
-  try {
-    const parsed = new URL(urlString);
-
-    // Only allow http/https protocols
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return true;
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Block known internal hostnames
-    if (BLOCKED_HOSTNAMES.includes(hostname)) return true;
-
-    // IPv4 / IPv6 literal host (incl. bracketed IPv6, ULA/link-local/[::],
-    // and IPv4-mapped) — delegate to the shared classifier so the IP ranges
-    // are defined in exactly one place.
-    if (isPrivateIP(hostname)) return true;
-
-    // Block alternative IP notations (decimal, hex, octal) — these are
-    // integer/hex encodings the classifier doesn't decode.
-    // e.g., http://2130706433 (= 127.0.0.1), http://0x7f000001
-    if (/^\d+$/.test(hostname)) return true; // decimal IP
-    if (/^0x[0-9a-f]+$/i.test(hostname)) return true; // hex IP
-    if (/^0[0-7]+$/.test(hostname)) return true; // octal IP
-
-    // Block metadata.goog (GCP alternate)
-    if (hostname === "metadata.goog") return true;
-
-    return false;
-  } catch {
-    // Malformed URL — block it
-    return true;
-  }
+  return !checkOutboundUrl(urlString).ok;
 }
 
 // Extract URLs from text, filtering out private/internal addresses

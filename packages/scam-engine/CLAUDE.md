@@ -9,7 +9,7 @@ Scoped guidance for the scam-engine package — Claude AI integration, threat en
 - **Pipeline writes** — `pipeline.ts` (scrubs PII, normalises, calls RPCs to persist scam reports / entities / wallets / IPs)
 - **Inngest durable functions** — under `src/inngest/` (28+ functions: enrichment, cron, retention, embeddings, brand alerts)
 - **Sub-domain modules** — `news-intel/`, `phone-footprint/`
-- **SSRF guard** — `ssrf-guard.ts` exports `assertSafeURL` and `filterSafeURLs` (the canonical SSRF defence — used by Slack handler, persona-check, etc.)
+- **Outbound Fetch Module** — `safe-fetch.ts` (`@askarthur/scam-engine/safe-fetch`) is the ONE way to fetch a URL we don't control: guard on every redirect hop, `ssrfSafeDispatcher`, streamed byte cap, one timeout. `ssrf-guard.ts` holds the single host blocklist (`checkOutboundUrl` / `assertSafeURL`). A raw `fetch(` outside it fails `apps/web/__tests__/noRawExternalFetch.test.ts` unless the file is on its fixed-host allowlist with a reason.
 
 ## What it doesn't own
 
@@ -19,14 +19,15 @@ Scoped guidance for the scam-engine package — Claude AI integration, threat en
 
 ## Public API surface (key exports)
 
-| Export                     | Purpose                                             | Consumers                                             |
-| -------------------------- | --------------------------------------------------- | ----------------------------------------------------- |
-| `analyzeWithClaude`        | Single-shot Claude analysis call                    | core-analysis, route handlers                         |
-| `storeVerifiedScam`        | Persist a verified scam via `pipeline.ts`           | analyze + bot-core                                    |
-| `assertSafeURL`            | SSRF defence — throws on private IP / metadata host | Slack handler, persona-check, any outbound fetch path |
-| `filterSafeURLs`           | Silent drop of unsafe URLs from a list              | Safe Browsing / Twilio enrichment                     |
-| `scrubPII`                 | Email / phone redaction before persistence          | persona-check, pipeline                               |
-| `*` from `./inngest/index` | All durable functions (cron + event-driven)         | `apps/web/inngest/`                                   |
+| Export                     | Purpose                                                | Consumers                                           |
+| -------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
+| `analyzeWithClaude`        | Single-shot Claude analysis call                       | core-analysis, route handlers                       |
+| `storeVerifiedScam`        | Persist a verified scam via `pipeline.ts`              | analyze + bot-core                                  |
+| `safeFetch`                | Guarded outbound fetch (see above)                     | shop/review/image fetch, site-audit, liveness, bots |
+| `assertSafeURL`            | Syntactic guard — throws on private IP / metadata host | Pre-validation where no fetch follows               |
+| `filterSafeURLs`           | Silent drop of unsafe URLs from a list                 | Safe Browsing / Twilio enrichment                   |
+| `scrubPII`                 | Email / phone redaction before persistence             | persona-check, pipeline                             |
+| `*` from `./inngest/index` | All durable functions (cron + event-driven)            | `apps/web/inngest/`                                 |
 
 ## Scoped commands
 

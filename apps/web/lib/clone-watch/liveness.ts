@@ -1,5 +1,5 @@
 import { Resolver } from "node:dns/promises";
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 
 /**
  * Clone-watch liveness probing — shared by auto-triage (confirm a clone is
@@ -292,28 +292,29 @@ export async function submitPrecheck(hostname: string): Promise<SubmitPrecheck> 
   }
 }
 
-/** One bounded GET. Returns the status, or throws for the caller to classify. */
+/** One bounded GET. Returns the status, or throws for the caller to classify
+ *  (the error carries the transport `code` errorCodeOf reads). Goes through
+ *  safeFetch: guard + SSRF-safe dispatcher on every connect + per-hop
+ *  redirect checks; the body is never read. A refusal surfaces as
+ *  EPRIVATEHOST, which is neither TLS nor refused, so it falls through to the
+ *  DNS check below like any other failed fetch. */
 async function getStatus(url: string): Promise<number> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), LIVENESS_TIMEOUT_MS);
-  try {
-    // The SSRF-safe dispatcher checks every connect — names at DNS lookup and
-    // IP literals directly — so following redirects stays on public hosts.
-    // A refusal surfaces as a non-TLS error and falls through to the DNS
-    // check below, like any other failed fetch.
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: ctrl.signal,
-      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-      headers: {
-        "user-agent": "AskArthur-CloneWatch/1.0 (+https://askarthur.au)",
-      },
-    });
-    return res.status;
-  } finally {
-    clearTimeout(timer);
-  }
+  const r = await safeFetch(url, {
+    method: "GET",
+    redirect: "follow-checked",
+    // fetch()'s own default; kits chain redirects through trackers.
+    maxRedirects: 20,
+    as: "none",
+    timeoutMs: LIVENESS_TIMEOUT_MS,
+    okStatus: () => true,
+    headers: {
+      "user-agent": "AskArthur-CloneWatch/1.0 (+https://askarthur.au)",
+    },
+  });
+  if (r.ok) return r.status;
+  throw Object.assign(new Error(r.detail), {
+    code: r.code ?? (r.reason === "timeout" ? "ABORT_ERR" : undefined),
+  });
 }
 
 function hostnameOf(url: string): string {

@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import {
   detectInjectionAttempt,
@@ -103,59 +102,48 @@ Be empathetic but honest. Use Australian English. Never say definitively "this I
 
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_PAGE_TEXT_LENGTH = 5_000;
+/** Markup read per page before stripping — ample for 5k chars of text. */
+const MAX_PAGE_BYTES = 1024 * 1024;
 
 async function fetchPageText(url: string): Promise<{ url: string; text: string | null; error: string | null }> {
-  try {
-    assertSafeURL(url);
-  } catch {
-    return { url, text: null, error: "URL blocked by security policy" };
+  // safeFetch: the syntactic guard on the URL and on EVERY redirect hop, the
+  // SSRF-safe dispatcher on every connect (a name resolving to a private IP is
+  // refused), a streamed body cap, and one timeout across it all. Redirects are
+  // still followed — legitimate pages routinely redirect (http→https, slash).
+  const res = await safeFetch(url, {
+    headers: {
+      "User-Agent": "AskArthur/1.0 (scam-detection; +https://askarthur.au)",
+      Accept: "text/html,application/xhtml+xml,text/plain",
+    },
+    redirect: "follow-checked",
+    timeoutMs: FETCH_TIMEOUT_MS,
+    // Only the first MAX_PAGE_TEXT_LENGTH chars of text survive stripping;
+    // never pull more than this much markup.
+    maxBytes: MAX_PAGE_BYTES,
+    truncate: true,
+    as: "text",
+  });
+
+  if (!res.ok) {
+    if (res.reason === "blocked") return { url, text: null, error: "URL blocked by security policy" };
+    if (res.reason === "http") return { url, text: null, error: `HTTP ${res.status}` };
+    if (res.reason === "timeout") return { url, text: null, error: "Page load timed out" };
+    return { url, text: null, error: res.detail };
   }
 
-  try {
-    // SECURITY (2026-07-29): `assertSafeURL` above is a *syntactic* check on the
-    // hostname only. On its own it was bypassable two ways on this route — the
-    // route is unauthenticated, so both were reachable by anyone:
-    //   1. A public hostname whose A-record points at a private IP.
-    //   2. `redirect: "follow"` — the pre-flight check validated only the first
-    //      URL, and any 302 to http://169.254.169.254/ was then followed blind.
-    // `ssrfSafeDispatcher` closes both: it hooks undici's per-connection DNS
-    // lookup and rejects any host resolving into a private/loopback/metadata
-    // range. undici follows redirects on the same dispatcher, so every hop is
-    // validated at the IP layer — strictly stronger than re-running the
-    // syntactic check per hop. Redirect-following is deliberately retained;
-    // legitimate pages routinely redirect (http→https, canonical slash).
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "AskArthur/1.0 (scam-detection; +https://askarthur.au)",
-        Accept: "text/html,application/xhtml+xml,text/plain",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-    });
-
-    if (!res.ok) {
-      return { url, text: null, error: `HTTP ${res.status}` };
-    }
-
-    const contentType = res.headers.get("content-type") || "";
-    if (!contentType.includes("text/") && !contentType.includes("html") && !contentType.includes("json")) {
-      return { url, text: null, error: "Non-text content type" };
-    }
-
-    const raw = await res.text();
-    const stripped = stripEmailHtml(raw);
-    const truncated = stripped.slice(0, MAX_PAGE_TEXT_LENGTH);
-
-    if (truncated.trim().length < 50) {
-      return { url, text: null, error: "Page content too short or empty (may require login)" };
-    }
-
-    return { url, text: truncated, error: null };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { url, text: null, error: msg.includes("TimeoutError") || msg.includes("abort") ? "Page load timed out" : msg };
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("text/") && !contentType.includes("html") && !contentType.includes("json")) {
+    return { url, text: null, error: "Non-text content type" };
   }
+
+  const stripped = stripEmailHtml(res.body);
+  const truncated = stripped.slice(0, MAX_PAGE_TEXT_LENGTH);
+
+  if (truncated.trim().length < 50) {
+    return { url, text: null, error: "Page content too short or empty (may require login)" };
+  }
+
+  return { url, text: truncated, error: null };
 }
 
 // ── Email enrichment ──

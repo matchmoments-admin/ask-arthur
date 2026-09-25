@@ -4,10 +4,12 @@ import { scanSkill } from "@askarthur/mcp-audit";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { readBodyCapped } from "@askarthur/utils/read-body-capped";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { readZipEntryTextCapped } from "@askarthur/utils/zip-entry-capped";
 
 const MAX_SKILL_ZIP_BYTES = 5 * 1024 * 1024;
+/** ClawHub metadata responses are a few KB. */
+const MAX_CLAWHUB_JSON_BYTES = 256 * 1024;
 const MAX_SKILL_MD_BYTES = 1024 * 1024;
 
 /**
@@ -43,12 +45,13 @@ async function fetchSkillFromGithub(owner: string, repo: string): Promise<{ cont
     for (const filename of filenames) {
       const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filename}`;
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-        if (res.ok) {
-          const content = await res.text();
-          if (content && content.length > 0) {
-            return { content, filename };
-          }
+        const res = await safeFetch(url, {
+          timeoutMs: 10_000,
+          maxBytes: MAX_SKILL_MD_BYTES,
+          as: "text",
+        });
+        if (res.ok && res.body.length > 0) {
+          return { content: res.body, filename };
         }
       } catch {
         // Network error — try next combination
@@ -179,44 +182,54 @@ export async function POST(req: NextRequest) {
       // Fetch from ClawHub API (not GitHub)
       try {
         const [metaRes, versionRes] = await Promise.all([
-          fetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}`, { signal: AbortSignal.timeout(10000) }),
-          fetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}/versions/latest`, { signal: AbortSignal.timeout(10000) }),
+          safeFetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}`, {
+            timeoutMs: 10_000,
+            maxBytes: MAX_CLAWHUB_JSON_BYTES,
+            as: "json",
+          }),
+          safeFetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}/versions/latest`, {
+            timeoutMs: 10_000,
+            maxBytes: MAX_CLAWHUB_JSON_BYTES,
+            as: "json",
+          }),
         ]);
 
         if (!metaRes.ok) {
           return NextResponse.json(
-            { error: `Skill "${cleanSlug}" not found on ClawHub (${metaRes.status}).` },
+            { error: `Skill "${cleanSlug}" not found on ClawHub (${metaRes.status ?? metaRes.detail}).` },
             { status: 404 }
           );
         }
 
-        const meta: ClawHubSkillResponse = await metaRes.json();
-        const version: ClawHubVersionResponse | null = versionRes.ok ? await versionRes.json() : null;
+        const meta = metaRes.body as ClawHubSkillResponse;
+        const version = versionRes.ok ? (versionRes.body as ClawHubVersionResponse) : null;
         name = meta.skill.displayName || cleanSlug;
 
         // Download actual SKILL.md content from ClawHub ZIP endpoint
         const downloadUrl = `https://clawhub.ai/api/v1/download?slug=${cleanSlug}`;
-        const dlRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(15000) });
+        const dl = await safeFetch(downloadUrl, {
+          timeoutMs: 15_000,
+          maxBytes: MAX_SKILL_ZIP_BYTES,
+          as: "bytes",
+        });
 
         // Only a SKILL.md we actually read is assessed. Every other outcome —
         // download failed, empty body, no SKILL.md, over a size cap — is an
         // explicit "not assessed" response. (A metadata-only scan used to
         // stand in here, reporting a normal result for content never read.)
-        if (!dlRes.ok) {
-          await dlRes.body?.cancel().catch(() => undefined);
+        // Both bounded: the download (streamed, capped) and SKILL.md's
+        // UNCOMPRESSED size — a small archive can inflate without limit.
+        if (!dl.ok) {
+          if (dl.reason === "too_large") return skillTooLarge("package");
+          if (dl.reason === "no_body") {
+            return skillNotAssessed("ClawHub returned an empty package, so it was not assessed.", 502);
+          }
           return skillNotAssessed(
-            `Could not download "${cleanSlug}" from ClawHub (${dlRes.status}), so it was not assessed.`,
+            `Could not download "${cleanSlug}" from ClawHub (${dl.status ?? dl.detail}), so it was not assessed.`,
             502,
           );
         }
-        // Both bounded: the download (streamed, capped) and SKILL.md's
-        // UNCOMPRESSED size — a small archive can inflate without limit.
-        const zipBody = await readBodyCapped(dlRes, MAX_SKILL_ZIP_BYTES);
-        if (!zipBody.ok) {
-          return zipBody.reason === "too_large"
-            ? skillTooLarge("package")
-            : skillNotAssessed("ClawHub returned an empty package, so it was not assessed.", 502);
-        }
+        const zipBody = { bytes: dl.body };
         const zip = await JSZip.loadAsync(zipBody.bytes);
         const skillFile = zip.file("SKILL.md");
         if (!skillFile) {
