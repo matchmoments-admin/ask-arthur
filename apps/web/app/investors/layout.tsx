@@ -1,24 +1,28 @@
 import type { Metadata } from "next";
-import { Newsreader, Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  style: ["normal", "italic"],
+const newsreader = localFont({
+  src: [
+    { path: "../fonts/newsreader-latin-400-700-normal.woff2", weight: "400 700", style: "normal" },
+    { path: "../fonts/newsreader-latin-400-700-italic.woff2", weight: "400 700", style: "italic" },
+  ],
   display: "swap",
   variable: "--font-newsreader",
+  adjustFontFallback: "Times New Roman",
 });
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const inter = localFont({
+  src: [
+    { path: "../fonts/inter-latin-400-700-normal.woff2", weight: "400 700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-inter",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const jetbrainsMono = localFont({
+  src: [
+    { path: "../fonts/jetbrains-mono-latin-400-700-normal.woff2", weight: "400 700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-jetbrains-mono",
 });

@@ -1,4 +1,4 @@
-import { Archivo, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { requireAdmin } from "@/lib/adminAuth";
 import {
@@ -86,8 +86,20 @@ async function loadPinnedCard(
  * down", never time-to-takedown).
  */
 
-const archivo = Archivo({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800", "900"], display: "swap", variable: "--font-archivo" });
-const jbMono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "700"], display: "swap", variable: "--font-jbmono" });
+const archivo = localFont({
+  src: [
+    { path: "../../fonts/archivo-latin-400-900-normal.woff2", weight: "400 900", style: "normal" },
+  ],
+  display: "swap",
+  variable: "--font-archivo",
+});
+const jbMono = localFont({
+  src: [
+    { path: "../../fonts/jetbrains-mono-latin-400-700-normal.woff2", weight: "400 700", style: "normal" },
+  ],
+  display: "swap",
+  variable: "--font-jbmono",
+});
 
 export const dynamic = "force-dynamic";
 

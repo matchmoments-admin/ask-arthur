@@ -1,4 +1,4 @@
-import { IBM_Plex_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 
@@ -6,9 +6,12 @@ import Nav from "@/components/Nav";
 // to the clone-watch routes — it's used ONLY for domain strings + the contact
 // email on these pages, per the hybrid-typography decision (Public Sans stays
 // the site font everywhere else). Exposed as --font-plex-mono on the wrapper.
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const plexMono = localFont({
+  src: [
+    { path: "../fonts/ibm-plex-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/ibm-plex-mono-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/ibm-plex-mono-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-plex-mono",
 });

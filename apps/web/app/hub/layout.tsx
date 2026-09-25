@@ -6,25 +6,28 @@
 // JetBrains Mono is already used by /investors — no new font dependency beyond
 // Archivo and Instrument Sans.
 
-import { Archivo, Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
-const archivo = Archivo({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+const archivo = localFont({
+  src: [
+    { path: "../fonts/archivo-latin-400-900-normal.woff2", weight: "400 900", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-archivo",
 });
 
-const instrumentSans = Instrument_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const instrumentSans = localFont({
+  src: [
+    { path: "../fonts/instrument-sans-latin-400-600-normal.woff2", weight: "400 600", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-instrument-sans",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const jetbrainsMono = localFont({
+  src: [
+    { path: "../fonts/jetbrains-mono-latin-400-700-normal.woff2", weight: "400 700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-jetbrains-mono",
 });

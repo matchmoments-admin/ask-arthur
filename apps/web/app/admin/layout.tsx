@@ -1,30 +1,34 @@
 import { cookies } from "next/headers";
-import { Geist, Geist_Mono, Source_Serif_4 } from "next/font/google";
+import localFont from "next/font/local";
 import { verifyAdminToken, COOKIE_NAME } from "@/lib/adminAuth";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import AdminShell from "@/components/admin/AdminShell";
 
 // Admin chrome fonts. Scoped to /admin/* so they don't add weight to
-// marketing / consumer pages. `next/font/google` self-hosts at build time
+// marketing / consumer pages. `next/font/local` serves the committed woff2 files (app/fonts/)
 // and exposes CSS variables that `globals.css` reads (var(--font-geist),
 // var(--font-geist-mono-var), var(--font-source-serif)).
-const geistSans = Geist({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const geistSans = localFont({
+  src: [
+    { path: "../fonts/geist-latin-400-700-normal.woff2", weight: "400 700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-geist-sans",
 });
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const geistMono = localFont({
+  src: [
+    { path: "../fonts/geist-mono-latin-400-500-normal.woff2", weight: "400 500", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-geist-mono-var",
 });
-const sourceSerif = Source_Serif_4({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+const sourceSerif = localFont({
+  src: [
+    { path: "../fonts/source-serif-4-latin-500-700-normal.woff2", weight: "500 700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-source-serif",
+  adjustFontFallback: "Times New Roman",
 });
 
 // Cheap auth probe for the chrome. Mirrors requireAdmin() ordering (SSO
