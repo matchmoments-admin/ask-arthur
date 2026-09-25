@@ -5,6 +5,7 @@ import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { checkNewsletterEvidence } from "./evidence";
 import { IssueContent, safeProse } from "./content";
+import { escapeHtml } from "@askarthur/utils/html";
 
 type Client = NonNullable<ReturnType<typeof createServiceClient>>;
 export const UNSUBSCRIBE_MARKER = "https://askarthur.au/unsubscribe/NEWSLETTER_RECIPIENT_TOKEN";
@@ -37,7 +38,7 @@ export async function sendNewsletterBatch(sb: Client, id: string, revision: numb
       method: "POST", signal: AbortSignal.timeout(10_000),
       headers: { Authorization: `Bearer ${readStringEnv("RESEND_API_KEY")}`, "Content-Type": "application/json", "Idempotency-Key": `newsletter/${id}/${recipient.subscriber_id}` },
       body: JSON.stringify({ from: issue.sender, to: [recipient.email], subject: safeProse(issue.content.subject),
-        html: issue.rendered_html.replaceAll(UNSUBSCRIBE_MARKER, unsubscribe.replaceAll("&", "&amp;")),
+        html: issue.rendered_html.replaceAll(UNSUBSCRIBE_MARKER, escapeHtml(unsubscribe)),
         text: issue.rendered_text.replaceAll(UNSUBSCRIBE_MARKER, unsubscribe),
         headers: { "List-Unsubscribe": `<${unsubscribe}>, <${oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       }),
@@ -78,7 +79,7 @@ export async function sendNewsletterTest(sb: Client, id: string, revision: numbe
     method: "POST", signal: AbortSignal.timeout(10_000),
     headers: { Authorization: `Bearer ${readStringEnv("RESEND_API_KEY")}`, "Content-Type": "application/json", "Idempotency-Key": `newsletter-test/${id}/${revision}` },
     body: JSON.stringify({ from: issue.sender, to: [email], subject: `[TEST] ${safeProse(issue.content.subject)}`,
-      html: issue.rendered_html.replaceAll(UNSUBSCRIBE_MARKER, unsubscribe.replaceAll("&", "&amp;")),
+      html: issue.rendered_html.replaceAll(UNSUBSCRIBE_MARKER, escapeHtml(unsubscribe)),
       text: issue.rendered_text.replaceAll(UNSUBSCRIBE_MARKER, unsubscribe),
     }),
   });

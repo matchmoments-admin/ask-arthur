@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SafeHtml, escapeHtml, headerSafe, html, joinHtml, raw } from "../html";
+import { SafeHtml, escapeHtml, headerSafe, html, isSafeHref, joinHtml, raw, safeHref } from "../html";
 
 describe("escapeHtml", () => {
   it("escapes & < > \" ' (attribute-safe)", () => {
@@ -60,5 +60,31 @@ describe("html template", () => {
     const fake = { value: "<script>" } as unknown;
     expect(fake instanceof SafeHtml).toBe(false);
     expect(html`${fake as string}`.value).toBe("[object Object]");
+  });
+});
+
+describe("safeHref", () => {
+  it("links http(s) and mailto, escaping the URL and label", () => {
+    expect(safeHref("https://a.example/?x=1&y=2", "Page").value).toBe(
+      '<a href="https://a.example/?x=1&amp;y=2">Page</a>',
+    );
+    expect(safeHref("mailto:a@b.example").value).toBe(
+      '<a href="mailto:a@b.example">mailto:a@b.example</a>',
+    );
+  });
+
+  it.each(["javascript:alert(1)", " JavaScript:x", "data:text/html,<b>", "vbscript:x", "/relative", "//evil.example"])(
+    "renders %j as escaped text, never a link",
+    (url) => {
+      const out = safeHref(url, "Page").value;
+      expect(out).not.toContain("<a ");
+      expect(isSafeHref(url)).toBe(false);
+    },
+  );
+
+  it("an attribute-breaking URL cannot escape the href", () => {
+    expect(safeHref('https://a.example/"onmouseover="x').value).toBe(
+      '<a href="https://a.example/&quot;onmouseover=&quot;x">https://a.example/&quot;onmouseover=&quot;x</a>',
+    );
   });
 });

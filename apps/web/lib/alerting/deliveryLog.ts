@@ -152,7 +152,7 @@ export async function alertAndRecord(opts: {
   text: SafeHtml;
   /** When false, the send is skipped and recorded as 'muted'. */
   enabled?: boolean;
-  parseMode?: "HTML" | "MarkdownV2";
+  parseMode?: "HTML";
   metadata?: Record<string, unknown>;
 }): Promise<AdminMessageResult> {
   const { alerter, text, enabled = true, parseMode, metadata } = opts;

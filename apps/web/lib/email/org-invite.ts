@@ -11,6 +11,7 @@ export function buildOrgInviteEmail(args: {
 }): { subject: string; html: string } {
   const orgName = escapeHtml(args.orgName);
   const role = escapeHtml(args.role.replace("_", " "));
+  // Server-built (site URL + random token), escaped anyway.
   const inviteUrl = escapeHtml(args.inviteUrl);
   return {
     subject: `You've been invited to join ${headerSafe(args.orgName)} on Ask Arthur`,

@@ -41,9 +41,32 @@ export function headerSafe(value: string, max = 80): string {
 }
 
 /**
+ * True when `url` may be used as a link target: http(s) or mailto only.
+ * Anything else (javascript:, data:, vbscript:, relative junk) is refused —
+ * escaping alone does not make a `javascript:` href safe.
+ */
+export function isSafeHref(url: string): boolean {
+  return /^(https?:|mailto:)/i.test(url.trim());
+}
+
+/**
+ * `<a href>` for a URL, or the URL as escaped text when it is not a safe
+ * link target. `label` defaults to the URL itself.
+ */
+export function safeHref(url: string, label?: HtmlValue): SafeHtml {
+  const text = label ?? url;
+  return isSafeHref(url) ? html`<a href="${url.trim()}">${text}</a>` : html`${text}`;
+}
+
+/**
  * HTML that is safe to send as-is: either built by `html\`…\`` (every
  * interpolation escaped) or explicitly marked with `raw()`. The private field
  * makes it impossible to forge from a plain object or string.
+ *
+ * CAUTION: `toString()` returns the markup, so interpolating a SafeHtml into a
+ * PLAIN template literal (`\`<b>${safe} ${userText}</b>\``) yields a plain
+ * string — the brand is dropped and `userText` is NOT escaped. Always compose
+ * with `html\`…\`` (or `joinHtml`), never with a bare backtick string.
  */
 export class SafeHtml {
   readonly #value: string;

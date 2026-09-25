@@ -163,6 +163,7 @@ export const phoneFootprintPdfRender = inngest.createFunction(
   }),
 );
 
+// signedUrl is server-built (a Supabase Storage signed URL), not user input.
 function emailBody(footprint: Footprint, signedUrl: string): string {
   return `
 <!doctype html>

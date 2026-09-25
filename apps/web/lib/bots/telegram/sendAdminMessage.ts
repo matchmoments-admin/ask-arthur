@@ -36,7 +36,7 @@ export type AdminMessageResult = {
  */
 export async function sendAdminTelegramMessage(
   message: SafeHtml,
-  options: { parseMode?: "HTML" | "MarkdownV2" } = {},
+  options: { parseMode?: "HTML" } = {},
 ): Promise<AdminMessageResult> {
   // SafeHtml only (built with `html\`…\`` or marked with `raw()`): a plain
   // string with an unescaped `<` makes Telegram reject the whole message —

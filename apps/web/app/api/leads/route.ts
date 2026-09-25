@@ -12,7 +12,8 @@ import {
   type FeedbackPayload,
   type FeedbackType,
 } from "@/lib/notion/feedback-tracker";
-import { escapeHtml, html, joinHtml, type HtmlValue, type SafeHtml } from "@askarthur/utils/html";
+import { escapeHtml, html, joinHtml } from "@askarthur/utils/html";
+import { buildFeedbackTelegram } from "@/lib/leads-telegram";
 
 // Where new-lead notifications are delivered. Kept a const so the
 // recipient is obvious in code review — don't silently redirect this to
@@ -265,36 +266,3 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
-const FEEDBACK_EMOJI: Record<FeedbackType, string> = {
-  bug: "🐛",
-  improvement: "🛠",
-  feature: "✨",
-};
-
-function buildFeedbackTelegram(
-  type: FeedbackType,
-  ax: Record<string, unknown>,
-  reporter: string,
-  email: string,
-  company: string,
-  notionUrl: string | null
-): SafeHtml {
-  const title = String(ax.title ?? "").slice(0, 200);
-  const description = String(ax.description ?? "");
-  const severity = ax.severity ? `[${String(ax.severity)}]` : "";
-  const url = typeof ax.url === "string" ? ax.url : "";
-
-  const lines: HtmlValue[] = [
-    html`/agent-fleet feedback`,
-    html`${FEEDBACK_EMOJI[type]} <b>New ${type}${severity ? " " + severity : ""}</b>`,
-    html`<b>${title}</b>`,
-    "",
-    truncate(description, 600),
-    "",
-    html`👤 ${reporter} &lt;${email}&gt;`,
-    html`🏢 ${company}`,
-  ];
-  if (url) lines.push(html`🔗 <a href="${url}">Page</a>`);
-  if (notionUrl) lines.push(html`\n📝 <a href="${notionUrl}">Open in Notion</a>`);
-  return joinHtml(lines, "\n");
-}
