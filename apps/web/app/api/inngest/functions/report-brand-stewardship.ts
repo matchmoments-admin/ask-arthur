@@ -7,6 +7,7 @@ import {
   buildBrandResolver,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { loadAliasRecord } from "@/lib/brand-aliases";
@@ -317,10 +318,6 @@ const MEMBER_ID_CHUNK = 500;
  */
 export type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 
-/** Minimal HTML escape for the Telegram (HTML parse-mode) digest. */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 /**
  * The clone rollup moved to lib/clone-watch/clone-metrics.ts — it is the
@@ -902,43 +899,43 @@ export const reportBrandStewardship = inngest.createFunction(
       });
 
       await step.run("telegram-digest", async () => {
-        const lines = [
-          `<b>Brand Stewardship — ${periodMonth} prepared</b>`,
-          `Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneLedger.size}</b>`,
-          `Reports prepared (have contact): <b>${prepared.prepared}</b>`,
-          `…of which carry clone detections: <b>${prepared.clones_attached}</b>`,
-          `…of which carry Reddit mentions: <b>${prepared.reddit_attached}</b> (reddit-active brands: ${redditAgg.size})`,
-          `Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
+        const lines: SafeHtml[] = [
+          html`<b>Brand Stewardship — ${periodMonth} prepared</b>`,
+          html`Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneLedger.size}</b>`,
+          html`Reports prepared (have contact): <b>${prepared.prepared}</b>`,
+          html`…of which carry clone detections: <b>${prepared.clones_attached}</b>`,
+          html`…of which carry Reddit mentions: <b>${prepared.reddit_attached}</b> (reddit-active brands: ${redditAgg.size})`,
+          html`Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
         ];
         if (clonesFromStore.storeRows.length === 0) {
           // Loud, not silent: an empty store is either a month with no clones
           // (never, in practice) or a manual run before report-summary wrote it.
           lines.push(
-            `⚠️ <b>Monthly clone store has 0 rows for ${periodMonth}</b> — clone section empty. Run clone-watch/report-summary.manual-trigger.v1 first.`,
+            html`⚠️ <b>Monthly clone store has 0 rows for ${periodMonth}</b> — clone section empty. Run clone-watch/report-summary.manual-trigger.v1 first.`,
           );
         } else if (clonesFromStore.unreadMembers > 0) {
           lines.push(
-            `⚠️ ${clonesFromStore.unreadMembers} member alert(s) no longer readable — counts kept, watch-list shorter`,
+            html`⚠️ ${clonesFromStore.unreadMembers} member alert(s) no longer readable — counts kept, watch-list shorter`,
           );
         }
         if (prepared.failed > 0) {
           lines.push(
-            `⚠️ <b>${prepared.failed} report row(s) failed to write</b> — see brand-stewardship logs`,
+            html`⚠️ <b>${prepared.failed} report row(s) failed to write</b> — see brand-stewardship logs`,
           );
         }
         // Manual-outreach nudge: clone-targeted brands we can't email (no contact).
         if (prepared.no_contact_clone_brands > 0) {
           lines.push(
-            ``,
-            `⚠️ <b>${prepared.no_contact_clone_brands} clone-targeted brand(s) have NO security contact</b> — manual outreach (security.txt / LinkedIn):`,
+            html``,
+            html`⚠️ <b>${prepared.no_contact_clone_brands} clone-targeted brand(s) have NO security contact</b> — manual outreach (security.txt / LinkedIn):`,
             ...prepared.no_contact_top.map(
               (b) =>
-                `· ${escapeHtml(b.domain)} — ${b.count} clone${b.count === 1 ? "" : "s"}`,
+                html`· ${b.domain} — ${b.count} clone${b.count === 1 ? "" : "s"}`,
             ),
           );
         }
-        lines.push(``, `Review + send at askarthur.au/admin/brand-stewardship`);
-        await sendAdminTelegramMessage(lines.join("\n"));
+        lines.push(html``, html`Review + send at askarthur.au/admin/brand-stewardship`);
+        await sendAdminTelegramMessage(joinHtml(lines, "\n"));
       });
 
       await step.run("log-outcome", () =>

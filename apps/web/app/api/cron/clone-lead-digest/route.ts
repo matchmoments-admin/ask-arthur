@@ -6,6 +6,7 @@ import {
   alertAndRecord,
   recordNoAlertNeeded,
 } from "@/lib/alerting/deliveryLog";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 // Weekly digest of open Clone Watch lead-magnet leads. clone-list-request
 // does NOT fire the real-time founder pings that /api/leads does, so this is
@@ -69,13 +70,11 @@ export async function GET(req: NextRequest) {
   const lines = rows.map((l) => {
     const ad = l.assessment_data ?? {};
     const flag = ad.unmonitored_brand ? " ⚠️ not-monitored" : "";
-    return `• ${l.email} — ${ad.brand ?? "?"}${flag} (${l.company_name})`;
+    return html`• ${l.email} — ${ad.brand ?? "?"}${flag} (${l.company_name})`;
   });
 
-  const body =
-    `🔎 <b>Clone Watch leads — new this week: ${rows.length}</b> (${totalOpen} open total)\n\n` +
-    lines.join("\n") +
-    `\n\nWork them from your inbox — reply to book a call. ⚠️ = a brand we don't monitor yet (watch-list gap).`;
+  // Lead fields are user-submitted form data: the template escapes them.
+  const body = html`🔎 <b>Clone Watch leads — new this week: ${rows.length}</b> (${totalOpen} open total)\n\n${joinHtml(lines, "\n")}\n\nWork them from your inbox — reply to book a call. ⚠️ = a brand we don't monitor yet (watch-list gap).`;
 
   const delivery = await alertAndRecord({
     alerter: "clone-lead-digest",
@@ -90,7 +89,12 @@ export async function GET(req: NextRequest) {
   }
 
   if (process.env.SLACK_WEBHOOK_LEADS_URL) {
-    const slackText = body.replace(/<\/?b>/g, "*");
+    // Slack mrkdwn wants & < > escaped (already done) but renders quote
+    // entities literally, so only those two are undone.
+    const slackText = body.value
+      .replace(/<\/?b>/g, "*")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
     fetch(process.env.SLACK_WEBHOOK_LEADS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

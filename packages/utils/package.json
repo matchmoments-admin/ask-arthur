@@ -12,7 +12,8 @@
     "./rate-limit": "./src/rate-limit.ts",
     "./request-id": "./src/request-id.ts",
     "./concurrency": "./src/concurrency.ts",
-    "./pgvector": "./src/pgvector.ts"
+    "./pgvector": "./src/pgvector.ts",
+    "./html": "./src/html.ts"
   },
   "scripts": {
     "test": "vitest run --passWithNoTests",

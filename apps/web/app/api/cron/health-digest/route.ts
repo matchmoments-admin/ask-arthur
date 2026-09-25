@@ -22,6 +22,7 @@ import {
   type LaneProblem,
   type LaneProblemKind,
 } from "@/lib/laneHealth";
+import { html, joinHtml, type HtmlValue, type SafeHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,44 +85,40 @@ const _everyKindListed: Exclude<
   : never = true;
 void _everyKindListed;
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 function buildMessage(
   errors: ErrorRow[],
   problems: FeedProblem[],
   laneProblems: LaneProblem[],
   cost: CostSummary,
   mutedCount: number,
-): string {
+): SafeHtml {
   const dateStr = new Date().toLocaleString("en-AU", {
     timeZone: "Australia/Sydney",
     dateStyle: "medium",
     timeStyle: "short",
   });
-  const lines: string[] = [
-    "🩺 <b>Ask Arthur — Daily Health Digest</b>",
-    escapeHtml(dateStr),
+  const lines: HtmlValue[] = [
+    html`🩺 <b>Ask Arthur — Daily Health Digest</b>`,
+    dateStr,
     "",
   ];
 
   if (errors.length > 0) {
-    lines.push("❌ <b>Errors (last 24h):</b>");
+    lines.push(html`❌ <b>Errors (last 24h):</b>`);
     for (const e of errors) {
       lines.push(
-        `  • ${escapeHtml(e.feature)} / ${escapeHtml(e.operation)} — ${e.hits} hit${e.hits === 1 ? "" : "s"}`,
+        html`  • ${e.feature} / ${e.operation} — ${e.hits} hit${e.hits === 1 ? "" : "s"}`,
       );
     }
     lines.push("");
   }
 
   if (problems.length > 0) {
-    const LABEL: Record<FeedProblemKind, string> = {
-      absent: "🚫 <b>Not running at all:</b>",
-      never_succeeds: "💀 <b>Never succeeded:</b>",
-      stale: "⏱️ <b>Stale:</b>",
-      silent_success: "🕳️ <b>Succeeding but producing nothing:</b>",
+    const LABEL: Record<FeedProblemKind, SafeHtml> = {
+      absent: html`🚫 <b>Not running at all:</b>`,
+      never_succeeds: html`💀 <b>Never succeeded:</b>`,
+      stale: html`⏱️ <b>Stale:</b>`,
+      silent_success: html`🕳️ <b>Succeeding but producing nothing:</b>`,
     };
     // Grouped by kind, worst first — "not running" and "never succeeded" are
     // categorically worse than "a bit behind" and used to be indistinguishable.
@@ -135,27 +132,27 @@ function buildMessage(
       if (group.length === 0) continue;
       lines.push(LABEL[kind]);
       for (const p of group) {
-        lines.push(`  • ${escapeHtml(p.feed_name)} — ${escapeHtml(p.detail)}`);
+        lines.push(html`  • ${p.feed_name} — ${p.detail}`);
       }
       lines.push("");
     }
   }
 
   if (laneProblems.length > 0) {
-    const LANE_LABEL: Record<LaneProblemKind, string> = {
+    const LANE_LABEL: Record<LaneProblemKind, SafeHtml> = {
       absent:
-        "🚫 <b>Clone-watch lane wrote no outcome row (not running, or skipped without logging):</b>",
-      braked: "🛑 <b>Clone-watch lane braked:</b>",
-      brake_unknown: "❓ <b>Clone-watch brake state unreadable:</b>",
-      quota_exhausted: "⛔ <b>Clone-watch lane stopped by a vendor quota:</b>",
-      silent_zero: "🕳️ <b>Clone-watch lane running but doing nothing:</b>",
+        html`🚫 <b>Clone-watch lane wrote no outcome row (not running, or skipped without logging):</b>`,
+      braked: html`🛑 <b>Clone-watch lane braked:</b>`,
+      brake_unknown: html`❓ <b>Clone-watch brake state unreadable:</b>`,
+      quota_exhausted: html`⛔ <b>Clone-watch lane stopped by a vendor quota:</b>`,
+      silent_zero: html`🕳️ <b>Clone-watch lane running but doing nothing:</b>`,
     };
     for (const kind of LANE_PROBLEM_ORDER) {
       const group = laneProblems.filter((p) => p.kind === kind);
       if (group.length === 0) continue;
       lines.push(LANE_LABEL[kind]);
       for (const p of group) {
-        lines.push(`  • ${escapeHtml(p.lane)} — ${escapeHtml(p.detail)}`);
+        lines.push(html`  • ${p.lane} — ${p.detail}`);
       }
       lines.push("");
     }
@@ -165,15 +162,15 @@ function buildMessage(
   // replaced was invisible, which is how it drifted to muting 7 live feeds.
   if (mutedCount > 0) {
     lines.push(
-      `🔇 ${mutedCount} feed${mutedCount === 1 ? "" : "s"} muted (see feed_sources.muted_until / muted_reason)`,
+      html`🔇 ${mutedCount} feed${mutedCount === 1 ? "" : "s"} muted (see feed_sources.muted_until / muted_reason)`,
     );
   }
 
   lines.push(
-    `💰 Last 24h: $${cost.cost_usd.toFixed(2)} across ${cost.events.toLocaleString()} events`,
+    html`💰 Last 24h: $${cost.cost_usd.toFixed(2)} across ${cost.events.toLocaleString()} events`,
   );
-  lines.push(`🔗 <a href="https://askarthur.au/admin/health">Full status</a>`);
-  return lines.join("\n");
+  lines.push(html`🔗 <a href="https://askarthur.au/admin/health">Full status</a>`);
+  return joinHtml(lines, "\n");
 }
 
 export async function GET(req: Request) {

@@ -1,6 +1,7 @@
 import { Marked } from "marked";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { EMAIL_TEMPLATES } from "./copy-registry";
+import { escapeHtml, isSafeHref } from "@askarthur/utils/html";
 
 // Sync markdown renderer (no async highlighter, unlike lib/blogRenderer). Used
 // inside React Email templates, which render synchronously.
@@ -56,15 +57,6 @@ export function clearEmailCopyCache(templateKey?: string): void {
   else cache.clear();
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 const ALLOWED_TAGS = new Set([
   "p", "br", "strong", "em", "b", "i", "a", "ul", "ol", "li",
   "h3", "h4", "blockquote", "code", "pre",
@@ -94,7 +86,7 @@ export function renderCopySlot(
   let html = md.parse(escaped) as string;
   // 4. neutralise non-http(s)/mailto hrefs (e.g. javascript:)
   html = html.replace(/href\s*=\s*"([^"]*)"/gi, (_m, url) => {
-    return /^(https?:|mailto:)/i.test(url.trim()) ? `href="${url}"` : 'href="#"';
+    return isSafeHref(url) ? `href="${url}"` : 'href="#"';
   });
   // 5. strip disallowed tags, keeping their inner text
   html = html.replace(/<\/?([a-zA-Z0-9]+)(\s[^>]*)?>/g, (full, tag) =>

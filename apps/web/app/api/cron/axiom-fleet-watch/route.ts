@@ -8,6 +8,7 @@ import {
 } from "@/lib/alerting/deliveryLog";
 import { axiomQuery } from "@/lib/axiom-query";
 import { axiomInfoSamplePct } from "@askarthur/utils/axiom-logger";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,24 +123,23 @@ export async function GET(req: Request) {
   }
   const worstFn = topFns[0];
 
-  const reasons: string[] = [];
+  const reasons: SafeHtml[] = [];
   if (inngestErrors >= errorThreshold) {
     reasons.push(
-      `Inngest errors: <b>${inngestErrors}</b> (≥ ${errorThreshold})`,
+      html`Inngest errors: <b>${inngestErrors}</b> (≥ ${errorThreshold})`,
     );
   } else if (worstFn && worstFn.n >= perFnThreshold) {
     reasons.push(
-      `<b>${worstFn.fn}</b> failing repeatedly: ${worstFn.n}× (≥ ${perFnThreshold})`,
+      html`<b>${worstFn.fn}</b> failing repeatedly: ${worstFn.n}× (≥ ${perFnThreshold})`,
     );
   }
   if (inngestStarts >= runawayThreshold) {
     reasons.push(
-      `Runaway Inngest volume: ~<b>${inngestStarts}</b> fn.start in ${LOOKBACK_MINUTES}m ` +
-        `(≥ ${runawayThreshold}; estimated from ${inngestStartsSampled} sampled at ${samplePct}%)`,
+      html`Runaway Inngest volume: ~<b>${inngestStarts}</b> fn.start in ${LOOKBACK_MINUTES}m (≥ ${runawayThreshold}; estimated from ${inngestStartsSampled} sampled at ${samplePct}%)`,
     );
   }
   if (http5xx >= http5xxThreshold) {
-    reasons.push(`HTTP 5xx spike: <b>${http5xx}</b> (≥ ${http5xxThreshold})`);
+    reasons.push(html`HTTP 5xx spike: <b>${http5xx}</b> (≥ ${http5xxThreshold})`);
   }
 
   const summary = {
@@ -167,14 +167,12 @@ export async function GET(req: Request) {
 
   const fnLines =
     topFns.length > 0
-      ? "\n" + topFns.map((f) => `  • ${f.fn} ×${f.n}`).join("\n")
-      : "";
-  const text =
-    `🚨 <b>Axiom fleet watch</b> — last ${LOOKBACK_MINUTES}m\n\n` +
-    reasons.map((r) => `• ${r}`).join("\n") +
-    fnLines +
-    `\n\nInspect: Axiom → <code>${DATASET}</code> dataset (Query: ` +
-    `<code>['${DATASET}'] | where source=='inngest' and message=='fn.error'</code>)`;
+      ? html`\n${joinHtml(topFns.map((f) => html`  • ${f.fn} ×${f.n}`), "\n")}`
+      : null;
+  const text = html`🚨 <b>Axiom fleet watch</b> — last ${LOOKBACK_MINUTES}m\n\n${joinHtml(
+    reasons.map((r) => html`• ${r}`),
+    "\n",
+  )}${fnLines}\n\nInspect: Axiom → <code>${DATASET}</code> dataset (Query: <code>['${DATASET}'] | where source=='inngest' and message=='fn.error'</code>)`;
 
   await alertAndRecord({
     alerter: "axiom-fleet-watch",

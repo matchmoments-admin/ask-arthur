@@ -7,6 +7,7 @@ import {
   alertAndRecord,
   recordNoAlertNeeded,
 } from "@/lib/alerting/deliveryLog";
+import { html, joinHtml, type HtmlValue } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,35 +85,35 @@ export async function GET(req: Request) {
     });
   }
 
-  const lines: string[] = [
-    `📬 <b>Ask Arthur feedback (24h)</b>`,
-    ``,
-    `Total submissions: <b>${total}</b> (${correct} ✓ correct)`,
-    `Disagreements: <b>${disagreements}</b>`,
+  const lines: HtmlValue[] = [
+    html`📬 <b>Ask Arthur feedback (24h)</b>`,
+    html``,
+    html`Total submissions: <b>${total}</b> (${correct} ✓ correct)`,
+    html`Disagreements: <b>${disagreements}</b>`,
   ];
 
   if (falseNeg > 0) {
     lines.push(
-      `• 🛑 false-negative: ${falseNeg}${fnOnSafe.length > 0 ? ` (on SAFE: ${fnOnSafe.length})` : ""}`,
+      html`• 🛑 false-negative: ${falseNeg}${fnOnSafe.length > 0 ? html` (on SAFE: ${fnOnSafe.length})` : ""}`,
     );
   }
   if (userReported > 0) {
-    lines.push(`• ⚠️ user-reported: ${userReported}`);
+    lines.push(html`• ⚠️ user-reported: ${userReported}`);
   }
   if (falsePos > 0) {
-    lines.push(`• ℹ️ false-positive: ${falsePos}`);
+    lines.push(html`• ℹ️ false-positive: ${falsePos}`);
   }
 
   if (fnOnSafe.length > 0) {
     const sample = fnOnSafe.slice(0, 5).map((h) => h.slice(0, 12));
     lines.push(
       "",
-      `<b>Top FN-on-SAFE hashes:</b>`,
-      ...sample.map((h) => `<code>${h}</code>`),
+      html`<b>Top FN-on-SAFE hashes:</b>`,
+      ...sample.map((h) => html`<code>${h}</code>`),
     );
   }
 
-  lines.push("", `Triage queue: https://askarthur.au/admin/feedback`);
+  lines.push("", html`Triage queue: https://askarthur.au/admin/feedback`);
 
   // Telegram send is gated by FF_LEGACY_DIGEST_TELEGRAM. The signal now rides
   // in the consolidated 7am founder brief (Claude Code Routine "Daily Founder
@@ -127,7 +128,7 @@ export async function GET(req: Request) {
   // liveness query as everything else instead of looking like a healthy alerter.
   const delivery = await alertAndRecord({
     alerter: "feedback-digest",
-    text: lines.join("\n"),
+    text: joinHtml(lines, "\n"),
     enabled: legacyTelegramEnabled,
     metadata: {
       disagreements,

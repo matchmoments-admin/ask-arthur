@@ -21,6 +21,7 @@ import type {
   Footprint,
   FootprintDelta,
 } from "@askarthur/scam-engine/phone-footprint";
+import { escapeHtml } from "@askarthur/utils/html";
 
 interface MonitorForAlert {
   id: number;
@@ -208,14 +209,6 @@ function severityFg(sev: FootprintDelta["severity"]): string {
 }
 function severityBg(sev: FootprintDelta["severity"]): string {
   return sev === "critical" ? "#FEF2F2" : sev === "warning" ? "#FFF8E1" : "#EFF6FF";
-}
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 // ---------------------------------------------------------------------------

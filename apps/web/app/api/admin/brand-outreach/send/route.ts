@@ -13,7 +13,7 @@ import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { outreachIdempotencyKey } from "@/lib/email/brand-outreach";
 import { getBrandCloneSample } from "@/lib/email/brand-outreach-pilot";
 import BrandOutreachPilot from "@/emails/BrandOutreachPilot";
-import { escapeHtml } from "@/lib/escape-html";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 export const dynamic = "force-dynamic";
 
@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
     cloneSample: cloneSample ?? undefined,
     stopUrl: unsubscribeUrl,
   });
-  const html = await render(el);
+  const emailHtml = await render(el);
   const text = await render(el, { plainText: true });
 
   let messageId: string | null = null;
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
         from: fromEmail,
         to: [recipient],
         subject,
-        html,
+        html: emailHtml,
         text,
         headers: {
           "List-Unsubscribe": `<${unsubscribeUrl}>, <${stopMailto}>`,
@@ -199,13 +199,13 @@ export async function POST(req: NextRequest) {
     });
     try {
       const sent = await sendAdminTelegramMessage(
-        [
-          `🚨 <b>Brand outreach send FAILED</b>`,
-          ``,
-          `Brand: <b>${escapeHtml(body.brandName)}</b>`,
-          `Recipient: <code>${escapeHtml(recipient)}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
-          `Reason: <code>${escapeHtml(reason.slice(0, 200))}</code>`,
-        ].join("\n"),
+        joinHtml([
+          html`🚨 <b>Brand outreach send FAILED</b>`,
+          html``,
+          html`Brand: <b>${body.brandName}</b>`,
+          html`Recipient: <code>${recipient}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
+          html`Reason: <code>${reason.slice(0, 200)}</code>`,
+        ], "\n"),
       );
       if (!sent.ok) {
         logger.warn("brand-outreach send: telegram alert not delivered", {
@@ -256,13 +256,13 @@ export async function POST(req: NextRequest) {
   // should never happen silently.
   try {
     const sent = await sendAdminTelegramMessage(
-      [
-        `${isShadow ? "🧪" : "📨"} <b>Brand outreach ${isShadow ? "TEST" : "SENT"}</b>`,
-        ``,
-        `Brand: <b>${escapeHtml(body.brandName)}</b>`,
-        `Recipient: <code>${escapeHtml(recipient)}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
-        `Subject: ${escapeHtml(subject)}`,
-      ].join("\n"),
+      joinHtml([
+        html`${isShadow ? "🧪" : "📨"} <b>Brand outreach ${isShadow ? "TEST" : "SENT"}</b>`,
+        html``,
+        html`Brand: <b>${body.brandName}</b>`,
+        html`Recipient: <code>${recipient}</code>${isShadow ? " (shadow/test)" : " (REAL)"}`,
+        html`Subject: ${subject}`,
+      ], "\n"),
     );
     if (!sent.ok) {
       logger.warn("brand-outreach send: telegram confirm not delivered", {

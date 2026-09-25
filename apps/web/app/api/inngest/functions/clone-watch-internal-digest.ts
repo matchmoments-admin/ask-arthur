@@ -20,6 +20,7 @@ import {
   type CloneBrandMetrics,
 } from "@/lib/clone-watch/clone-metrics";
 import { priorMonthStart } from "@/lib/clone-watch/month-window";
+import { escapeHtml, html, joinHtml } from "@askarthur/utils/html";
 
 /** Local extended row — the shared CloneAlertRow doesn't carry the full URL
  *  (only candidate_domain); we select candidate_url locally for the full-mode
@@ -50,15 +51,10 @@ type FoldedClones = {
 const CLONE_FETCH_LIMIT = 5000;
 const TOP_CLONES_PER_BRAND = 5;
 
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;",
-  );
-}
 
 function hosting(d: CloneBrandMetrics["domains"][number]): string {
   const parts = [d.ip, d.asn, d.country].filter(Boolean);
-  return parts.length ? esc(parts.join(" · ")) : "—";
+  return parts.length ? escapeHtml(parts.join(" · ")) : "—";
 }
 
 // buildRegistrarRollup moved to lib/clone-watch/clone-metrics.ts. THIS is the
@@ -94,7 +90,7 @@ export function buildInternalDigestHtml(
     .map(([domain, m]) => {
       const phishing = m.byClassification.likely_phishing ?? 0;
       const heading =
-        `<h3 style="margin:18px 0 4px;font-size:14px;color:#1B2A4A">${esc(domain)} — ${m.detected} clone${m.detected === 1 ? "" : "s"}` +
+        `<h3 style="margin:18px 0 4px;font-size:14px;color:#1B2A4A">${escapeHtml(domain)} — ${m.detected} clone${m.detected === 1 ? "" : "s"}` +
         (phishing
           ? ` <span style="color:#DC2626">(${phishing} likely phishing)</span>`
           : "") +
@@ -107,7 +103,7 @@ export function buildInternalDigestHtml(
         const list = urls
           .map(
             (u) =>
-              `<div style="padding:1px 0;font-family:monospace;font-size:12px;color:#334155">${esc(u)}</div>`,
+              `<div style="padding:1px 0;font-family:monospace;font-size:12px;color:#334155">${escapeHtml(u)}</div>`,
           )
           .join("");
         return `${heading}<div style="margin:0 0 4px 0">${list}</div>`;
@@ -117,10 +113,10 @@ export function buildInternalDigestHtml(
         .slice(0, TOP_CLONES_PER_BRAND)
         .map(
           (d) =>
-            `<tr><td style="padding:3px 8px;font-family:monospace;font-size:12px">${esc(d.domain)}</td>` +
-            `<td style="padding:3px 8px;font-size:12px">${esc(d.classification ?? "—")}</td>` +
+            `<tr><td style="padding:3px 8px;font-family:monospace;font-size:12px">${escapeHtml(d.domain)}</td>` +
+            `<td style="padding:3px 8px;font-size:12px">${escapeHtml(d.classification ?? "—")}</td>` +
             `<td style="padding:3px 8px;font-size:12px;color:#475569">${hosting(d)}</td>` +
-            `<td style="padding:3px 8px;font-size:12px;color:#475569">${esc(d.registrar ?? "—")}</td></tr>`,
+            `<td style="padding:3px 8px;font-size:12px;color:#475569">${escapeHtml(d.registrar ?? "—")}</td></tr>`,
         )
         .join("");
       const more =
@@ -138,9 +134,9 @@ export function buildInternalDigestHtml(
     const trs = rows
       .map(
         (r) =>
-          `<tr><td style="padding:3px 8px;font-size:12px">${esc(r.registrar)}</td>` +
+          `<tr><td style="padding:3px 8px;font-size:12px">${escapeHtml(r.registrar)}</td>` +
           `<td style="padding:3px 8px;font-size:12px;text-align:right">${r.clones}</td>` +
-          `<td style="padding:3px 8px;font-family:monospace;font-size:12px;color:#475569">${esc(r.abuseEmail ?? "—")}</td></tr>`,
+          `<td style="padding:3px 8px;font-family:monospace;font-size:12px;color:#475569">${escapeHtml(r.abuseEmail ?? "—")}</td></tr>`,
       )
       .join("");
     rollup =
@@ -158,7 +154,7 @@ export function buildInternalDigestHtml(
 
   return (
     `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:680px;margin:0 auto;color:#334155">` +
-    `<h2 style="color:#1B2A4A">Clone-Watch internal digest — ${esc(periodLabel)}</h2>` +
+    `<h2 style="color:#1B2A4A">Clone-Watch internal digest — ${escapeHtml(periodLabel)}</h2>` +
     `<p style="font-size:14px"><b>${totalClones}</b> lookalike domains detected across <b>${brands.length}</b> brands` +
     (totalPhishing
       ? ` · <b style="color:#DC2626">${totalPhishing}</b> likely phishing`
@@ -335,7 +331,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
 
       const urlsByBrand = new Map<string, string[]>(folded.urlsByBrand);
 
-      const html = buildInternalDigestHtml(
+      const emailHtml = buildInternalDigestHtml(
         label,
         byBrand,
         full ? { urlsByBrand, full: true } : undefined,
@@ -348,7 +344,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
             from: fromEmail,
             to: [recipient],
             subject: `Clone-Watch internal digest — ${label}`,
-            html,
+            html: emailHtml,
           },
           { idempotencyKey: `cw-internal-digest:${periodMonth}` },
         );
@@ -376,21 +372,22 @@ export const cloneWatchInternalDigest = inngest.createFunction(
             (n, m) => n + m.detected,
             0,
           );
-          const topReg = rows
-            .slice(0, 8)
-            .map((r) => `• ${esc(r.registrar)} — ${r.clones}`)
-            .join("\n");
+          const topReg = joinHtml(
+            rows.slice(0, 8).map((r) => html`• ${r.registrar} — ${r.clones}`),
+            "\n",
+          );
           await sendAdminTelegramMessage(
-            [
-              `<b>Clone-watch summary — ${esc(label)}</b>`,
-              `${totalClones} clone URLs across ${byBrand.size} brands.`,
-              `Top registrars (by clones provided):`,
-              topReg,
-              unknownCount > 0 ? `(registrar unknown for ${unknownCount})` : "",
-              `Full per-brand URL list + abuse emails emailed. Submit via the Scamwatch web form (report.scamwatch.gov.au).`,
-            ]
-              .filter(Boolean)
-              .join("\n"),
+            joinHtml(
+              [
+                html`<b>Clone-watch summary — ${label}</b>`,
+                html`${totalClones} clone URLs across ${byBrand.size} brands.`,
+                html`Top registrars (by clones provided):`,
+                rows.length > 0 ? topReg : null,
+                unknownCount > 0 ? html`(registrar unknown for ${unknownCount})` : null,
+                html`Full per-brand URL list + abuse emails emailed. Submit via the Scamwatch web form (report.scamwatch.gov.au).`,
+              ],
+              "\n",
+            ),
           );
           await logCostAsync({
             feature: "brand_stewardship",

@@ -12,7 +12,7 @@ import {
 } from "@/lib/monthly-intel-blog";
 import { createGhostDraft } from "@/lib/ghost-admin";
 import { renderMarkdownKeepCalloutMarkers } from "@/lib/blogRenderer";
-import { escapeHtml } from "@/lib/escape-html";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 /**
  * Monthly Intel Blog — one data-driven draft post per month.
@@ -106,7 +106,7 @@ export const monthlyIntelBlog = inngest.createFunction(
       );
     } catch (err) {
       await sendAdminTelegramMessage(
-        `⚠️ Monthly intel blog (${facts.periodMonth}): generation failed after retries — no draft created. Re-run with blog/monthly-intel.manual-trigger.v1.`
+        html`⚠️ Monthly intel blog (${facts.periodMonth}): generation failed after retries — no draft created. Re-run with blog/monthly-intel.manual-trigger.v1.`
       );
       throw err;
     }
@@ -168,26 +168,29 @@ export const monthlyIntelBlog = inngest.createFunction(
     await step.run("notify-admin", async () => {
       // Model-written titles go into an HTML-mode message: escape them, or a
       // stray "<" makes Telegram reject the whole notification.
-      const runnerUps = generated.ideas
-        .slice(1, 10)
-        .map((i, n) => `${n + 2}. ${escapeHtml(i.title)}`)
-        .join("\n");
+      const runnerUps = joinHtml(
+        generated.ideas.slice(1, 10).map((i, n) => html`${n + 2}. ${i.title}`),
+        "\n",
+      );
       const where =
         persisted.via === "ghost"
-          ? `Ghost draft ready to review/edit:\n${escapeHtml(persisted.reviewUrl)}`
+          ? html`Ghost draft ready to review/edit:\n${persisted.reviewUrl}`
           : persisted.via === "blog_posts"
-            ? `Ghost unavailable — draft saved to blog_posts (review at ${escapeHtml(persisted.reviewUrl)})`
-            : "⚠️ PERSIST FAILED — draft was generated but not saved";
+            ? html`Ghost unavailable — draft saved to blog_posts (review at ${persisted.reviewUrl})`
+            : html`⚠️ PERSIST FAILED — draft was generated but not saved`;
       const sent = await sendAdminTelegramMessage(
-        [
-          `📝 Monthly intel blog — ${escapeHtml(facts.periodMonth)}`,
-          ``,
-          `Draft: "${escapeHtml(generated.title)}"`,
-          where,
-          ``,
-          `Runner-up ideas this month:`,
-          runnerUps,
-        ].join("\n")
+        joinHtml(
+          [
+            html`📝 Monthly intel blog — ${facts.periodMonth}`,
+            "",
+            html`Draft: "${generated.title}"`,
+            where,
+            "",
+            "Runner-up ideas this month:",
+            runnerUps,
+          ],
+          "\n",
+        ),
       );
       if (!sent.ok) {
         logger.warn("monthly-intel-blog: admin notification not delivered", {

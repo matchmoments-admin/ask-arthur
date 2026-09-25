@@ -5,6 +5,7 @@ import {
   sendAdminTelegramMessage,
   type AdminMessageResult,
 } from "@/lib/bots/telegram/sendAdminMessage";
+import type { SafeHtml } from "@askarthur/utils/html";
 
 /**
  * Alerter delivery accounting — see migration-v263 for the full why.
@@ -147,10 +148,11 @@ export async function recordNoAlertNeeded(
  */
 export async function alertAndRecord(opts: {
   alerter: Alerter;
-  text: string;
+  /** Built with `html\`…\`` (interpolations escaped) or `raw()`. */
+  text: SafeHtml;
   /** When false, the send is skipped and recorded as 'muted'. */
   enabled?: boolean;
-  parseMode?: "HTML" | "MarkdownV2";
+  parseMode?: "HTML";
   metadata?: Record<string, unknown>;
 }): Promise<AdminMessageResult> {
   const { alerter, text, enabled = true, parseMode, metadata } = opts;
@@ -161,7 +163,7 @@ export async function alertAndRecord(opts: {
       conditionMet: true,
       outcome: "muted",
       channel: "none",
-      payload: text,
+      payload: text.value,
       metadata,
     });
     return { ok: false, reason: "no_config", latencyMs: 0 };
@@ -179,7 +181,7 @@ export async function alertAndRecord(opts: {
         : "failed",
     error: result.error,
     latencyMs: result.latencyMs,
-    payload: text,
+    payload: text.value,
     metadata,
   });
 

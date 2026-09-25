@@ -75,10 +75,10 @@ export function buildAliasRows(entries) {
 }
 
 function toValuesSql(rows) {
-  const esc = (s) => s.replace(/'/g, "''");
+  const sqlQuote = (s) => s.replace(/'/g, "''");
   return [...rows.entries()]
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([k, v]) => `  ('${esc(k)}', '${esc(v)}', 'watchlist')`)
+    .map(([k, v]) => `  ('${sqlQuote(k)}', '${sqlQuote(v)}', 'watchlist')`)
     .join(",\n");
 }
 

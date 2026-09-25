@@ -160,7 +160,7 @@ describe("scraper-brake-alert cron", () => {
     expect(body.alerted).toBe(1);
     expect(body.feeds).toEqual(["acsc"]);
     expect(sendAdminTelegramMessage).toHaveBeenCalledTimes(1);
-    const [msg] = vi.mocked(sendAdminTelegramMessage).mock.calls[0];
+    const msg = vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value;
     expect(msg).toContain("Scraper circuit breaker tripped");
     expect(msg).toContain("acsc");
   });
@@ -258,7 +258,7 @@ describe("scraper-brake-alert cron", () => {
     expect(body.alerted).toBe(2);
     expect(body.feeds.sort()).toEqual(["acsc", "phishtank"]);
     expect(sendAdminTelegramMessage).toHaveBeenCalledTimes(1);
-    const [msg] = vi.mocked(sendAdminTelegramMessage).mock.calls[0];
+    const msg = vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value;
     expect(msg).toContain("acsc");
     expect(msg).toContain("phishtank");
   });

@@ -1,4 +1,5 @@
 import { EXT_COLORS } from "./extension-colors";
+import { escapeHtml } from "@askarthur/utils/html";
 
 // --- Types ---
 
@@ -436,8 +437,3 @@ export function createChatWarningBanner(patterns: string[]): HTMLElement {
 
 // --- Helpers ---
 
-function escapeHtml(str: string): string {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}

@@ -13,6 +13,7 @@ import {
   feedCloneEntity,
   retractCloneEntity,
 } from "@/lib/clone-watch/feed-entity";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 const TriageBodySchema = z.object({
   alertId: z.number().int().positive(),
@@ -337,15 +338,15 @@ export async function POST(req: Request) {
       // weekly digest + brand-notification approvals.
       try {
         await sendAdminTelegramMessage(
-          [
-            `⚠️ <b>Clone-watch triage event drop</b>`,
-            ``,
-            `Alert <code>${alert.id}</code> (${escapeHtml(alert.inferred_target_domain)} / ${escapeHtml(alert.candidate_domain)}) was marked tp_confirmed but the downstream Inngest event failed after ${result.attempts} attempts.`,
-            ``,
-            `Last error: <code>${escapeHtml(result.lastError ?? "unknown")}</code>`,
-            ``,
-            `<b>No Netcraft submission, no brand notification.</b> Retry by re-triaging the row from /admin/clone-watch (set to needs_investigation then back to tp_confirmed).`,
-          ].join("\n"),
+          joinHtml([
+            html`⚠️ <b>Clone-watch triage event drop</b>`,
+            html``,
+            html`Alert <code>${alert.id}</code> (${alert.inferred_target_domain} / ${alert.candidate_domain}) was marked tp_confirmed but the downstream Inngest event failed after ${result.attempts} attempts.`,
+            html``,
+            html`Last error: <code>${result.lastError ?? "unknown"}</code>`,
+            html``,
+            html`<b>No Netcraft submission, no brand notification.</b> Retry by re-triaging the row from /admin/clone-watch (set to needs_investigation then back to tp_confirmed).`,
+          ], "\n"),
         );
       } catch (telegramErr) {
         logger.error("clone-watch triage: telegram alert also failed", {
@@ -404,6 +405,3 @@ export async function sendEventWithRetry(
   return { ok: false, attempts: maxAttempts, lastError };
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

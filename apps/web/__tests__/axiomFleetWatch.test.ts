@@ -124,7 +124,7 @@ describe("axiom-fleet-watch cron", () => {
     const res = await GET(req());
     expect((await res.json()).paged).toBe(true);
     expect(sendAdminTelegramMessage).toHaveBeenCalledOnce();
-    const msg = vi.mocked(sendAdminTelegramMessage).mock.calls[0][0];
+    const msg = vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value;
     expect(msg).toContain("Inngest errors");
     expect(msg).toContain("scam-alert-push");
   });
@@ -135,7 +135,7 @@ describe("axiom-fleet-watch cron", () => {
     ]);
     const res = await GET(req());
     expect((await res.json()).paged).toBe(true);
-    expect(vi.mocked(sendAdminTelegramMessage).mock.calls[0][0]).toContain(
+    expect(vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value).toContain(
       "report-onward-acma-email-spam",
     );
   });
@@ -144,14 +144,14 @@ describe("axiom-fleet-watch cron", () => {
     mockAxiom([{ cat: "inngest_start", n: 412 }]);
     const res = await GET(req());
     expect((await res.json()).paged).toBe(true);
-    expect(vi.mocked(sendAdminTelegramMessage).mock.calls[0][0]).toContain("Runaway");
+    expect(vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value).toContain("Runaway");
   });
 
   it("pages on a 5xx spike (>= 10)", async () => {
     mockAxiom([{ cat: "http_5xx", n: 14 }]);
     const res = await GET(req());
     expect((await res.json()).paged).toBe(true);
-    expect(vi.mocked(sendAdminTelegramMessage).mock.calls[0][0]).toContain("5xx");
+    expect(vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value).toContain("5xx");
   });
 
   it("skips the run (no page) when the Axiom query fails", async () => {

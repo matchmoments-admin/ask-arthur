@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { verifyUnsubscribeToken } from "@/lib/unsubscribe";
 import { logger } from "@askarthur/utils/logger";
+import { escapeHtml } from "@askarthur/utils/html";
 
 export const dynamic = "force-dynamic";
 
@@ -61,13 +62,6 @@ export async function GET(req: NextRequest) {
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 function page(inner: string): string {

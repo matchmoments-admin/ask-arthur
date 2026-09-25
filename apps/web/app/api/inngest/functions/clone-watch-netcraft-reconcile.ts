@@ -15,6 +15,7 @@ import {
   type ReconcileFetch,
 } from "@/lib/clone-watch/netcraft-urls";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 /**
  * Clone-Watch — Netcraft PER-URL lifecycle reconciler (PR3.1, Part A).
@@ -267,11 +268,11 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
             },
           });
           await sendAdminTelegramMessage(
-            [
-              "⚠️ <b>Clone-watch — Netcraft reconcile degraded</b>",
-              `Fetch errors: <b>${counts.errors}/${groups.length}</b> uuids`,
+            joinHtml([
+              html`⚠️ <b>Clone-watch — Netcraft reconcile degraded</b>`,
+              html`Fetch errors: <b>${counts.errors}/${groups.length}</b> uuids`,
               "Likely a Netcraft outage / rate-limit. Lifecycle + takedown-KPI update was skipped for the failed batch; the cadence throttle retries them next run.",
-            ].join("\n"),
+            ], "\n"),
           );
         });
       }

@@ -37,6 +37,7 @@ import type { BrandEntry } from "@askarthur/shopfront-glue/au-brand-watchlist";
 import { getActiveWatchlist } from "../active-watchlist";
 import { ssrfSafeDispatcher } from "../ssrf-dispatcher";
 import { recordLaneOutcome } from "../lane-outcome";
+import { escapeHtml } from "@askarthur/utils/html";
 
 const ZIP_DOWNLOAD_TIMEOUT_MS = 60_000;
 const MAX_ZIP_BYTES = 50 * 1024 * 1024; // 50 MB compressed — 10x the legit
@@ -578,6 +579,3 @@ async function postTelegram(
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
