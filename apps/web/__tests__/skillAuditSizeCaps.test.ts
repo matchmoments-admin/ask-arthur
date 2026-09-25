@@ -55,7 +55,7 @@ describe("POST /api/skill-audit — ClawHub size caps", () => {
     stubFetch(() => new Response(bytes));
     const res = await req();
     expect(res.status).toBe(413);
-    expect(await res.json()).toMatchObject({ assessed: false });
+    expect(await res.json()).toMatchObject({ assessed: false, message: expect.stringContaining("too large to assess") });
     expect(m.scan).not.toHaveBeenCalled(); // never a metadata-only "clean" scan
   });
 
@@ -63,6 +63,32 @@ describe("POST /api/skill-audit — ClawHub size caps", () => {
     stubFetch(() => new Response(new Uint8Array(6 * 1024 * 1024)));
     const res = await req();
     expect(res.status).toBe(413);
+    expect(m.scan).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/skill-audit — no silent metadata-only results", () => {
+  it.each([
+    ["download fails", () => new Response("nope", { status: 500 }), 502],
+    ["empty package", () => new Response(null), 502],
+  ])("%s → explicit not-assessed", async (_l, download, status) => {
+    stubFetch(download as () => Response);
+    const res = await req();
+    expect(res.status).toBe(status);
+    const body = await res.json();
+    expect(body).toMatchObject({ assessed: false });
+    expect(body.message).toMatch(/not assessed/);
+    expect(m.scan).not.toHaveBeenCalled();
+  });
+
+  it("package without SKILL.md → explicit not-assessed", async () => {
+    const z = new JSZip();
+    z.file("README.md", "# hi");
+    const bytes = await z.generateAsync({ type: "arraybuffer" });
+    stubFetch(() => new Response(bytes));
+    const res = await req();
+    expect(res.status).toBe(422);
+    expect((await res.json()).message).toMatch(/no SKILL\.md/);
     expect(m.scan).not.toHaveBeenCalled();
   });
 });

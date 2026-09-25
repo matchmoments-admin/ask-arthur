@@ -69,20 +69,32 @@ describe("POST /api/deepfake", () => {
   });
 });
 
-describe("POST /api/deepfake — quota is spent last", () => {
-  it("does not consume a rate-limit token for invalid input", async () => {
+describe("POST /api/deepfake — check order", () => {
+  it("rate-limits BEFORE parsing the upload (cheap check first)", async () => {
+    m.rate.mockResolvedValue({ allowed: false, remaining: 0, resetAt: new Date(Date.now() + 60_000), reason: "exceeded" });
+    const form = new FormData();
+    form.set("audio", new File([new Uint8Array(10)], "a.txt", { type: "text/plain" }));
+    const res = await POST(
+      new Request("https://x.test/api/deepfake", { method: "POST", headers: { "x-real-ip": "1.2.3.4" }, body: form }) as never,
+    );
+    expect(res.status).toBe(429); // not 400: the limiter ran before validation
+    expect(m.braked).not.toHaveBeenCalled();
+  });
+
+  it("never reaches the paid call with invalid input", async () => {
     const form = new FormData();
     form.set("audio", new File([new Uint8Array(10)], "a.txt", { type: "text/plain" }));
     const res = await POST(
       new Request("https://x.test/api/deepfake", { method: "POST", headers: { "x-real-ip": "1.2.3.4" }, body: form }) as never,
     );
     expect(res.status).toBe(400);
-    expect(m.rate).not.toHaveBeenCalled();
+    expect(m.braked).not.toHaveBeenCalled();
+    expect(m.analyze).not.toHaveBeenCalled();
   });
 
-  it("does not consume a rate-limit token while braked", async () => {
+  it("checks the brake before the paid call", async () => {
     m.braked.mockResolvedValue(true);
     expect((await POST(audioRequest())).status).toBe(503);
-    expect(m.rate).not.toHaveBeenCalled();
+    expect(m.analyze).not.toHaveBeenCalled();
   });
 });

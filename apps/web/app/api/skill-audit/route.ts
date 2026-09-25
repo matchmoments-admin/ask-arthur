@@ -10,17 +10,22 @@ import { readZipEntryTextCapped } from "@askarthur/utils/zip-entry-capped";
 const MAX_SKILL_ZIP_BYTES = 5 * 1024 * 1024;
 const MAX_SKILL_MD_BYTES = 1024 * 1024;
 
-/** Explicit "not assessed" response for a skill over the size caps. */
+/**
+ * Explicit "not assessed" response. Carries `message` (what the scanner UI
+ * renders) as well as `error`, and `assessed: false` so no client can mistake
+ * it for a result.
+ */
+function skillNotAssessed(message: string, status: number) {
+  return NextResponse.json({ error: message, message, assessed: false }, { status });
+}
+
+/** "Not assessed" for a skill over the size caps. */
 function skillTooLarge(what: "package" | "SKILL.md") {
-  return NextResponse.json(
-    {
-      error:
-        what === "package"
-          ? "Skill package too large to assess (max 5 MB)."
-          : "SKILL.md too large to assess (max 1 MB).",
-      assessed: false,
-    },
-    { status: 413 },
+  return skillNotAssessed(
+    what === "package"
+      ? "Skill package too large to assess (max 5 MB)."
+      : "SKILL.md too large to assess (max 1 MB).",
+    413,
   );
 }
 
@@ -193,41 +198,35 @@ export async function POST(req: NextRequest) {
         const downloadUrl = `https://clawhub.ai/api/v1/download?slug=${cleanSlug}`;
         const dlRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(15000) });
 
-        if (dlRes.ok) {
-          // Both bounded: the download (streamed, capped) and SKILL.md's
-          // UNCOMPRESSED size — a small archive can inflate without limit.
-          // Over either cap the skill is NOT assessed — say so explicitly
-          // rather than silently scanning only its metadata, which would
-          // report a clean result for content we never read.
-          const zipBody = await readBodyCapped(dlRes, MAX_SKILL_ZIP_BYTES);
-          if (!zipBody.ok && zipBody.reason === "too_large") {
-            return skillTooLarge("package");
-          }
-          if (zipBody.ok) {
-            const zip = await JSZip.loadAsync(zipBody.bytes);
-            const skillFile = zip.file("SKILL.md");
-            if (skillFile) {
-              const text = await readZipEntryTextCapped(skillFile, MAX_SKILL_MD_BYTES);
-              if (text === null) return skillTooLarge("SKILL.md");
-              content = text;
-            }
-          }
+        // Only a SKILL.md we actually read is assessed. Every other outcome —
+        // download failed, empty body, no SKILL.md, over a size cap — is an
+        // explicit "not assessed" response. (A metadata-only scan used to
+        // stand in here, reporting a normal result for content never read.)
+        if (!dlRes.ok) {
+          await dlRes.body?.cancel().catch(() => undefined);
+          return skillNotAssessed(
+            `Could not download "${cleanSlug}" from ClawHub (${dlRes.status}), so it was not assessed.`,
+            502,
+          );
         }
-
-        // Fallback: build from metadata if download failed
-        if (!content) {
-          content = [
-            `---`,
-            `name: ${meta.skill.slug}`,
-            `description: ${meta.skill.summary || ""}`,
-            `---`,
-            `# ${meta.skill.displayName}`,
-            ``,
-            meta.skill.summary || "",
-          ].join("\n");
+        // Both bounded: the download (streamed, capped) and SKILL.md's
+        // UNCOMPRESSED size — a small archive can inflate without limit.
+        const zipBody = await readBodyCapped(dlRes, MAX_SKILL_ZIP_BYTES);
+        if (!zipBody.ok) {
+          return zipBody.reason === "too_large"
+            ? skillTooLarge("package")
+            : skillNotAssessed("ClawHub returned an empty package, so it was not assessed.", 502);
         }
+        const zip = await JSZip.loadAsync(zipBody.bytes);
+        const skillFile = zip.file("SKILL.md");
+        if (!skillFile) {
+          return skillNotAssessed("This skill package has no SKILL.md, so it was not assessed.", 422);
+        }
+        const text = await readZipEntryTextCapped(skillFile, MAX_SKILL_MD_BYTES);
+        if (text === null) return skillTooLarge("SKILL.md");
+        content = text;
 
-        // Run our scan on the metadata
+        // Scan the downloaded SKILL.md
         const result = await scanSkill({ skillContent: content, skillName: name });
 
         // Enrich with ClawHub's own security assessment

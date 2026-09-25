@@ -58,16 +58,29 @@ export async function extractSourceFiles(zipData: ArrayBuffer): Promise<Map<stri
   const jsFiles = zip.filter((path) => path.endsWith(".js") || path.endsWith(".ts"));
   let totalBytes = 0;
   for (const f of jsFiles.slice(0, MAX_SOURCE_FILES)) {
+    const remaining = MAX_TOTAL_SOURCE_BYTES - totalBytes;
+    if (remaining <= 0) break;
+    // The total budget, not the per-file cap, is the binding limit for this read.
+    const budgetBound = remaining < MAX_SOURCE_FILE_BYTES;
+    let content: string | null;
     try {
-      // Stop inflating at the per-file cap, and never past the remaining
-      // total budget (bytes, not UTF-16 code units).
-      const budget = Math.min(MAX_SOURCE_FILE_BYTES, MAX_TOTAL_SOURCE_BYTES - totalBytes);
-      if (budget <= 0) break;
-      const content = await readZipEntryTextCapped(f, budget);
-      if (content === null) continue; // Skip files over the cap
-      totalBytes += new TextEncoder().encode(content).byteLength;
-      sources.set(f.name, content);
-    } catch { /* skip binary/corrupt files */ }
+      content = await readZipEntryTextCapped(f, Math.min(MAX_SOURCE_FILE_BYTES, remaining));
+    } catch {
+      continue; // binary/corrupt entry
+    }
+    if (content === null) {
+      // Over the per-file cap → skip just this file. Over the REMAINING total
+      // budget → the budget is spent: stop inflating entries altogether.
+      if (budgetBound) break;
+      continue;
+    }
+    // Account what is actually KEPT: the decoded string. Invalid UTF-8
+    // decodes to U+FFFD (3 bytes per input byte), so the inflated size alone
+    // can understate it by up to 3×.
+    const kept = new TextEncoder().encode(content).byteLength;
+    if (kept > remaining) break;
+    totalBytes += kept;
+    sources.set(f.name, content);
   }
   return sources;
 }

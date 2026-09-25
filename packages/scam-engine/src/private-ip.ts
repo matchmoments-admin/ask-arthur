@@ -18,6 +18,10 @@ const IPV4_PRIVATE_PATTERNS: RegExp[] = [
   /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // shared / CGNAT
   /^198\.1[89]\./, //                            benchmarking
   /^192\.0\.0\./, //                             IETF protocol assignments
+  // IPv4 documentation TEST-NETs (192.0.2/24, 198.51.100/24, 203.0.113/24) are
+  // deliberately NOT listed: unroutable on the internet, and used throughout
+  // the tests as stand-in public addresses. Their IPv6 counterpart
+  // (2001:db8::/32) IS blocked — see isPrivateIPv6.
   /^(22[4-9]|23\d)\./, //                        multicast 224/4
   /^(24\d|25[0-5])\./, //                        reserved 240/4 + broadcast
 ];
@@ -105,6 +109,8 @@ function isPrivateIPv6(g: number[]): boolean {
   if (zero(0, 7) && g[7] === 1) return true; //              ::1 loopback
   // ::ffff:0:0/96 IPv4-mapped
   if (zero(0, 5) && g[5] === 0xffff) return isPrivateIP(v4(g[6]!, g[7]!));
+  // ::ffff:0:0:0/96 IPv4-translated (SIIT)
+  if (zero(0, 4) && g[4] === 0xffff && g[5] === 0) return isPrivateIP(v4(g[6]!, g[7]!));
   // ::/96 IPv4-compatible (deprecated)
   if (zero(0, 6)) return isPrivateIP(v4(g[6]!, g[7]!));
   // 64:ff9b::/96 NAT64 well-known prefix
@@ -122,6 +128,11 @@ function isPrivateIPv6(g: number[]): boolean {
       isPrivateIP(v4(g[6]! ^ 0xffff, g[7]! ^ 0xffff))
     );
   }
+  // Non-routable IPv6 special-purpose blocks (RFC 6890 registry).
+  if (g[0] === 0x2001 && g[1] === 0xdb8) return true; //            2001:db8::/32 documentation
+  if (g[0] === 0x100 && zero(1, 4)) return true; //                 100::/64 discard-only
+  if (g[0] === 0x2001 && (g[1]! & 0xfff0) === 0x10) return true; // 2001:10::/28 ORCHID
+  if (g[0] === 0x2001 && g[1] === 2 && g[2] === 0) return true; //  2001:2::/48 benchmarking
   const first = g[0]!;
   if ((first & 0xfe00) === 0xfc00) return true; //          fc00::/7 unique local
   if ((first & 0xffc0) === 0xfe80) return true; //          fe80::/10 link-local

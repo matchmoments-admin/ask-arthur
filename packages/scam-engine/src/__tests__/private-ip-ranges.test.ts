@@ -59,3 +59,19 @@ describe("isPrivateIP — IPv6 forms that embed or imply a private address", () 
     },
   );
 });
+
+describe("isPrivateIP — IPv4-translated and reserved IPv6 ranges", () => {
+  it.each([
+    "::ffff:0:7f00:1", "::ffff:0:127.0.0.1", "::ffff:0:a00:1", "0:0:0:0:ffff:0:a9fe:a9fe", // ::ffff:0:0/96
+    "2001:db8::1", "2001:db8:ffff::", // documentation
+    "100::1", // discard-only
+    "2001:10::1", "2001:1f::1", // ORCHID
+    "2001:2::1", // benchmarking
+  ])("blocks %s", (ip) => {
+    expect(isPrivateIP(ip)).toBe(true);
+  });
+
+  it.each(["::ffff:0:808:808", "2001:4860:4860::8888", "2001:20::1", "101::1"])("allows %s", (ip) => {
+    expect(isPrivateIP(ip)).toBe(false);
+  });
+});

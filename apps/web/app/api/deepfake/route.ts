@@ -26,9 +26,31 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Order: validate the input, then the operator brake, THEN spend a
-    // rate-limit token, then the paid vendor call — a malformed request or a
-    // braked feature must not use up a caller's quota.
+    // Order: rate limit (cheap abuse protection) → parse + validate → brake →
+    // paid vendor call. Invalid input still never reaches the paid call.
+    // Per-IP limit FIRST — the cheap check, before parsing an upload or
+    // reading the brake (fail-closed in prod).
+    const ip =
+      req.headers.get("x-real-ip") ??
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      "unknown";
+    const rate = await checkDeepfakeRateLimit(ip);
+    if (!rate.allowed) {
+      if (rate.reason === "store_unavailable") {
+        return NextResponse.json(
+          { error: "Service temporarily unavailable" },
+          { status: 503, headers: { "Retry-After": "60" } },
+        );
+      }
+      const retryAfter = rate.resetAt
+        ? Math.max(1, Math.ceil((rate.resetAt.getTime() - Date.now()) / 1000))
+        : 3600;
+      return NextResponse.json(
+        { error: rate.message ?? "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get("audio") as File | null;
 
@@ -55,28 +77,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Deepfake detection is temporarily paused" },
         { status: 503, headers: { "Retry-After": "3600" } },
-      );
-    }
-
-    // Per-IP limit on the paid call (fail-closed in prod).
-    const ip =
-      req.headers.get("x-real-ip") ??
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-      "unknown";
-    const rate = await checkDeepfakeRateLimit(ip);
-    if (!rate.allowed) {
-      if (rate.reason === "store_unavailable") {
-        return NextResponse.json(
-          { error: "Service temporarily unavailable" },
-          { status: 503, headers: { "Retry-After": "60" } },
-        );
-      }
-      const retryAfter = rate.resetAt
-        ? Math.max(1, Math.ceil((rate.resetAt.getTime() - Date.now()) / 1000))
-        : 3600;
-      return NextResponse.json(
-        { error: rate.message ?? "Too many requests" },
-        { status: 429, headers: { "Retry-After": String(retryAfter) } },
       );
     }
 
