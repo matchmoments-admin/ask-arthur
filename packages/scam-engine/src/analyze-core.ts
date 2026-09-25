@@ -43,7 +43,7 @@ import {
   analyzeOutputAffectingFlags,
   type AnalyzeCacheSurface,
 } from "./analysis-cache";
-import { mergeVerdict } from "@askarthur/core-analysis";
+import { isImageOnlySubmission, mergeVerdict } from "@askarthur/core-analysis";
 import { logger } from "@askarthur/utils/logger";
 import type {
   AnalysisResult,
@@ -122,6 +122,7 @@ export interface AnalyzeCoreOutput {
     maliciousUrlCount: number;
     injectionDetected: boolean;
     deepfakeDetected: boolean;
+    imageOnlyDowngraded: boolean;
   };
   /**
    * Background fire-and-forget work the caller should pass to
@@ -202,6 +203,9 @@ export async function runAnalysisCore(
           maliciousUrlCount: 0,
           injectionDetected: false,
           deepfakeDetected: false,
+          // The cached result already carries the merged (floored) verdict;
+          // the downgrade itself happened on the original miss.
+          imageOnlyDowngraded: false,
         },
         backgroundTasks: dispatchBackground(cachedTasks, backgroundMode),
       };
@@ -271,7 +275,15 @@ export async function runAnalysisCore(
     urlResults,
     redirectChains,
     injection,
+    imageOnly: isImageOnlySubmission(text, images?.length ?? 0),
   });
+  if (merged.signals.imageOnlyDowngraded) {
+    logger.info("analyze.image_only_downgrade", {
+      surface,
+      aiVerdict: merged.signals.aiVerdict,
+      imageCount: images?.length ?? 0,
+    });
+  }
 
   // mergeVerdict returns the merged consumer-facing fields; preserve any
   // non-merged fields the AI provided (scam type, country code, etc.) by

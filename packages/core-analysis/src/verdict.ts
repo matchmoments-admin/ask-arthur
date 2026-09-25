@@ -66,6 +66,12 @@ export interface VerdictSignals {
   redirectChains?: RedirectChainSignal[];
   injection?: InjectionSignal;
   deepfake?: DeepfakeSignal;
+  /**
+   * The submission was images with no user-supplied text — see
+   * {@link isImageOnlySubmission}, the ONE definition every caller uses.
+   * An image-only submission never returns SAFE (see mergeVerdict).
+   */
+  imageOnly?: boolean;
 }
 
 export interface VerdictMergeInput extends VerdictSignals {}
@@ -82,6 +88,8 @@ export interface VerdictMergeOutput {
     maliciousUrlCount: number;
     injectionDetected: boolean;
     deepfakeDetected: boolean;
+    /** A SAFE on an image-only submission was lowered to UNCERTAIN. */
+    imageOnlyDowngraded: boolean;
   };
 }
 
@@ -98,6 +106,29 @@ const DEEPFAKE_DETECTION_THRESHOLD = 0.5;
 const DEEPFAKE_HIGH_RISK_THRESHOLD = 0.85;
 
 const NO_LINKS_WARNING = "Do not click any links in this message.";
+
+/** The next step shown when an image-only SAFE is lowered to UNCERTAIN. */
+export const IMAGE_ONLY_NEXT_STEP =
+  "We can't confirm a screenshot is safe on its own — check the sender through a channel you trust (their official website, app or phone number) before acting on it.";
+
+/**
+ * The ONE definition of an image-only submission: at least one image and no
+ * user-supplied text (missing, empty or whitespace-only). A caption the user
+ * typed alongside a screenshot is text, so it is NOT image-only; nothing the
+ * pipeline generates itself (QR/mode instructions) counts as text here —
+ * callers pass the user's own text field, never the assembled prompt.
+ *
+ * Why the rule exists: text the scammer printed inside an image (a fake
+ * "verified by your bank" banner, instructions aimed at the checker) is
+ * invisible to the text-based injection pre-filter, so on image-only input the
+ * model's SAFE is the one verdict nothing else can corroborate or floor.
+ */
+export function isImageOnlySubmission(
+  text: string | null | undefined,
+  imageCount: number,
+): boolean {
+  return imageCount > 0 && (text ?? "").trim().length === 0;
+}
 
 /**
  * Ordinal rank of a verdict. `never` on default makes the Verdict union
@@ -206,6 +237,19 @@ export function mergeVerdict(signals: VerdictSignals): VerdictMergeOutput {
     }
   }
 
+  // Image-only floor (founder decision 2026-09-25): an image-only submission
+  // never returns SAFE — it becomes UNCERTAIN with a fixed next step. Runs
+  // last, after every escalation, and only ever moves SAFE → UNCERTAIN, so it
+  // cannot lower any other verdict.
+  let imageOnlyDowngraded = false;
+  if (signals.imageOnly && verdict === "SAFE") {
+    verdict = "UNCERTAIN";
+    imageOnlyDowngraded = true;
+    if (!nextSteps.includes(IMAGE_ONLY_NEXT_STEP)) {
+      nextSteps.unshift(IMAGE_ONLY_NEXT_STEP);
+    }
+  }
+
   return {
     verdict,
     confidence: signals.ai.confidence,
@@ -217,6 +261,7 @@ export function mergeVerdict(signals: VerdictSignals): VerdictMergeOutput {
       maliciousUrlCount: maliciousUrls.length,
       injectionDetected,
       deepfakeDetected,
+      imageOnlyDowngraded,
     },
   };
 }

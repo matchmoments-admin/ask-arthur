@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil, ipAddress } from "@vercel/functions";
 import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
-import { mergeVerdict } from "@askarthur/core-analysis";
+import { isImageOnlySubmission, mergeVerdict } from "@askarthur/core-analysis";
 import {
   getRelevantThemes,
   renderThemesForPrompt,
@@ -419,7 +419,15 @@ export async function POST(req: NextRequest) {
       urlResults,
       redirectChains,
       injection: injectionCheck,
+      imageOnly: isImageOnlySubmission(text, images.length),
     });
+    if (merged.signals.imageOnlyDowngraded) {
+      logger.info("analyze.image_only_downgrade", {
+        aiVerdict: merged.signals.aiVerdict,
+        imageCount: images.length,
+        mode: mode ?? "image",
+      });
+    }
     aiResult.verdict = merged.verdict;
     aiResult.redFlags = merged.redFlags;
     aiResult.nextSteps = merged.nextSteps;

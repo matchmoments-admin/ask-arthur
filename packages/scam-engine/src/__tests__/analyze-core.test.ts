@@ -374,3 +374,48 @@ describe("runAnalysisCore — background fan-out", () => {
     expect(mockStats).toHaveBeenCalledOnce();
   });
 });
+
+// Founder decision 2026-09-25: an image-only submission never returns SAFE.
+// Bots, the extension text route, inbound-scan and media all reach the verdict
+// through runAnalysisCore → mergeVerdict, so this is where they inherit it.
+describe("runAnalysisCore — image-only submissions", () => {
+  it("lowers a model SAFE to UNCERTAIN, records the downgrade, and caches the lowered verdict", async () => {
+    mockAnalyze.mockResolvedValue({ ...safeAi, confidence: 0.95 });
+
+    const out = await runAnalysisCore({
+      text: "",
+      surface: "bot",
+      images: ["base64data"],
+      backgroundMode: "waitUntil",
+    });
+
+    expect(out.result.verdict).toBe("UNCERTAIN");
+    expect(out.result.nextSteps[0]).toMatch(/can't confirm a screenshot is safe/);
+    expect(out.signals.imageOnlyDowngraded).toBe(true);
+    expect(out.signals.aiVerdict).toBe("SAFE");
+    const cachedResult = mockCacheSet.mock.calls[0]?.[1] as { verdict: string } | undefined;
+    expect(cachedResult?.verdict).toBe("UNCERTAIN");
+  });
+
+  it("keeps SAFE when the user typed a caption with the image", async () => {
+    mockAnalyze.mockResolvedValue({ ...safeAi, confidence: 0.95 });
+
+    const out = await runAnalysisCore({
+      text: "is this message from my bank real?",
+      surface: "bot",
+      images: ["base64data"],
+    });
+
+    expect(out.result.verdict).toBe("SAFE");
+    expect(out.signals.imageOnlyDowngraded).toBe(false);
+  });
+
+  it("leaves an image-only HIGH_RISK untouched", async () => {
+    mockAnalyze.mockResolvedValue(highRiskAi);
+
+    const out = await runAnalysisCore({ text: "  ", surface: "web", images: ["x"] });
+
+    expect(out.result.verdict).toBe("HIGH_RISK");
+    expect(out.signals.imageOnlyDowngraded).toBe(false);
+  });
+});
