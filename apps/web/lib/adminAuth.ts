@@ -15,7 +15,13 @@ function getSecret(): string {
   // a different HMAC than the same `<secret>` typed into the login form).
   const secret = readStringEnv("ADMIN_SECRET");
   if (!secret) throw new Error("ADMIN_SECRET not configured");
-  return secret;
+  // Revocation epoch (2026-09-25). The HMAC cookie is stateless, so there is
+  // no server-side session to delete; folding ADMIN_SESSION_EPOCH into the
+  // signing key means bumping it invalidates every outstanding admin cookie at
+  // once (SECURITY.md → "Revoke all admin sessions"). Unset reads as "0", so
+  // existing deployments keep their current key material until it is bumped.
+  const epoch = readStringEnv("ADMIN_SESSION_EPOCH") || "0";
+  return `${secret}:epoch:${epoch}`;
 }
 
 /** Create an HMAC-signed token with nonce: timestamp:nonce:hmac */
@@ -35,9 +41,8 @@ export function createAdminToken(): string {
  *
  * Observability: every failure path emits `logger.warn("admin_token_verify_failed", { reason, … })`
  * so silent rejections show up in the log stream. Each `reason` is a stable code
- * (decode_failed, wrong_parts_count, legacy_empty_field, legacy_expired,
- * legacy_hmac_mismatch, empty_field, expired, bad_nonce_shape, hmac_mismatch,
- * unexpected_throw). Grep these to triage future auth issues.
+ * (decode_failed, wrong_parts_count, empty_field, expired, bad_nonce_shape,
+ * hmac_mismatch, unexpected_throw). Grep these to triage future auth issues.
  *
  * SECURITY: never log `token`, the HMAC `signature`, the computed `expected`,
  * or the raw `nonce` value. Reason + age + length is enough to triage.
@@ -64,42 +69,9 @@ export function verifyAdminToken(token: string): boolean {
     }
     const parts = token.split(":");
 
-    // Support both old format (timestamp:hmac) and new (timestamp:nonce:hmac)
-    if (parts.length === 2) {
-      // Legacy format — verify but with shorter window (1h)
-      const [timestamp, signature] = parts;
-      if (!timestamp || !signature) {
-        logger.warn("admin_token_verify_failed", {
-          reason: "legacy_empty_field",
-          parts_length: 2,
-        });
-        return false;
-      }
-      const age = Date.now() - Number(timestamp);
-      if (isNaN(age) || age > 3600 * 1000 || age < 0) {
-        logger.warn("admin_token_verify_failed", {
-          reason: "legacy_expired",
-          age_ms: isNaN(age) ? null : age,
-        });
-        return false;
-      }
-      const expected = crypto
-        .createHmac("sha256", getSecret())
-        .update(timestamp)
-        .digest("hex");
-      const ok = crypto.timingSafeEqual(
-        Buffer.from(signature, "hex"),
-        Buffer.from(expected, "hex")
-      );
-      if (!ok) {
-        logger.warn("admin_token_verify_failed", {
-          reason: "legacy_hmac_mismatch",
-          age_ms: age,
-        });
-      }
-      return ok;
-    }
-
+    // Only the timestamp:nonce:hmac format is accepted. The legacy two-part
+    // timestamp:hmac format was removed 2026-09-25 (it had a 1 h window and no
+    // nonce); a two-part cookie now fails as wrong_parts_count.
     if (parts.length !== 3) {
       logger.warn("admin_token_verify_failed", {
         reason: "wrong_parts_count",

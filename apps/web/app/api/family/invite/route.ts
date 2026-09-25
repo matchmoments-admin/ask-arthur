@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
@@ -66,8 +67,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Group is full" }, { status: 400 });
   }
 
-  // Generate invite code
-  const inviteCode = crypto.randomUUID().slice(0, 8).toUpperCase();
+  // 128-bit, URL-safe invite code (was 32 bits from a UUID prefix). The row's
+  // expires_at defaults to now() + 7 days (v323); join enforces it.
+  const inviteCode = randomBytes(16).toString("base64url");
 
   const { data, error } = await supabase
     .from("family_members")
