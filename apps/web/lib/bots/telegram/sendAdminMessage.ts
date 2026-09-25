@@ -1,3 +1,4 @@
+import type { SafeHtml } from "@askarthur/utils/html";
 import { logger } from "@askarthur/utils/logger";
 
 /**
@@ -22,7 +23,8 @@ export type AdminMessageResult = {
 };
 
 /**
- * Send an HTML-formatted Telegram DM to the admin chat ID.
+ * Send an HTML-formatted Telegram DM to the admin chat ID. Build the message
+ * with `html\`…\`` from `@askarthur/utils/html` (interpolations are escaped).
  *
  * Requires TELEGRAM_ADMIN_CHAT_ID env var — obtain via @userinfobot on Telegram.
  * Kept separate from the user-bot handlers so admin notifications don't mix
@@ -33,9 +35,13 @@ export type AdminMessageResult = {
  * cron routes — but the caller can now tell, which it previously could not.
  */
 export async function sendAdminTelegramMessage(
-  text: string,
+  message: SafeHtml,
   options: { parseMode?: "HTML" | "MarkdownV2" } = {},
 ): Promise<AdminMessageResult> {
+  // SafeHtml only (built with `html\`…\`` or marked with `raw()`): a plain
+  // string with an unescaped `<` makes Telegram reject the whole message —
+  // silently, since this never throws — so it no longer typechecks.
+  const text = message.value;
   const startedAt = Date.now();
 
   const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;

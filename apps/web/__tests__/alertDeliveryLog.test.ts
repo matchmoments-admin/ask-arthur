@@ -27,6 +27,7 @@ import {
   alertAndRecord,
   recordNoAlertNeeded,
 } from "@/lib/alerting/deliveryLog";
+import { raw } from "@askarthur/utils/html";
 
 beforeEach(() => {
   inserted.length = 0;
@@ -57,7 +58,7 @@ describe("recordNoAlertNeeded", () => {
 
 describe("alertAndRecord outcome mapping", () => {
   it("records 'sent' when the transport confirms", async () => {
-    const r = await alertAndRecord({ alerter: "cost-daily-check", text: "hi" });
+    const r = await alertAndRecord({ alerter: "cost-daily-check", text: raw("hi") });
 
     expect(r.ok).toBe(true);
     expect(sendMock).toHaveBeenCalledOnce();
@@ -76,7 +77,7 @@ describe("alertAndRecord outcome mapping", () => {
       latencyMs: 0,
     } as never);
 
-    await alertAndRecord({ alerter: "health-digest", text: "hi" });
+    await alertAndRecord({ alerter: "health-digest", text: raw("hi") });
 
     expect(inserted[0]).toMatchObject({ outcome: "skipped_no_config" });
   });
@@ -89,7 +90,7 @@ describe("alertAndRecord outcome mapping", () => {
       latencyMs: 12,
     } as never);
 
-    await alertAndRecord({ alerter: "axiom-fleet-watch", text: "hi" });
+    await alertAndRecord({ alerter: "axiom-fleet-watch", text: raw("hi") });
 
     expect(inserted[0]).toMatchObject({
       outcome: "failed",
@@ -103,7 +104,7 @@ describe("alertAndRecord outcome mapping", () => {
     // query rather than looking like a healthy alerter.
     const r = await alertAndRecord({
       alerter: "feedback-digest",
-      text: "something is wrong",
+      text: raw("something is wrong"),
       enabled: false,
     });
 
@@ -117,7 +118,7 @@ describe("alertAndRecord outcome mapping", () => {
   });
 
   it("hashes the payload instead of storing it", async () => {
-    await alertAndRecord({ alerter: "cost-weekly-digest", text: "secret body" });
+    await alertAndRecord({ alerter: "cost-weekly-digest", text: raw("secret body") });
 
     const row = inserted[0];
     expect(row.payload_digest).toMatch(/^[0-9a-f]{16}$/);
@@ -125,8 +126,8 @@ describe("alertAndRecord outcome mapping", () => {
   });
 
   it("is stable: the same body hashes the same way", async () => {
-    await alertAndRecord({ alerter: "cost-weekly-digest", text: "same" });
-    await alertAndRecord({ alerter: "cost-weekly-digest", text: "same" });
+    await alertAndRecord({ alerter: "cost-weekly-digest", text: raw("same") });
+    await alertAndRecord({ alerter: "cost-weekly-digest", text: raw("same") });
     expect(inserted[0].payload_digest).toBe(inserted[1].payload_digest);
   });
 });

@@ -6,6 +6,7 @@ import {
 } from "@askarthur/scam-engine/inngest/events";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 import { logger } from "@askarthur/utils/logger";
 import { logCostAsync } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -162,12 +163,15 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       });
       await step.run("telegram-no-directory-row", async () => {
         await sendAdminTelegramMessage(
-          [
-            `<b>Clone-watch — brand_contact_directory missing</b>`,
-            `Brand: <code>${escapeHtml(data.brand)}</code>`,
-            `Candidate: <code>${escapeHtml(data.candidateDomain)}</code>`,
-            `Add a row via SQL or skip this brand for outreach.`,
-          ].join("\n"),
+          joinHtml(
+            [
+              html`<b>Clone-watch — brand_contact_directory missing</b>`,
+              html`Brand: <code>${data.brand}</code>`,
+              html`Candidate: <code>${data.candidateDomain}</code>`,
+              html`Add a row via SQL or skip this brand for outreach.`,
+            ],
+            "\n",
+          ),
         );
       });
       return { skipped: true, reason: "no_directory_row" };
@@ -206,17 +210,17 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       directoryRow.channel_type === "manual_review"
     ) {
       await step.run("telegram-admin-manual", async () => {
-        const lines = [
-          `<b>Clone-watch — manual brand outreach needed</b>`,
-          `Brand: <b>${escapeHtml(directoryRow.brand)}</b> (${escapeHtml(data.brand)})`,
-          `Candidate: <code>${escapeHtml(data.candidateDomain)}</code>`,
-          `Channel: <i>${directoryRow.channel_type}</i>`,
+        const lines: SafeHtml[] = [
+          html`<b>Clone-watch — manual brand outreach needed</b>`,
+          html`Brand: <b>${directoryRow.brand}</b> (${data.brand})`,
+          html`Candidate: <code>${data.candidateDomain}</code>`,
+          html`Channel: <i>${directoryRow.channel_type}</i>`,
         ];
         if (directoryRow.recipient) {
-          lines.push(`Open: ${directoryRow.recipient}`);
+          lines.push(html`Open: ${directoryRow.recipient}`);
         }
-        lines.push(`Triage queue: askarthur.au/admin/clone-watch`);
-        await sendAdminTelegramMessage(lines.join("\n"));
+        lines.push(html`Triage queue: askarthur.au/admin/clone-watch`);
+        await sendAdminTelegramMessage(joinHtml(lines, "\n"));
       });
 
       // Manual-action rows go under a DIFFERENT key
@@ -390,8 +394,4 @@ async function persistManualQueue(
     p_set_triage_status: null,
   });
   if (error) throw new Error(`notification stamp failed: ${error.message}`);
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

@@ -12,6 +12,7 @@ import {
   type FeedbackPayload,
   type FeedbackType,
 } from "@/lib/notion/feedback-tracker";
+import { escapeHtml, html, joinHtml, type HtmlValue, type SafeHtml } from "@askarthur/utils/html";
 
 // Where new-lead notifications are delivered. Kept a const so the
 // recipient is obvious in code review — don't silently redirect this to
@@ -204,14 +205,14 @@ export async function POST(req: NextRequest) {
           const hearAbout =
             (lead.assessment_data as { hear_about?: string } | null)?.hear_about ?? null;
           const lines = [
-            `/agent-fleet lead`,
-            `<b>New lead</b> — ${escapeHtml(lead.name)} (${escapeHtml(lead.email)})`,
-            `Company: ${escapeHtml(lead.company_name)}${lead.sector ? ` · ${escapeHtml(lead.sector)}` : ""}`,
-            lead.source ? `Source: ${escapeHtml(lead.source)}` : null,
-            hearAbout ? `Heard via: ${escapeHtml(hearAbout)}` : null,
-            challenge ? `\n<i>${escapeHtml(truncate(challenge, 400))}</i>` : null,
-          ].filter(Boolean);
-          await sendAdminTelegramMessage(lines.join("\n"));
+            html`/agent-fleet lead`,
+            html`<b>New lead</b> — ${lead.name} (${lead.email})`,
+            html`Company: ${lead.company_name}${lead.sector ? html` · ${lead.sector}` : ""}`,
+            lead.source ? html`Source: ${lead.source}` : null,
+            hearAbout ? html`Heard via: ${hearAbout}` : null,
+            challenge ? html`\n<i>${truncate(challenge, 400)}</i>` : null,
+          ];
+          await sendAdminTelegramMessage(joinHtml(lines, "\n"));
         }
       } catch (err) {
         logger.error("Lead Telegram notification failed", { error: String(err) });
@@ -260,15 +261,6 @@ function buildLeadEmailHtml(lead: LeadInput, challenge: string): string {
 </html>`;
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
@@ -286,23 +278,23 @@ function buildFeedbackTelegram(
   email: string,
   company: string,
   notionUrl: string | null
-): string {
+): SafeHtml {
   const title = String(ax.title ?? "").slice(0, 200);
   const description = String(ax.description ?? "");
   const severity = ax.severity ? `[${String(ax.severity)}]` : "";
   const url = typeof ax.url === "string" ? ax.url : "";
 
-  const lines = [
-    `/agent-fleet feedback`,
-    `${FEEDBACK_EMOJI[type]} <b>New ${type}${severity ? " " + escapeHtml(severity) : ""}</b>`,
-    `<b>${escapeHtml(title)}</b>`,
+  const lines: HtmlValue[] = [
+    html`/agent-fleet feedback`,
+    html`${FEEDBACK_EMOJI[type]} <b>New ${type}${severity ? " " + severity : ""}</b>`,
+    html`<b>${title}</b>`,
     "",
-    escapeHtml(truncate(description, 600)),
+    truncate(description, 600),
     "",
-    `👤 ${escapeHtml(reporter)} &lt;${escapeHtml(email)}&gt;`,
-    `🏢 ${escapeHtml(company)}`,
+    html`👤 ${reporter} &lt;${email}&gt;`,
+    html`🏢 ${company}`,
   ];
-  if (url) lines.push(`🔗 <a href="${escapeHtml(url)}">Page</a>`);
-  if (notionUrl) lines.push(`\n📝 <a href="${escapeHtml(notionUrl)}">Open in Notion</a>`);
-  return lines.join("\n");
+  if (url) lines.push(html`🔗 <a href="${url}">Page</a>`);
+  if (notionUrl) lines.push(html`\n📝 <a href="${notionUrl}">Open in Notion</a>`);
+  return joinHtml(lines, "\n");
 }

@@ -6,6 +6,7 @@ import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 /**
  * PR-D1 (#497) — Weekly FP-cluster digest.
@@ -312,39 +313,40 @@ export function buildProposedException(prefix: string, tld: string): string {
 export function buildTelegramMessage(
   clusters: FpCluster[],
   totalFps: number,
-): string {
+): SafeHtml {
   const header = [
-    `📋 <b>Clone-watch — FP patterns (last ${WINDOW_DAYS}d)</b>`,
-    ``,
-    `<b>${totalFps}</b> total FPs · <b>${clusters.length}</b> repeat patterns`,
-    ``,
+    html`📋 <b>Clone-watch — FP patterns (last ${WINDOW_DAYS}d)</b>`,
+    html``,
+    html`<b>${totalFps}</b> total FPs · <b>${clusters.length}</b> repeat patterns`,
+    html``,
   ];
 
   const shown = clusters.slice(0, 15);
   const body = shown.map((c) => {
-    const exampleList = c.examples
-      .map((e) => `<code>${escapeHtml(e)}</code>`)
-      .join(", ");
-    return [
-      `• <b>${escapeHtml(c.brand)}</b> — <b>${c.count}</b> FPs on <code>.${escapeHtml(c.tld)}</code>`,
-      `  ${exampleList}`,
-      `  Proposed exception: <code>${escapeHtml(c.proposed_exception)}</code>`,
-    ].join("\n");
+    const exampleList = joinHtml(
+      c.examples.map((e) => html`<code>${e}</code>`),
+      ", ",
+    );
+    return joinHtml(
+      [
+        html`• <b>${c.brand}</b> — <b>${c.count}</b> FPs on <code>.${c.tld}</code>`,
+        html`  ${exampleList}`,
+        html`  Proposed exception: <code>${c.proposed_exception}</code>`,
+      ],
+      "\n",
+    );
   });
 
   const overflow =
     clusters.length > shown.length
-      ? [``, `+${clusters.length - shown.length} smaller clusters omitted`]
+      ? [html``, html`+${clusters.length - shown.length} smaller clusters omitted`]
       : [];
 
   const footer = [
-    ``,
-    `Apply by editing <code>packages/shopfront-glue/src/au-brand-watchlist.ts</code> if you agree.`,
+    html``,
+    html`Apply by editing <code>packages/shopfront-glue/src/au-brand-watchlist.ts</code> if you agree.`,
   ];
 
-  return [...header, ...body, ...overflow, ...footer].join("\n");
+  return joinHtml([...header, ...body, ...overflow, ...footer], "\n");
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

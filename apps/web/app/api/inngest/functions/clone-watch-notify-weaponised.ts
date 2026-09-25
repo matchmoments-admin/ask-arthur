@@ -22,6 +22,7 @@ import {
 import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
 import { readAttribution } from "@/lib/clone-watch/attribution";
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 /**
  * F1 — weaponisation early-warning brand alert.
@@ -445,40 +446,37 @@ export function buildWeaponisedTelegramMessage(args: {
   channelType?: string;
   recipient?: string;
   detail?: string;
-}): string {
-  const lines = [`🚨 <b>Clone-watch — lookalike WEAPONISED</b>`, ``];
+}): SafeHtml {
+  const lines: SafeHtml[] = [html`🚨 <b>Clone-watch — lookalike WEAPONISED</b>`, html``];
   lines.push(
-    `Brand: <b>${escapeHtml(args.brand)}</b>`,
-    `Domain: <code>${escapeHtml(args.candidateDomain)}</code> (via ${escapeHtml(args.via)})`,
+    html`Brand: <b>${args.brand}</b>`,
+    html`Domain: <code>${args.candidateDomain}</code> (via ${args.via})`,
   );
   if (args.urlscanResultUrl) {
-    lines.push(`Evidence: ${args.urlscanResultUrl}`);
+    lines.push(html`Evidence: ${args.urlscanResultUrl}`);
   }
   switch (args.stage) {
     case "staged":
       lines.push(
-        ``,
-        `Brand alert staged for approval (${escapeHtml(args.channelType ?? "email")}).`,
-        `Review and send: ${DASHBOARD_URL}`,
+        html``,
+        html`Brand alert staged for approval (${args.channelType ?? "email"}).`,
+        html`Review and send: ${DASHBOARD_URL}`,
       );
       break;
     case "manual_channel":
       lines.push(
-        ``,
-        `No auto-email channel (<i>${escapeHtml(args.detail ?? "manual")}</i>) — notify the brand manually.`,
+        html``,
+        html`No auto-email channel (<i>${args.detail ?? "manual"}</i>) — notify the brand manually.`,
       );
-      if (args.recipient) lines.push(`Open: ${escapeHtml(args.recipient)}`);
+      if (args.recipient) lines.push(html`Open: ${args.recipient}`);
       break;
     case "no_contact":
       lines.push(
-        ``,
-        `⚠️ No brand contact on file (<i>${escapeHtml(args.detail ?? "no_directory_row")}</i>) — add a brand_contact_directory row to alert them.`,
+        html``,
+        html`⚠️ No brand contact on file (<i>${args.detail ?? "no_directory_row"}</i>) — add a brand_contact_directory row to alert them.`,
       );
       break;
   }
-  return lines.join("\n");
+  return joinHtml(lines, "\n");
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

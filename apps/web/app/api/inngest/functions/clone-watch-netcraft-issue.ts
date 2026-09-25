@@ -31,6 +31,7 @@ import {
   type PendingAlert,
 } from "@/lib/clone-watch/netcraft-urls";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 /**
  * Clone-Watch — Netcraft false-negative auto-escalation (PR2-hardened).
@@ -743,11 +744,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             { onConflict: "feature" },
           );
           await sendAdminTelegramMessage(
-            [
-              "🛑 <b>Clone-watch — Netcraft issue reporter auto-braked</b>",
-              `Permanent 4xx rejects: <b>${counts.permanentRejects}/${counts.livePosts}</b> this run.`,
-              `<code>feature_brakes.${BRAKE}</code> engaged 24h. Likely a body-contract or standing problem — check before clearing.`,
-            ].join("\n"),
+            joinHtml([
+              html`🛑 <b>Clone-watch — Netcraft issue reporter auto-braked</b>`,
+              html`Permanent 4xx rejects: <b>${counts.permanentRejects}/${counts.livePosts}</b> this run.`,
+              html`<code>feature_brakes.${BRAKE}</code> engaged 24h. Likely a body-contract or standing problem — check before clearing.`,
+            ], "\n"),
           );
         });
       }

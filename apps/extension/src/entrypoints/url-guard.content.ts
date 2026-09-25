@@ -1,4 +1,5 @@
 import type { ShowPhishingWarningMessage } from "@/lib/types";
+import { escapeHtml } from "@askarthur/utils/html";
 
 export default defineContentScript({
   matches: ["<all_urls>"],
@@ -139,8 +140,3 @@ function showWarningOverlay(warning: ShowPhishingWarningMessage) {
   });
 }
 
-function escapeHtml(str: string): string {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}

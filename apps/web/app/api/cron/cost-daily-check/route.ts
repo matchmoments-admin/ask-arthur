@@ -8,6 +8,7 @@ import {
 } from "@/lib/alerting/deliveryLog";
 import { readNumberEnv, type NumberEnvResult } from "@/lib/env-coerce";
 import { brakeSpend } from "@/lib/cost-brakes";
+import { html, joinHtml, type HtmlValue } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -749,17 +750,17 @@ export async function GET(req: Request) {
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
-  const lines: string[] = [
-    `⚠️ <b>Ask Arthur daily cost alert</b>`,
-    ``,
-    `Today's spend: <b>$${totalCostUsd.toFixed(2)}</b> across ${eventCount.toLocaleString()} events`,
-    `Threshold: $${thresholdUsd.toFixed(2)}`,
-    ``,
-    `<b>Top features today:</b>`,
+  const lines: HtmlValue[] = [
+    html`⚠️ <b>Ask Arthur daily cost alert</b>`,
+    html``,
+    html`Today's spend: <b>$${totalCostUsd.toFixed(2)}</b> across ${eventCount.toLocaleString()} events`,
+    html`Threshold: $${thresholdUsd.toFixed(2)}`,
+    html``,
+    html`<b>Top features today:</b>`,
   ];
   for (const t of topForTelegram) {
     lines.push(
-      `• ${t.feature} (${t.provider}) — $${t.cost.toFixed(
+      html`• ${t.feature} (${t.provider}) — $${t.cost.toFixed(
         2,
       )} · ${t.events.toLocaleString()} events`,
     );
@@ -767,86 +768,86 @@ export async function GET(req: Request) {
   if (brakeSet) {
     lines.push(
       "",
-      `🛑 <b>vuln_au_enrichment brake engaged</b> — paused for 24h (spend $${vulnEnrichCost.toFixed(2)} > $${vulnEnrichThresholdUsd} cap)`,
+      html`🛑 <b>vuln_au_enrichment brake engaged</b> — paused for 24h (spend $${vulnEnrichCost.toFixed(2)} > $${vulnEnrichThresholdUsd} cap)`,
     );
   }
   if (redditBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>reddit_intel brake engaged</b> — paused for 24h (spend $${redditIntelCost.toFixed(2)} > $${redditIntelThresholdUsd} cap)`,
+      html`🛑 <b>reddit_intel brake engaged</b> — paused for 24h (spend $${redditIntelCost.toFixed(2)} > $${redditIntelThresholdUsd} cap)`,
     );
   }
   if (phoneFootprintBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>phone_footprint brake engaged</b> — paused for 24h (spend $${phoneFootprintCost.toFixed(2)} > $${phoneFootprintThresholdUsd} cap)`,
+      html`🛑 <b>phone_footprint brake engaged</b> — paused for 24h (spend $${phoneFootprintCost.toFixed(2)} > $${phoneFootprintThresholdUsd} cap)`,
     );
   }
   if (charityCheckBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>charity_check brake engaged</b> — paused for 24h (spend $${charityCheckCost.toFixed(2)} > $${charityCheckThresholdUsd} cap)`,
+      html`🛑 <b>charity_check brake engaged</b> — paused for 24h (spend $${charityCheckCost.toFixed(2)} > $${charityCheckThresholdUsd} cap)`,
     );
   }
   if (shopSignalBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>shop_signal brake engaged</b> — paused for 24h (spend $${shopSignalCost.toFixed(2)} > $${shopSignalThresholdUsd} cap)`,
+      html`🛑 <b>shop_signal brake engaged</b> — paused for 24h (spend $${shopSignalCost.toFixed(2)} > $${shopSignalThresholdUsd} cap)`,
     );
   }
   if (shopSignalReviewsBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>shop_signal_reviews brake engaged</b> — paused for 24h (spend $${shopSignalReviewsCost.toFixed(2)} > $${shopSignalReviewsThresholdUsd} cap)`,
+      html`🛑 <b>shop_signal_reviews brake engaged</b> — paused for 24h (spend $${shopSignalReviewsCost.toFixed(2)} > $${shopSignalReviewsThresholdUsd} cap)`,
     );
   }
   if (shopfrontCloneOutreachBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>shopfront_clone_outreach brake engaged</b> — paused for 24h (spend $${shopfrontCloneOutreachCost.toFixed(2)} > $${shopfrontCloneOutreachThresholdUsd} cap)`,
+      html`🛑 <b>shopfront_clone_outreach brake engaged</b> — paused for 24h (spend $${shopfrontCloneOutreachCost.toFixed(2)} > $${shopfrontCloneOutreachThresholdUsd} cap)`,
     );
   }
   if (shopfrontCloneWatchBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>shopfront_clone_watch brake engaged</b> — paused for 24h (spend $${shopfrontCloneWatchCost.toFixed(2)} > $${shopfrontCloneWatchThresholdUsd} cap)`,
+      html`🛑 <b>shopfront_clone_watch brake engaged</b> — paused for 24h (spend $${shopfrontCloneWatchCost.toFixed(2)} > $${shopfrontCloneWatchThresholdUsd} cap)`,
     );
   }
   if (newsIntelEmbedBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>news_intel_embed brake engaged</b> — paused for 24h (spend $${newsIntelEmbedCost.toFixed(2)} > $${newsIntelEmbedThresholdUsd} cap)`,
+      html`🛑 <b>news_intel_embed brake engaged</b> — paused for 24h (spend $${newsIntelEmbedCost.toFixed(2)} > $${newsIntelEmbedThresholdUsd} cap)`,
     );
   }
   if (scamReportEmbedBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>scam_report_embed brake engaged</b> — paused for 24h (spend $${scamReportEmbedCost.toFixed(2)} > $${scamReportEmbedThresholdUsd} cap)`,
+      html`🛑 <b>scam_report_embed brake engaged</b> — paused for 24h (spend $${scamReportEmbedCost.toFixed(2)} > $${scamReportEmbedThresholdUsd} cap)`,
     );
   }
   if (botAnalyzeBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>bot_analyze brake engaged</b> — paused for 24h (spend $${botAnalyzeCost.toFixed(2)} > $${botAnalyzeThresholdUsd} cap). Bots reply "try again shortly" until reset.`,
+      html`🛑 <b>bot_analyze brake engaged</b> — paused for 24h (spend $${botAnalyzeCost.toFixed(2)} > $${botAnalyzeThresholdUsd} cap). Bots reply "try again shortly" until reset.`,
     );
   }
   if (hiveAiBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>hive_ai brake engaged</b> — paused for 24h (spend $${hiveAiCost.toFixed(2)} > $${hiveAiThresholdUsd} cap). Extension image scans skip Hive until reset.`,
+      html`🛑 <b>hive_ai brake engaged</b> — paused for 24h (spend $${hiveAiCost.toFixed(2)} > $${hiveAiThresholdUsd} cap). Extension image scans skip Hive until reset.`,
     );
   }
   if (extensionImageCheckBrakeSet) {
     lines.push(
       "",
-      `🛑 <b>extension_image_check brake engaged</b> — paused for 24h (spend $${extensionImageCheckCost.toFixed(2)} > $${extensionImageCheckThresholdUsd} cap). Image checks keep the Hive verdict; the vision context pass pauses.`,
+      html`🛑 <b>extension_image_check brake engaged</b> — paused for 24h (spend $${extensionImageCheckCost.toFixed(2)} > $${extensionImageCheckThresholdUsd} cap). Image checks keep the Hive verdict; the vision context pass pauses.`,
     );
   }
-  lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
+  lines.push("", html`Full breakdown: https://askarthur.au/admin/costs`);
 
   await alertAndRecord({
     alerter: "cost-daily-check",
-    text: lines.join("\n"),
+    text: joinHtml(lines, "\n"),
     metadata: { totalCostUsd, thresholdUsd, eventCount },
   });
 

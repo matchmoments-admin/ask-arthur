@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { renderCopySlot } from "./resolve-copy";
+import { escapeHtml } from "@askarthur/utils/html";
 
 // Brand reach-out / pilot outreach — the founder-composed, four-eyes cold email.
 //
@@ -44,19 +45,6 @@ If that's worth a conversation, I'm happy to send through a recent real example 
 
 Best,
 Brendan`;
-
-/**
- * Escape text for safe inclusion in HTML. Kept local so the module has no
- * dependency on the (non-exported) escapeHtml in resolve-copy.
- */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 /**
  * Build the multipart (html + text) bodies for a founder outreach email.

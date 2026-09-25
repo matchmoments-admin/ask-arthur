@@ -1,6 +1,7 @@
 import { Marked } from "marked";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { EMAIL_TEMPLATES } from "./copy-registry";
+import { escapeHtml } from "@askarthur/utils/html";
 
 // Sync markdown renderer (no async highlighter, unlike lib/blogRenderer). Used
 // inside React Email templates, which render synchronously.
@@ -54,15 +55,6 @@ export async function resolveEmailCopy(
 export function clearEmailCopyCache(templateKey?: string): void {
   if (templateKey) cache.delete(templateKey);
   else cache.clear();
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 const ALLOWED_TAGS = new Set([

@@ -9,7 +9,7 @@ import {
 import { decideNotificationAction } from "@/app/api/inngest/functions/clone-watch-notify-brand";
 import {
   buildLinkedInDraft,
-  buildTelegramMessage,
+  buildTelegramMessage as buildTelegramHtml,
   brandDisplayName,
   type WeeklyMetrics,
 } from "@/app/api/inngest/functions/clone-watch-weekly-digest";
@@ -26,7 +26,7 @@ import {
 import {
   groupByBrandRecipient,
   buildBatchSubject,
-  buildTelegramSummaryMessage,
+  buildTelegramSummaryMessage as buildTelegramSummaryHtml,
   urlscanEvidenceFromJsonb,
 } from "@/app/api/inngest/functions/clone-watch-notify-brand-prepare";
 import {
@@ -36,6 +36,13 @@ import {
   firstSignal,
 } from "@/app/api/admin/clone-watch/scamwatch-export/route";
 import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
+
+// The builder returns SafeHtml; these assertions read the rendered string.
+const buildTelegramMessage = (...a: Parameters<typeof buildTelegramHtml>) =>
+  buildTelegramHtml(...a).value;
+const buildTelegramSummaryMessage = (
+  ...a: Parameters<typeof buildTelegramSummaryHtml>
+) => buildTelegramSummaryHtml(...a).value;
 
 // Covers the pure helpers that route channels, build outbound copy, and
 // shape the Netcraft submission. The Inngest step machinery itself

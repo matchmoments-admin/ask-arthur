@@ -6,6 +6,7 @@ import {
   alertAndRecord,
   recordNoAlertNeeded,
 } from "@/lib/alerting/deliveryLog";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,12 +119,13 @@ export async function GET(req: Request) {
     const reason = (row.error_message ?? "")
       .slice(BACKOFF_PREFIX.length)
       .trim();
-    return `• <code>${escapeHtml(row.feed_name)}</code> — ${escapeHtml(reason)}`;
+    return html`• <code>${row.feed_name}</code> — ${reason}`;
   });
 
   await alertAndRecord({
     alerter: "scraper-brake-alert",
-    text: `<b>🚧 Scraper circuit breaker tripped</b>\n\n${lines.join(
+    text: html`<b>🚧 Scraper circuit breaker tripped</b>\n\n${joinHtml(
+      lines,
       "\n",
     )}\n\nThe affected scrapers will skip every cron firing for 24h. Manual probe: <code>gh workflow run scrape-feeds.yml -f feed=&lt;name&gt;</code>`,
     parseMode: "HTML",
@@ -142,6 +144,3 @@ export async function GET(req: Request) {
   });
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

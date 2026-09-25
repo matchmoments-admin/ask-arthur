@@ -7,6 +7,7 @@ import {
   alertAndRecord,
   recordNoAlertNeeded,
 } from "@/lib/alerting/deliveryLog";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,12 +71,12 @@ export async function GET(req: Request) {
     const mins = Math.round(row.minutes);
     const app = row.application_name ?? "?";
     const preview = (row.query_preview ?? "").replace(/\s+/g, " ").trim();
-    return `• <code>PID ${row.pid}</code> — ${mins}min — ${app}\n  <code>${escapeHtml(preview)}</code>`;
+    return html`• <code>PID ${row.pid}</code> — ${mins}min — ${app}\n  <code>${preview}</code>`;
   });
 
   await alertAndRecord({
     alerter: "pg-stuck-query-watchdog",
-    text: `<b>⚠️ Postgres stuck queries (≥${ALERT_MINUTES}min)</b>\n\n${lines.join("\n\n")}`,
+    text: html`<b>⚠️ Postgres stuck queries (≥${ALERT_MINUTES}min)</b>\n\n${joinHtml(lines, "\n\n")}`,
     parseMode: "HTML",
     metadata: { stuck: stuck.length, pids: stuck.map((s) => s.pid) },
   });
@@ -112,6 +113,3 @@ export async function GET(req: Request) {
   });
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

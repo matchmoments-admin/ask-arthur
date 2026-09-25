@@ -11,7 +11,7 @@ import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
 import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { escapeHtml } from "@/lib/escape-html";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -180,7 +180,7 @@ export async function POST(
   });
   // Send multipart (HTML + text). A missing text/plain part raises the spam
   // score for cold B2B mail — render the same component to plain text.
-  const html = await render(el);
+  const emailHtml = await render(el);
   const text = await render(el, { plainText: true });
 
   let messageId: string | null = null;
@@ -191,7 +191,7 @@ export async function POST(
         from: fromEmail,
         to: [recipient as string],
         subject: `${row.brand_name} brand-protection summary — ${label}`,
-        html,
+        html: emailHtml,
         text,
         headers: {
           "List-Unsubscribe": `<${unsubscribeUrl}>, <${stopMailto}>`,
@@ -216,14 +216,14 @@ export async function POST(
     // are worth a proactive ping, especially for a REAL (non-shadow) send).
     try {
       const sent = await sendAdminTelegramMessage(
-        [
-          `🚨 <b>Brand-stewardship send FAILED</b>`,
-          ``,
-          `Brand: <b>${escapeHtml(String(row.brand_name ?? ""))}</b>`,
-          `Recipient: <code>${escapeHtml(String(recipient))}</code>${isShadow ? " (shadow)" : " (REAL)"}`,
-          `Reason: <code>${escapeHtml(reason.slice(0, 200))}</code>`,
-          `Row id: <code>${escapeHtml(String(id))}</code> — marked <code>failed</code>. Review at askarthur.au/admin/brand-stewardship`,
-        ].join("\n"),
+        joinHtml([
+          html`🚨 <b>Brand-stewardship send FAILED</b>`,
+          html``,
+          html`Brand: <b>${String(row.brand_name ?? "")}</b>`,
+          html`Recipient: <code>${String(recipient)}</code>${isShadow ? " (shadow)" : " (REAL)"}`,
+          html`Reason: <code>${reason.slice(0, 200)}</code>`,
+          html`Row id: <code>${String(id)}</code> — marked <code>failed</code>. Review at askarthur.au/admin/brand-stewardship`,
+        ], "\n"),
       );
       if (!sent.ok) {
         logger.warn("brand-stewardship send: telegram alert not delivered", {

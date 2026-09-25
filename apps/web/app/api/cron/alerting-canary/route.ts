@@ -7,6 +7,7 @@ import {
   alertAndRecord,
   type Alerter,
 } from "@/lib/alerting/deliveryLog";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,22 +103,23 @@ export async function GET(req: Request) {
   }
 
   const headline = !counts
-    ? "⚠️ Canary alive but the liveness sweep FAILED — check alert_delivery_log connectivity."
+    ? html`⚠️ Canary alive but the liveness sweep FAILED — check alert_delivery_log connectivity.`
     : silent.length === 0
-      ? `✅ All ${Object.keys(LIVENESS_FLOORS).length} alerters alive.`
-      : `🚨 ${silent.length} alerter(s) below liveness floor:\n${silent.map((s) => `  • ${s}`).join("\n")}`;
+      ? html`✅ All ${Object.keys(LIVENESS_FLOORS).length} alerters alive.`
+      : html`🚨 ${silent.length} alerter(s) below liveness floor:\n${joinHtml(silent.map((s) => html`  • ${s}`), "\n")}`;
 
   const result = await alertAndRecord({
     alerter: "alerting-canary",
-    text: [
-      `🕊 <b>Weekly alerting canary</b>`,
-      ``,
-      headline,
-      ``,
-      counts ? `8-day row counts — ${summary.join(" · ")}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    text: joinHtml(
+      [
+        html`🕊 <b>Weekly alerting canary</b>`,
+        "",
+        headline,
+        "",
+        counts ? html`8-day row counts — ${summary.join(" · ")}` : null,
+      ],
+      "\n",
+    ),
     metadata: { silent, sweepOk: counts !== null },
   });
 

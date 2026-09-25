@@ -6,6 +6,7 @@ import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneGate } from "@/lib/laneHealth";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 /**
  * Layer 5 — weekly digest of clone-watch activity. Cron Sun 09:00 UTC
@@ -360,59 +361,63 @@ export function buildTelegramMessage({
   linkedinDraft: string;
   takedown?: TakedownStats;
   lowSeverityDigest?: LowSeverityDigest;
-}): string {
+}): SafeHtml {
   const brandLines = brandBreakdown.length
-    ? brandBreakdown
-        .map((b) => `· ${escapeHtml(b.brand)} — ${b.count}`)
-        .join("\n")
-    : "<i>(no confirmed TPs this week)</i>";
+    ? joinHtml(
+        brandBreakdown.map((b) => html`· ${b.brand} — ${b.count}`),
+        "\n",
+      )
+    : html`<i>(no confirmed TPs this week)</i>`;
 
   const reportedLine =
     reportedBrands.length > 0
-      ? `Reported directly to: <b>${reportedBrands.map((b) => escapeHtml(brandDisplayName(b))).join(", ")}</b>`
-      : `Reported directly to: <i>(no direct-email channels fired this week)</i>`;
+      ? html`Reported directly to: <b>${reportedBrands.map((b) => brandDisplayName(b)).join(", ")}</b>`
+      : html`Reported directly to: <i>(no direct-email channels fired this week)</i>`;
 
   const takedownLine =
     takedown && takedown.takedowns_total > 0
-      ? `Netcraft takedowns: <b>${takedown.takedowns_total}</b> · median <b>${formatMinutes(takedown.median_minutes)}</b> · P90 ${formatMinutes(takedown.p90_minutes)}`
-      : `Netcraft takedowns: 0 (polling cron warming up)`;
+      ? html`Netcraft takedowns: <b>${takedown.takedowns_total}</b> · median <b>${formatMinutes(takedown.median_minutes)}</b> · P90 ${formatMinutes(takedown.p90_minutes)}`
+      : html`Netcraft takedowns: 0 (polling cron warming up)`;
 
-  const lowSeverityLines =
+  const lowSeverityLines: SafeHtml[] =
     lowSeverityDigest && lowSeverityDigest.total > 0
       ? [
-          ``,
-          `<b>Low-severity queue (suppressed from per-hit email):</b>`,
-          `<i>${lowSeverityDigest.total} candidates across ${lowSeverityDigest.byBrand.length} brand(s)</i>`,
+          html``,
+          html`<b>Low-severity queue (suppressed from per-hit email):</b>`,
+          html`<i>${lowSeverityDigest.total} candidates across ${lowSeverityDigest.byBrand.length} brand(s)</i>`,
           ...lowSeverityDigest.byBrand.map(
-            (b) => `· ${escapeHtml(b.brand)} — ${b.count}`,
+            (b) => html`· ${b.brand} — ${b.count}`,
           ),
         ]
       : [];
 
-  return [
-    `🛡️ <b>Clone-watch weekly · ${escapeHtml(period)}</b>`,
-    ``,
-    `Candidates: <b>${metrics.candidates_total}</b>`,
-    `TP confirmed: <b>${metrics.triaged_tp}</b> (${tpRate}%)`,
-    `FP: <b>${metrics.triaged_fp}</b> (${fpRate}%)`,
-    `Investigate: ${metrics.triaged_investigate}`,
-    `Pending: ${metrics.pending}`,
-    `Brands touched: <b>${metrics.brands_touched}</b>`,
-    `Netcraft submits: ${metrics.submissions_netcraft}`,
-    takedownLine,
-    `Brand notifications: ${metrics.notifications_sent}`,
-    reportedLine,
-    ``,
-    `<b>Top brands (confirmed TP):</b>`,
-    brandLines,
-    ...lowSeverityLines,
-    ``,
-    `<b>Triage queue:</b> <a href="https://askarthur.au/admin/clone-watch">askarthur.au/admin/clone-watch</a>`,
-    ``,
-    `<b>LinkedIn-post draft (copy-paste):</b>`,
-    ``,
-    `<pre>${escapeHtml(linkedinDraft)}</pre>`,
-  ].join("\n");
+  return joinHtml(
+    [
+      html`🛡️ <b>Clone-watch weekly · ${period}</b>`,
+      html``,
+      html`Candidates: <b>${metrics.candidates_total}</b>`,
+      html`TP confirmed: <b>${metrics.triaged_tp}</b> (${tpRate}%)`,
+      html`FP: <b>${metrics.triaged_fp}</b> (${fpRate}%)`,
+      html`Investigate: ${metrics.triaged_investigate}`,
+      html`Pending: ${metrics.pending}`,
+      html`Brands touched: <b>${metrics.brands_touched}</b>`,
+      html`Netcraft submits: ${metrics.submissions_netcraft}`,
+      takedownLine,
+      html`Brand notifications: ${metrics.notifications_sent}`,
+      reportedLine,
+      html``,
+      html`<b>Top brands (confirmed TP):</b>`,
+      brandLines,
+      ...lowSeverityLines,
+      html``,
+      html`<b>Triage queue:</b> <a href="https://askarthur.au/admin/clone-watch">askarthur.au/admin/clone-watch</a>`,
+      html``,
+      html`<b>LinkedIn-post draft (copy-paste):</b>`,
+      html``,
+      html`<pre>${linkedinDraft}</pre>`,
+    ],
+    "\n",
+  );
 }
 
 export function buildLinkedInDraft({
@@ -473,6 +478,3 @@ export function brandDisplayName(legitimateDomain: string): string {
   return root.charAt(0).toUpperCase() + root.slice(1);
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

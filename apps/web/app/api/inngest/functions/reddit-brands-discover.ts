@@ -12,6 +12,7 @@ import {
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getLogger } from "@askarthur/utils/axiom-logger";
+import { escapeHtml, raw } from "@askarthur/utils/html";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { loadAliasRecord } from "@/lib/brand-aliases";
@@ -595,8 +596,9 @@ export interface DigestInput {
   priorTriage?: Readonly<Record<string, string>>;
 }
 
-/**
- * Escape a classifier-authored label for Telegram's HTML parse mode.
+/*
+ * Classifier-authored labels are escaped with the shared `escapeHtml`
+ * (@askarthur/utils/html) for Telegram's HTML parse mode.
  *
  * NOT cosmetic. `sendAdminTelegramMessage` posts with parse_mode=HTML, and
  * Telegram rejects a message whose markup is malformed — a bare `&` that is not
@@ -607,13 +609,8 @@ export interface DigestInput {
  * These labels are Claude output derived from user-submitted scam text, so
  * their content is not ours to assume. Live proof rather than a hypothetical:
  * `AT&T` has been sitting `pending` in reddit_watchlist_candidates since
- * 2026-08-24 with 5 mentions. It has not broken a digest yet only because it
- * stopped being net-new before it was ever rendered — the moment it gains AU
- * evidence, or any label like it arrives fresh, the digest stops sending.
+ * 2026-08-24 with 5 mentions.
  */
-function escapeHtml(raw: string): string {
-  return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 /**
  * Build the Telegram digest.
@@ -1269,8 +1266,11 @@ export const redditBrandsDiscover = inngest.createFunction(
     // and every id there carries an expected-firings floor in the weekly
     // canary's liveness sweep. Registering one is a separate decision.
     const delivery = await step.run("telegram", async () => {
+      // raw(): buildDigestMessage is a string renderer that escapes every
+      // classifier-authored value itself (pinned by redditBrandsDiscover.test)
+      // and must truncate the rendered HTML to Telegram's 4096-char cap.
       const res = await sendAdminTelegramMessage(
-        buildDigestMessage({
+        raw(buildDigestMessage({
           auEvidenced,
           globalOnly,
           promote,
@@ -1287,7 +1287,7 @@ export const redditBrandsDiscover = inngest.createFunction(
           degraded,
           hasAlias: (raw) => resolveCanonical(raw) !== null,
           priorTriage: knownStep.triaged,
-        }),
+        })),
         { parseMode: "HTML" },
       );
       if (!res.ok) {

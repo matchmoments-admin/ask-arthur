@@ -6,7 +6,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { deriveBrandKey } from "@/app/api/inngest/functions/report-brand-stewardship";
-import { escapeHtml } from "@/lib/escape-html";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 /**
  * Known-brands security-contact discovery (RFC 9116 security.txt).
@@ -183,11 +183,11 @@ export const knownBrandsDiscover = inngest.createFunction(
     if (discovered > 0) {
       await step.run("telegram", async () => {
         const sent = await sendAdminTelegramMessage(
-          [
-            `<b>Known-brands discovery</b>`,
-            `Discovered <b>${discovered}</b> new security.txt contact(s) from ${probed} probed:`,
-            ...discoveredBrands.map((name) => `• ${escapeHtml(name)}`),
-          ].join("\n"),
+          joinHtml([
+            html`<b>Known-brands discovery</b>`,
+            html`Discovered <b>${discovered}</b> new security.txt contact(s) from ${probed} probed:`,
+            ...discoveredBrands.map((name) => html`• ${name}`),
+          ], "\n"),
         );
         if (!sent.ok) {
           logger.warn("known-brands-discover: admin notification not delivered", {

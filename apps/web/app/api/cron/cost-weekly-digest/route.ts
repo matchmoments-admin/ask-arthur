@@ -10,6 +10,7 @@ import {
   thisWindowTimestamps,
   type CostRow,
 } from "@/lib/cost-digest";
+import { joinHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,7 +86,7 @@ export async function GET(req: Request) {
 
   await alertAndRecord({
     alerter: "cost-weekly-digest",
-    text: formatCostDigest(digest, { inboundScanFailures }).join("\n"),
+    text: joinHtml(formatCostDigest(digest, { inboundScanFailures }), "\n"),
     metadata: {
       weekEnding: digest.weekEnding,
       thisTotalUsd: digest.thisTotal,

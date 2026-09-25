@@ -122,7 +122,7 @@ describe("cost-daily-check hive_ai brake", () => {
 
     // Total > $2 global threshold → Telegram digest includes the brake line.
     expect(sendAdminTelegramMessage).toHaveBeenCalledTimes(1);
-    const [msg] = vi.mocked(sendAdminTelegramMessage).mock.calls[0];
+    const msg = vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value;
     expect(msg).toContain("hive_ai brake engaged");
   });
 
@@ -170,7 +170,7 @@ describe("cost-daily-check hive_ai brake", () => {
     expect(brakeUpserts.find((b) => b.feature === "hive_ai")).toBeUndefined();
     expect(body.extensionImageCheckBrakeSet).toBe(true);
     expect(body.hiveAiBrakeSet).toBe(false);
-    const [msg] = vi.mocked(sendAdminTelegramMessage).mock.calls[0];
+    const msg = vi.mocked(sendAdminTelegramMessage).mock.calls[0][0].value;
     expect(msg).toContain("extension_image_check brake engaged");
   });
 

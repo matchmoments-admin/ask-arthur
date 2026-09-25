@@ -3,10 +3,14 @@ import {
   buildClusterKey,
   summariseFpClusters,
   buildProposedException,
-  buildTelegramMessage,
+  buildTelegramMessage as buildTelegramHtml,
   longestCommonPrefix,
   type FpRow,
 } from "@/app/api/inngest/functions/clone-watch-fp-cluster-digest";
+
+// The builder returns SafeHtml; these assertions read the rendered string.
+const buildTelegramMessage = (...a: Parameters<typeof buildTelegramHtml>) =>
+  buildTelegramHtml(...a).value;
 
 describe("buildClusterKey", () => {
   it("composes key as brand|tld", () => {

@@ -20,6 +20,7 @@ import {
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 /**
  * Daily batch builder for clone-watch brand notifications.
@@ -139,12 +140,12 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     if (brakeEngaged) {
       await step.run("notify-brake-engaged", async () => {
         await sendAdminTelegramMessage(
-          [
-            "🛑 <b>Clone-watch prepare skipped</b>",
+          joinHtml([
+            html`🛑 <b>Clone-watch prepare skipped</b>`,
             "",
-            "<code>feature_brakes.shopfront_clone_outreach</code> is engaged.",
+            html`<code>feature_brakes.shopfront_clone_outreach</code> is engaged.`,
             "No batches prepared. Resume when the brake clears.",
-          ].join("\n"),
+          ], "\n"),
         );
       });
       return { skipped: true, reason: "cost_brake_engaged" };
@@ -551,27 +552,27 @@ export function buildTelegramSummaryMessage(args: {
   groupsFailed: number;
   groupsSkippedCooldown: number;
   dashboardUrl: string;
-}): string {
-  const lines = [`🛡️ <b>Clone-watch — prepare summary</b>`, ``];
+}): SafeHtml {
+  const lines: SafeHtml[] = [html`🛡️ <b>Clone-watch — prepare summary</b>`, html``];
   if (args.batchesPrepared > 0) {
     const noun = args.batchesPrepared === 1 ? "batch" : "batches";
     lines.push(
-      `<b>${args.batchesPrepared}</b> ${noun} awaiting your approval.`,
+      html`<b>${args.batchesPrepared}</b> ${noun} awaiting your approval.`,
     );
   } else {
-    lines.push(`No new batches awaiting approval.`);
+    lines.push(html`No new batches awaiting approval.`);
   }
   if (args.groupsSkippedCooldown > 0) {
     lines.push(
-      `${args.groupsSkippedCooldown} brand${args.groupsSkippedCooldown === 1 ? "" : "s"} skipped (24h cooldown — roll over to next run).`,
+      html`${args.groupsSkippedCooldown} brand${args.groupsSkippedCooldown === 1 ? "" : "s"} skipped (24h cooldown — roll over to next run).`,
     );
   }
   if (args.groupsFailed > 0) {
-    lines.push(`⚠️ ${args.groupsFailed} group${args.groupsFailed === 1 ? "" : "s"} failed during render/assign (check logs).`);
+    lines.push(html`⚠️ ${args.groupsFailed} group${args.groupsFailed === 1 ? "" : "s"} failed during render/assign (check logs).`);
   }
   lines.push(
-    ``,
-    `Review and send at <a href="${args.dashboardUrl}">${args.dashboardUrl}</a>`,
+    html``,
+    html`Review and send at <a href="${args.dashboardUrl}">${args.dashboardUrl}</a>`,
   );
-  return lines.join("\n");
+  return joinHtml(lines, "\n");
 }

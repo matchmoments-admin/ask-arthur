@@ -4,9 +4,14 @@ import WeaponisedCloneAlert from "../emails/WeaponisedCloneAlert";
 import {
   buildWeaponisedAlertProps,
   buildWeaponisedSubject,
-  buildWeaponisedTelegramMessage,
+  buildWeaponisedTelegramMessage as buildWeaponisedTelegramHtml,
 } from "@/app/api/inngest/functions/clone-watch-notify-weaponised";
 import { WEAPONISED_CLONE_SLOTS, EMAIL_TEMPLATES } from "@/lib/email/copy-registry";
+
+// The builder returns SafeHtml; these assertions read the rendered string.
+const buildWeaponisedTelegramMessage = (
+  ...a: Parameters<typeof buildWeaponisedTelegramHtml>
+) => buildWeaponisedTelegramHtml(...a).value;
 
 // F1 — weaponisation early-warning alert. Covers the pure prop/subject/
 // Telegram builders + full template renders with honesty-invariant

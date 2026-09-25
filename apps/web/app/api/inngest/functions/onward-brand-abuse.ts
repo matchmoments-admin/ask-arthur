@@ -10,6 +10,7 @@ import { redactPII } from "@/lib/onward/redact";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { resolveEmailCopy } from "@/lib/email/resolve-copy";
+import { html, joinHtml } from "@askarthur/utils/html";
 
 /**
  * Manual-review gate threshold. The first N successful sends to any given
@@ -148,14 +149,14 @@ export const onwardBrandAbuse = inngest.createFunction(
       await step.run("notify-admin-manual-review", async () => {
         try {
           await sendAdminTelegramMessage(
-            [
-              `/agent-fleet onward-review`,
-              `<b>Brand-abuse send held for review</b>`,
-              `Brand: ${escapeHtml(brand.brand_name)}`,
-              `Sent so far: ${sentSoFar}/${MANUAL_REVIEW_THRESHOLD}`,
-              `Scam report: <code>${data.scam_report_id}</code>`,
-              `Approve via /admin/onward-reports`,
-            ].join("\n")
+            joinHtml([
+              html`/agent-fleet onward-review`,
+              html`<b>Brand-abuse send held for review</b>`,
+              html`Brand: ${brand.brand_name}`,
+              html`Sent so far: ${sentSoFar}/${MANUAL_REVIEW_THRESHOLD}`,
+              html`Scam report: <code>${data.scam_report_id}</code>`,
+              html`Approve via /admin/onward-reports`,
+            ], "\n")
           );
         } catch (err) {
           logger.error("manual_review admin notify failed", {
@@ -189,7 +190,7 @@ export const onwardBrandAbuse = inngest.createFunction(
     const copy = await step.run("resolve-copy", () =>
       resolveEmailCopy("brand_abuse"),
     );
-    const html = await step.run("render-email", () =>
+    const emailHtml = await step.run("render-email", () =>
       render(
         BrandAbuseReport({
           brandName: brand.brand_name,
@@ -208,7 +209,7 @@ export const onwardBrandAbuse = inngest.createFunction(
     );
 
     const payloadHash = createHash("sha256")
-      .update(brand.security_contact_email + "|" + reportRef + "|" + html)
+      .update(brand.security_contact_email + "|" + reportRef + "|" + emailHtml)
       .digest("hex");
 
     // Send via Resend
@@ -221,7 +222,7 @@ export const onwardBrandAbuse = inngest.createFunction(
         to: [brand.security_contact_email!],
         replyTo: REPLY_TO_EMAIL,
         subject: `Phishing / scam impersonating ${brand.brand_name} — Ask Arthur ref ${reportRef}`,
-        html,
+        html: emailHtml,
       });
       if (result.error) {
         throw new Error(
@@ -313,9 +314,3 @@ function extractStringArray(
   return [];
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
