@@ -22,7 +22,6 @@
     "og:card": "tsx scripts/og-card-export.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
     "@askarthur/bot-core": "workspace:*",
     "@askarthur/charity-check": "workspace:*",
     "@askarthur/core-analysis": "workspace:*",

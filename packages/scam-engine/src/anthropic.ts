@@ -176,6 +176,12 @@ export class ClaudeTruncatedOutputError extends Error {
   }
 }
 
+/** One base64 image for a vision request. `base64` has no `data:` prefix. */
+export interface ClaudeImageInput {
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  base64: string;
+}
+
 export interface CallClaudeJsonOptions<T> {
   model: ClaudeModelKey;
   /** System prompt — cached when `cacheSystem` is true (default). */
@@ -187,6 +193,11 @@ export interface CallClaudeJsonOptions<T> {
    *  string passed here is escaped a second time). Blocks are always wrapped;
    *  `userIsTrusted` does not apply to them. */
   user: string | { blocks: readonly UntrustedBlockInput[] };
+  /** Images sent before the text part (vision input). Image content is
+   *  untrusted by nature and cannot be delimited like text — keep the
+   *  system prompt's instructions explicit about treating printed text in
+   *  the image as data. Omitted/empty = text-only request, unchanged. */
+  images?: readonly ClaudeImageInput[];
   /** Zod schema the parsed JSON output must satisfy. Throws on mismatch. */
   schema: z.ZodType<T>;
   /** Output token ceiling. */
@@ -195,8 +206,13 @@ export interface CallClaudeJsonOptions<T> {
   timeoutMs?: number;
   /** Apply `cache_control: ephemeral` to system prompt. Default true. */
   cacheSystem?: boolean;
-  /** Skip the injection sandwich on `user`. Default false, and there is
-   *  currently no caller that sets it — both that did were wrong.
+  /** Skip the injection sandwich on `user`. Default false. The one current
+   *  caller is charity-check's ocr-lanyard, whose `user` string is a fixed
+   *  code constant (the instruction "read the visible text in this image…")
+   *  with no third-party bytes in it; its untrusted input is the IMAGE, which
+   *  is sent as an image part and is never wrapped or escaped by this
+   *  function under any setting (see `images`). Two earlier callers set this
+   *  wrongly and were removed:
    *
    *  "Your own JSON envelope" is NOT the test, and phrasing it that way is
    *  what justified both removals: an envelope you built can still carry
@@ -264,6 +280,7 @@ export async function callClaudeJson<T>(
     model,
     system,
     user,
+    images = [],
     schema,
     maxTokens,
     timeoutMs = 30_000,
@@ -291,10 +308,11 @@ export async function callClaudeJson<T>(
 
   // Sandwich defence: nonce-tagged delimiter + explicit pre/post instruction
   // (shared with claude.ts::analyzeWithClaude via buildInjectionSandwich).
-  // Applied to every caller — `userIsTrusted` exists but nothing sets it, and
-  // the two call sites that did were both wrong about their own input (see
-  // the field's JSDoc). Judge the escape hatch on provenance, not on whether
-  // the string happens to be JSON.
+  // Applied to every caller except ocr-lanyard, whose `user` is a fixed code
+  // constant (see the field's JSDoc); two earlier callers that set
+  // `userIsTrusted` were wrong about their own input. Judge the escape hatch
+  // on provenance, not on whether the string happens to be JSON. Images are
+  // never wrapped here — they are separate content parts.
   // No scrubPii here: this wrapper's callers pass non-PII envelopes, matching
   // the pre-refactor behaviour (which never scrubbed).
   const userContent =
@@ -323,7 +341,27 @@ export async function callClaudeJson<T>(
     model: spec.id,
     max_tokens: maxTokens,
     system: systemBlock,
-    messages: [{ role: "user", content: userContent }],
+    messages: [
+      {
+        role: "user",
+        // Text-only requests keep the plain-string content they always had;
+        // a vision request puts the image parts first, then the text.
+        content:
+          images.length === 0
+            ? userContent
+            : [
+                ...images.map((img) => ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: img.mediaType,
+                    data: img.base64,
+                  },
+                })),
+                { type: "text" as const, text: userContent },
+              ],
+      },
+    ],
   };
   if (useToolUse) {
     // io: 'input' — we want the schema BEFORE Zod transforms run (so

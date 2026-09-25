@@ -8,7 +8,7 @@ import { logger } from "@askarthur/utils/logger";
 import { checkCharityCheckRateLimit } from "@askarthur/utils/rate-limit";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 
-import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logCost } from "@/lib/cost-telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -142,22 +142,29 @@ export async function POST(req: NextRequest) {
       ocrAbn = extracted.abn;
       ocrName = extracted.charity_name;
       // Cost telemetry for the OCR call (separate row so /admin/costs
-      // surfaces image-spend distinctly from registry lookups).
-      logCost({
-        feature: "charity_check",
-        provider: "anthropic",
-        operation: "claude-haiku-4-5-ocr-lanyard",
-        // ~600 input tokens (image + system + user prompt) + ~150 output
-        units: 750,
-        unitCostUsd: PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN,
-        requestId,
-        metadata: {
-          extracted: extracted.extracted,
-          had_charity_name: Boolean(extracted.charity_name),
-          had_abn: Boolean(extracted.abn),
-          ocr_latency_ms: Date.now() - ocrStart,
-        },
-      });
+      // surfaces image-spend distinctly from registry lookups). Real usage
+      // from the call (image tokens vary widely with resolution); no row when
+      // the call itself failed — there was no spend to record.
+      if (extracted.estimatedCostUsd !== undefined && extracted.usage) {
+        const tokens = extracted.usage.inputTokens + extracted.usage.outputTokens;
+        logCost({
+          feature: "charity_check",
+          provider: "anthropic",
+          operation: "claude-haiku-4-5-ocr-lanyard",
+          units: tokens,
+          unitCostUsd: tokens > 0 ? extracted.estimatedCostUsd / tokens : 0,
+          requestId,
+          metadata: {
+            extracted: extracted.extracted,
+            had_charity_name: Boolean(extracted.charity_name),
+            had_abn: Boolean(extracted.abn),
+            ocr_latency_ms: Date.now() - ocrStart,
+            input_tokens: extracted.usage.inputTokens,
+            output_tokens: extracted.usage.outputTokens,
+            model_id: extracted.modelId,
+          },
+        });
+      }
     }
 
     const result = await runCharityCheck({

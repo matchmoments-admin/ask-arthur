@@ -2,9 +2,9 @@
 //
 // Runs only for basic/full tiers — teaser returns a templated two-liner
 // since it has no provider detail worth narrating and the goal is to
-// upsell into paid. Reuses the existing @anthropic-ai/sdk setup and the
-// same Haiku 4.5 model the core analyze pipeline uses, so there's a
-// single vendor bill and a single upstream to monitor.
+// upsell into paid. Goes through callClaudeJson (the one model-call Module)
+// with the same Haiku 4.5 model the core analyze pipeline uses, so there's
+// a single vendor bill and a single upstream to monitor.
 //
 // Cost: ~$0.002/call at 400 in / 200 out tokens. Prompt-cached — the
 // system prompt is static and will hit cache from the second call
@@ -14,21 +14,20 @@
 // and logs a warn. Never throws — explanation is an enhancement, not a
 // correctness requirement, so failures must not cascade to the orchestrator.
 
-import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import { logger } from "@askarthur/utils/logger";
+import { callClaudeJson } from "../anthropic";
 import type { Footprint, PillarId, PillarResult } from "./types";
 
-const MODEL = "claude-haiku-4-5-20251001";
 const TIMEOUT_MS = 8_000;
+// Was 220 as free text; a forced tool call wraps the same 70-120-word
+// paragraph in a small JSON envelope, so the ceiling carries that overhead.
+// Truncation still degrades to the templated fallback (never throws).
+const MAX_TOKENS = 300;
 
-let _client: Anthropic | null = null;
-function getClient(): Anthropic | null {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!_client) {
-    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  }
-  return _client;
-}
+const ExplanationSchema = z.object({
+  explanation: z.string().min(1),
+});
 
 // Static system prompt — prompt-cached so repeat calls stay cheap. Keeps
 // the LLM scoped to plain explanation; no advice, no speculation about
@@ -48,7 +47,8 @@ Rules:
 - Never label the owner — only describe the signals.
 - No recommendations, no "you should call your bank", no legal advice.
 - Plain English, no jargon. British-AU spelling ("colour", "behaviour").
-- Do not use bullet points or headings — single flowing paragraph.`;
+- Do not use bullet points or headings — single flowing paragraph.
+- Return the paragraph via the tool as \`explanation\`.`;
 
 export async function explainFootprint(
   footprint: Footprint,
@@ -59,44 +59,39 @@ export async function explainFootprint(
     return templatedTeaserExplanation(footprint);
   }
 
-  const client = getClient();
-  if (!client) {
+  if (!process.env.ANTHROPIC_API_KEY) {
     logger.warn("explainFootprint: ANTHROPIC_API_KEY not set, using template");
     return templatedBasicExplanation(footprint, opts.ownershipProven);
   }
 
   // Compact the pillar data for the prompt — strip verbose raw fields
   // (carrier strings, raw breach names) that don't help the model phrase
-  // anything. The model sees shape + severity, not PII.
+  // anything. The model sees shape + severity, not PII. Pillar `reason`
+  // strings can originate from vendor responses, so the summary goes in as
+  // a delimited untrusted block rather than raw prompt text.
   const summary = compactSummary(footprint, opts.ownershipProven);
 
   try {
-    const response = await client.messages.create(
-      {
-        model: MODEL,
-        max_tokens: 220,
-        system: [
+    const out = await callClaudeJson({
+      model: "HAIKU_4_5",
+      system: SYSTEM_PROMPT,
+      user: {
+        blocks: [
           {
-            type: "text" as const,
-            text: SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" as const },
-          },
-        ],
-        messages: [
-          {
-            role: "user",
-            content: `\`\`\`json\n${JSON.stringify(summary, null, 2)}\n\`\`\``,
+            label: "footprint_summary",
+            body: JSON.stringify(summary, null, 2),
+            preamble: "The per-pillar signal summary for this phone number, as JSON.",
           },
         ],
       },
-      { timeout: TIMEOUT_MS },
-    );
+      schema: ExplanationSchema,
+      maxTokens: MAX_TOKENS,
+      timeoutMs: TIMEOUT_MS,
+      useToolUse: true,
+      toolName: "submit_explanation",
+    });
 
-    const text =
-      response.content[0]?.type === "text"
-        ? response.content[0].text.trim()
-        : "";
-
+    const text = out.result.explanation.trim();
     if (!text) {
       return templatedBasicExplanation(footprint, opts.ownershipProven);
     }
