@@ -790,3 +790,40 @@ describe("classifyLaneHealth — persistent vendor quota", () => {
     ]);
   });
 });
+
+// 2026-09-25: DNS-precheck skips (no_host / SERVFAIL) are not work. A daily
+// submit whose whole batch was dead domains correctly submitted nothing and
+// must not page; a real failure among them still must.
+describe("urlscan submit — DNS-precheck skips are not work", () => {
+  it("an all-dead-domain batch is not silent_zero", () => {
+    const rows = [
+      ...without("submit_batch"),
+      outcomeRow("shopfront-clone-urlscan-submit", 21, 40, {
+        submitted: 0,
+        submit_failed: 0,
+        rate_limited: 0,
+        dormant_retired: 0,
+        dns_skipped: 25,
+        dns_servfail: 15,
+      }),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
+  });
+
+  it("a genuine failure among dead domains still pages", () => {
+    const rows = [
+      ...without("submit_batch"),
+      outcomeRow("shopfront-clone-urlscan-submit", 21, 40, {
+        submitted: 0,
+        submit_failed: 2,
+        rate_limited: 0,
+        dormant_retired: 0,
+        dns_skipped: 25,
+        dns_servfail: 13,
+      }),
+    ];
+    expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
+      expect.objectContaining({ lane: "shopfront-clone-urlscan-submit", kind: "silent_zero" }),
+    ]);
+  });
+});

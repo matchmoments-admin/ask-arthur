@@ -173,6 +173,9 @@ export interface LaneOutcome {
     /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
      *  absent on quiet runs and rows written before it existed. */
     dns_skipped?: number;
+    /** A and AAAA both SERVFAIL at the DNS precheck — no urlscan call, stamped
+     *  like dns_skipped (2026-09-25); absent on older rows. */
+    dns_servfail?: number;
     /** urlscan 429s — our quota, not a failure; rows left unstamped to retry
      *  first. Absent on quiet runs and rows before 2026-09-24 (when this lane
      *  still folded 429s into submit_failed). */
@@ -187,6 +190,9 @@ export interface LaneOutcome {
     /** Proved no-host by the DNS precheck — no urlscan call (2026-09-24);
      *  absent on quiet runs and rows written before it existed. */
     dns_skipped?: number;
+    /** A and AAAA both SERVFAIL at the DNS precheck — no urlscan call, stamped
+     *  like dns_skipped (2026-09-25); absent on older rows. */
+    dns_servfail?: number;
     rate_limited: number;
     dormant_retired: number;
     /** Candidates the wall-clock budget stopped before (2026-09-24). */

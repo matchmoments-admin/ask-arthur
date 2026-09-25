@@ -194,8 +194,10 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // Same rule as recheck: nothing submitted while genuine submits failed
     // pages regardless of 429s; nothing submitted AND nothing refused on quota
     // (the Sep 12–16 shape) pages too. Pure quota → quotaExhausted.
+    // DNS-precheck skips (no_host / SERVFAIL) are not work: a day whose whole
+    // batch was dead domains submitted nothing correctly (2026-09-25).
     silentZero: (o) =>
-      n(o, "units") > 0 &&
+      n(o, "units") - n(o, "dns_skipped") - n(o, "dns_servfail") > 0 &&
       n(o, "submitted") === 0 &&
       (n(o, "rate_limited") === 0 || n(o, "submit_failed") > 0),
 

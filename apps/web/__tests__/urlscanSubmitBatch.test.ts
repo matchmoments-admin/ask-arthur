@@ -31,16 +31,18 @@ describe("submitCandidateBatch", () => {
       out("dns_no_host"),
       out("submit_failed"),
       out("no_client"),
+      out("dns_servfail"),
     ];
     const submitOne = vi.fn(async () => kinds.shift()!);
-    const t = await submitCandidateBatch(rows(6), open, { submitOne });
+    const t = await submitCandidateBatch(rows(7), open, { submitOne });
     expect(t).toEqual({
       submitted: 2,
       rateLimited: 1,
       dnsSkipped: 1,
+      dnsServfail: 1, // attempted (stamped), never a failure
       submitFailed: 2,
       reputationHits: 1,
-      attemptedIds: [1, 2, 4, 5, 6], // every row looked at EXCEPT the 429
+      attemptedIds: [1, 2, 4, 5, 6, 7], // every row looked at EXCEPT the 429
       unreached: 0,
     });
   });

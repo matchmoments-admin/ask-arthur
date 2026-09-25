@@ -206,8 +206,15 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
               }),
           }),
       );
-      const { submitted, submitFailed, rateLimited, dnsSkipped, reputationHits, unreached } =
-        batch;
+      const {
+        submitted,
+        submitFailed,
+        rateLimited,
+        dnsSkipped,
+        dnsServfail,
+        reputationHits,
+        unreached,
+      } = batch;
 
       await step.run("log-cost", async () => {
         // Awaited (#1069): the Aug 31 submit run was finish-cancelled after the
@@ -220,6 +227,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             submitted,
             submit_failed: submitFailed,
             dns_skipped: dnsSkipped,
+            dns_servfail: dnsServfail,
             rate_limited: rateLimited,
             reputation_hits: reputationHits,
             dormant_retired: dormant,

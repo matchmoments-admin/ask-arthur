@@ -313,6 +313,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         submitFailed,
         rateLimited,
         dnsSkipped,
+        dnsServfail,
         reputationHits,
         attemptedIds,
         unreached,
@@ -365,6 +366,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             submitted,
             submit_failed: submitFailed,
             dns_skipped: dnsSkipped,
+            dns_servfail: dnsServfail,
             rate_limited: rateLimited,
             unreached,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
@@ -393,6 +395,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             submitted,
             submit_failed: submitFailed,
             dns_skipped: dnsSkipped,
+            dns_servfail: dnsServfail,
             rate_limited: rateLimited,
             reputation_hits: reputationHits,
           },
