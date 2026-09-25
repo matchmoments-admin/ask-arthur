@@ -281,6 +281,9 @@ async function sendAlertWebhook(args: {
     body: payload,
     redirect: "follow-checked",
     allowRedirect: sameOriginOrUpgrade,
+    // Belt and braces: allowRedirect already refuses other origins, but the
+    // signature must never ride a hop that leaves this one.
+    sensitiveHeaders: ["x-askarthur-signature"],
     as: "none",
     timeoutMs: 5000,
   });

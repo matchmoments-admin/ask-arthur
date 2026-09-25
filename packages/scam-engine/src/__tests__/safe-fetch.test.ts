@@ -190,6 +190,41 @@ describe("safeFetch — redirect hygiene", () => {
     expect(seen[1]).toMatchObject({ url: "https://b.example/elsewhere", method: "GET", body: undefined });
   });
 
+  it("caller-marked sensitive headers are stripped on a cross-origin hop, kept on same origin / upgrade", async () => {
+    const { impl, seen } = recording({
+      "http://a.example/hook": redirect("https://a.example/hook", 308),
+      "https://a.example/hook": redirect("https://b.example/other", 307),
+      "https://b.example/other": text("ok"),
+    });
+    await safeFetch("http://a.example/hook", {
+      method: "POST",
+      body: "signed",
+      headers: { "X-AskArthur-Signature": "t=1,v1=abc", "x-askarthur-event": "e" },
+      sensitiveHeaders: ["x-askarthur-signature"],
+      timeoutMs: 1000,
+      maxBytes: 10,
+      fetchImpl: impl,
+    });
+    expect(seen.map((r) => r.headers)).toEqual([
+      { "X-AskArthur-Signature": "t=1,v1=abc", "x-askarthur-event": "e" },
+      { "X-AskArthur-Signature": "t=1,v1=abc", "x-askarthur-event": "e" },
+      { "x-askarthur-event": "e" },
+    ]);
+  });
+
+  it("sensitiveHeaders does not trigger the credential throw", async () => {
+    const ok = routes({ "https://a.example/": text("x") });
+    expect(
+      await safeFetch("https://a.example/", {
+        headers: { "x-askarthur-signature": "s" },
+        sensitiveHeaders: ["x-askarthur-signature"],
+        timeoutMs: 1000,
+        maxBytes: 10,
+        fetchImpl: ok,
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
   it("a same-origin 307 and an http→https upgrade keep method and body", async () => {
     const { impl, seen } = recording({
       "http://a.example/hook": redirect("https://a.example/hook", 308),
@@ -243,6 +278,34 @@ describe("safeFetch — body", () => {
     expect(bytes.ok && bytes.body.byteLength).toBe(0);
     expect(await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, as: "json", fetchImpl: impl }))
       .toMatchObject({ ok: false, reason: "invalid_json", detail: "empty-body" });
+  });
+
+  it("a throwing beforeBody is a typed rejection and the body is never read", async () => {
+    let pulled = false;
+    const impl = routes({
+      "https://a.example/": () =>
+        new Response(
+          new ReadableStream(
+            {
+              pull(c) {
+                pulled = true;
+                c.close();
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+    });
+    const r = await safeFetch("https://a.example/", {
+      timeoutMs: 1000,
+      maxBytes: 10,
+      beforeBody: () => {
+        throw new Error("bad header parse");
+      },
+      fetchImpl: impl,
+    });
+    expect(r).toMatchObject({ ok: false, reason: "rejected", detail: "before-body-threw" });
+    expect(pulled).toBe(false);
   });
 
   it("beforeBody refuses from headers without reading a byte", async () => {

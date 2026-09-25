@@ -200,7 +200,7 @@ const FIXED_HOST: Allowlist = {
     ],
   },
   "packages/mcp-audit/src/scanner.ts": {
-    reason: "npm registry (package name URL-encoded into the path) and OSV API \u2014 fixed hosts.",
+    reason: "npm registry (package name URL-encoded into the path) and OSV API — fixed hosts.",
     calls: [
       "const res = await fetch(`https://registry.npmjs.org/${encoded}`, {",
       "const res = await fetch(\"https://api.osv.dev/v1/querybatch\", {",
@@ -263,8 +263,9 @@ const FIXED_HOST: Allowlist = {
     ],
   },
   "apps/web/lib/hooks/useMediaAnalysis.ts": {
-    reason: "Browser \u2192 our own /api routes (relative URLs).",
+    reason: "Browser → our own /api routes (one template path) and the upload URL our own /api/media/upload returns.",
     calls: [
+      "const res = await fetch(`/api/media/status?jobId=${jobId}`);",
       "const putRes = await fetch(uploadUrl, {",
     ],
   },
@@ -312,7 +313,7 @@ const FIXED_HOST: Allowlist = {
     ],
   },
   "apps/web/app/admin/newsletter/NewsletterEditor.tsx": {
-    reason: "Browser \u2192 our own /api/admin/newsletter (constant relative path in `api`).",
+    reason: "Browser → our own /api/admin/newsletter (constant relative path in `api`).",
     calls: [
       "const response = await fetch(api, { cache: \"no-store\" });",
       "const response = await fetch(api, { method: \"POST\", headers: { \"Content-Type\": \"application/json\" }, body: JSON.stringify(action === \"prepare\" || action === \"refresh\" ? { action } : {",
@@ -359,6 +360,57 @@ const FIXED_HOST: Allowlist = {
     reason: "Resend API.",
     calls: [
       "fetch(\"https://api.resend.com/emails\", {",
+    ],
+  },
+  "apps/web/app/(marketing)/spf-compliance/SpfChecker.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(`/api/site-audit/email-security?domain=${encodeURIComponent(trimmed)}`);",
+    ],
+  },
+  "apps/web/app/admin/brand-outreach/BrandOutreach.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(",
+    ],
+  },
+  "apps/web/app/admin/brand-stewardship/BrandStewardshipDashboard.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(",
+      "const res = await fetch(`/api/admin/brand-stewardship/${id}/send`, {",
+      "const res = await fetch(`/api/admin/brand-stewardship/${id}/preview`);",
+    ],
+  },
+  "apps/web/app/admin/clone-watch/CloneWatchTriage.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(",
+    ],
+  },
+  "apps/web/app/admin/email-studio/EmailStudio.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(`/api/admin/email-studio/${path}`, {",
+    ],
+  },
+  "apps/web/app/app/keys/KeyList.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(`/api/keys/${id}`, { method: \"DELETE\" });",
+    ],
+  },
+  "apps/web/app/app/phone-footprint/monitors/MonitorsClient.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "await fetch(`/api/phone-footprint/monitors/${monitor.id}`, {",
+      "await fetch(`/api/phone-footprint/monitors/${monitor.id}`, { method: \"DELETE\" });",
+    ],
+  },
+  "apps/web/app/phone-footprint/LookupForm.tsx": {
+    reason: "Browser → our own route: a template path whose first segment is the literal \"/api/…\".",
+    calls: [
+      "const res = await fetch(`/api/phone-footprint/${encodeURIComponent(trimmed)}`, {",
     ],
   },
 };
@@ -484,6 +536,29 @@ describe("rawFetchSites — detector", () => {
     const [a, b, c] = rawFetchSites('fetch("/api/x"); fetch("//evil.example/x"); fetch(u);');
     expect([a.sameOrigin, b.sameOrigin, c.sameOrigin]).toEqual([true, false, false]);
   });
+
+  const sameOrigin = (src: string) => rawFetchSites(src).map((s) => s.sameOrigin);
+  it.each([
+    ["plain path", 'fetch("/api/x")'],
+    ["plain path + init", 'fetch("/api/x", { method: "POST" })'],
+    ["single quotes, spaced", "fetch( '/api/x' )"],
+    ["multi-line init", 'fetch(\n  "/api/x",\n  { cache: "no-store" },\n)'],
+  ])("exempts %s", (_l, src) => {
+    expect(sameOrigin(src)).toEqual([true]);
+  });
+  it.each([
+    ["backslash host", String.raw`fetch("/\\evil.com")`],
+    ["escaped slash", String.raw`fetch("/\/evil.com")`],
+    ["template", "fetch(`/${x}`)"],
+    ["plain template", "fetch(`/api/x`)"],
+    ["concatenation", 'fetch("/" + host)'],
+    ["&& argument", 'fetch("/" && evil)'],
+    ["ternary argument", 'fetch("/x" ? evil : 0)'],
+    ["protocol-relative", 'fetch("//evil.example")'],
+    ["dollar-brace in a string", 'fetch("/${x}")'],
+  ])("never exempts %s", (_l, src) => {
+    expect(sameOrigin(src)).toEqual([false]);
+  });
 });
 
 // Go-red: each form planted in a temp tree and run through the same walker
@@ -505,6 +580,11 @@ describe("go-red — planted fixtures", () => {
     got: 'import got from "got";\nexport const x = (u: string) => got(u);',
     // The safebrowsing.ts shape: a regex literal holding a quote and a backtick.
     afterRegex: 'const re = /https?:\\/\\/[^\\s<>"{}|\\\\^`\\[\\]]+/gi;\nexport const x = (u: string) => fetch(u);',
+    backslashPath: String.raw`export const x = () => fetch("/\\evil.com");`,
+    templatePath: "export const x = (h: string) => fetch(`/${h}`);",
+    concatPath: 'export const x = (h: string) => fetch("/" + h);',
+    andPath: 'export const x = (h: string) => fetch("/" && h);',
+    ternaryPath: 'export const x = (h: string) => fetch("/x" ? h : "");',
     afterBacktickRegex: "const re = /`/;\nexport const x = (u: string) => fetch(u);\nexport const t = `y`;",
   };
   it.each(Object.entries(forms))("flags %s", (name, src) => {

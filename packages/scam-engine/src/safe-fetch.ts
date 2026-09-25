@@ -77,6 +77,10 @@ export interface SafeFetchOptions {
    *  return false to refuse a hop (reason "redirects", detail
    *  "redirect-refused"). E.g. `sameOriginOrUpgrade` for a signed POST. */
   allowRedirect?: (from: URL, to: URL) => boolean;
+  /** Extra header names (case-insensitive) stripped on a hop to another
+   *  origin, e.g. a request signature. Always added to the credential set
+   *  (authorization, cookie, proxy-authorization); never replaces it. */
+  sensitiveHeaders?: string[];
   /** Inspect the final response's status/headers BEFORE any body byte is
    *  read (e.g. a content-type allowlist). Return a short detail string to
    *  refuse it (reason "rejected"), or undefined to accept. */
@@ -119,7 +123,7 @@ const DEFAULT_MAX_REDIRECTS = 5;
 /** The WHATWG fetch redirect limit — for callers that used `redirect: "follow"`. */
 export const FETCH_DEFAULT_MAX_REDIRECTS = 20;
 /** Credentials that must never ride a redirect to another origin. */
-const SENSITIVE_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
 
 /** `to` is `from`'s origin, or the same host upgraded from http (default
  *  port) to https (default port). Such a hop keeps the method, body and
@@ -162,7 +166,7 @@ export async function safeFetch(
     throw new Error("safeFetch: maxBytes is required unless as is \"none\"");
   }
   const sensitive = Object.keys(opts.headers ?? {}).filter((h) =>
-    SENSITIVE_HEADERS.includes(h.toLowerCase()),
+    CREDENTIAL_HEADERS.includes(h.toLowerCase()),
   );
   if (redirect === "follow-checked" && sensitive.length > 0) {
     // A credential plus automatic redirects is how a token reaches a host the
@@ -187,6 +191,10 @@ export async function safeFetch(
   let method = opts.method ?? "GET";
   let body = opts.body;
   let headers: Record<string, string> | undefined = opts.headers;
+  const stripOnCrossOrigin = new Set([
+    ...CREDENTIAL_HEADERS,
+    ...(opts.sensitiveHeaders ?? []).map((h) => h.toLowerCase()),
+  ]);
   let lastStatus: number | null = null;
   let lastHeaders: Headers | null = null;
 
@@ -273,7 +281,7 @@ export async function safeFetch(
           if (headers) {
             headers = Object.fromEntries(
               Object.entries(headers).filter(
-                ([h]) => !SENSITIVE_HEADERS.includes(h.toLowerCase()),
+                ([h]) => !stripOnCrossOrigin.has(h.toLowerCase()),
               ),
             );
           }
@@ -286,7 +294,12 @@ export async function safeFetch(
         await res.body?.cancel().catch(() => undefined);
         return fail("http", `http-${res.status}`);
       }
-      const refusal = opts.beforeBody?.(res.status, res.headers);
+      let refusal: string | undefined;
+      try {
+        refusal = opts.beforeBody?.(res.status, res.headers);
+      } catch {
+        refusal = "before-body-threw";
+      }
       if (refusal) {
         await res.body?.cancel().catch(() => undefined);
         return fail("rejected", refusal);

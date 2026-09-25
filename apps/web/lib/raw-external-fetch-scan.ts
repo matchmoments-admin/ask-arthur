@@ -268,12 +268,23 @@ export function rawFetchSites(src: string): RawFetchSite[] {
     seen.add(codeIndex);
     sites.push({ line, text: lines[line - 1].trim(), form, sameOrigin });
   };
-  // `fetch(` directly followed (in the ORIGINAL source) by "/x, '/x or `/x.
+  // Exempt only when the WHOLE first argument is one plain '…' or "…"
+  // literal naming a same-origin path: starts with "/", second char not "/"
+  // or "\\" (protocol-relative), no escapes, no "${", and the closing quote
+  // is followed only by whitespace then "," or ")". Templates, concatenation,
+  // `&&` / ternary arguments are never exempt.
   const firstArgIsSamePath = (identEnd: number): boolean => {
     if (code[identEnd] !== "(") return false;
-    const open = toks[identEnd].pos;
-    const rest = src.slice(open + 1, open + 200).replace(/^\s+/, "");
-    return /^["'`]\/(?!\/)/.test(rest);
+    let i = toks[identEnd].pos + 1;
+    while (i < src.length && /\s/.test(src[i])) i++;
+    const q = src[i];
+    if (q !== '"' && q !== "'") return false;
+    const close = src.indexOf(q, i + 1);
+    if (close < 0) return false;
+    const content = src.slice(i + 1, close);
+    if (!content.startsWith("/") || content[1] === "/" || content[1] === "\\") return false;
+    if (/[\\\n]/.test(content) || content.includes("${")) return false;
+    return /^\s*[,)]/.test(src.slice(close + 1));
   };
 
   for (const m of code.matchAll(FETCH_IDENT)) {
