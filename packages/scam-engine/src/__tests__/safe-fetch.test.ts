@@ -3,7 +3,7 @@ import http from "node:http";
 import zlib from "node:zlib";
 import type { AddressInfo } from "node:net";
 import { Agent, buildConnector } from "undici";
-import { safeFetch } from "../safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch, sameOriginOrUpgrade } from "../safe-fetch";
 import { buildSsrfConnector, buildSsrfLookup } from "../ssrf-dispatcher";
 
 // The Interface is the test surface: every case goes through safeFetch().
@@ -50,6 +50,10 @@ describe("safeFetch — guard", () => {
     "http://localhost/",
     "http://metadata.google.internal/",
     "http://instance-data/",
+    "http://localhost./",
+    "http://metadata.google.internal./",
+    "http://instance-data./",
+    "http://localhost../",
     "file:///etc/passwd",
   ])("refuses %s before any request", async (url) => {
     const impl = routes({});
@@ -127,10 +131,14 @@ describe("safeFetch — redirects", () => {
     expect(r).toMatchObject({ ok: false, reason: "redirects", detail: "loop" });
   });
 
-  it("no Location → redirects/no-location; manual mode returns the 3xx; error mode refuses", async () => {
+  it("a 3xx without Location is a final response; manual mode returns the 3xx; error mode refuses", async () => {
     const impl = routes({ "https://a.example/": () => new Response(null, { status: 302 }) });
+    // Default okStatus (2xx) → an http failure carrying the status…
     expect(await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, fetchImpl: impl }))
-      .toMatchObject({ ok: false, reason: "redirects", detail: "no-location" });
+      .toMatchObject({ ok: false, reason: "http", detail: "http-302", status: 302 });
+    // …and a caller that accepts any status (liveness) gets the response.
+    expect(await safeFetch("https://a.example/", { timeoutMs: 1000, as: "none", okStatus: () => true, fetchImpl: impl }))
+      .toMatchObject({ ok: true, status: 302 });
     const impl2 = routes({ "https://a.example/": redirect("https://b.example/") });
     const manual = await safeFetch("https://a.example/", { timeoutMs: 1000, as: "none", redirect: "manual", fetchImpl: impl2 });
     expect(manual).toMatchObject({ ok: true, status: 302 });
@@ -140,7 +148,128 @@ describe("safeFetch — redirects", () => {
   });
 });
 
+describe("safeFetch — redirect hygiene", () => {
+  /** Records method, headers and body per request. */
+  function recording(table: Record<string, () => Response>) {
+    const seen: Array<{ url: string; method: string; headers: Record<string, string>; body: unknown }> = [];
+    const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        headers: { ...((init?.headers as Record<string, string>) ?? {}) },
+        body: init?.body,
+      });
+      const make = table[String(input)];
+      if (!make) throw new TypeError(`no route for ${String(input)}`);
+      return make();
+    }) as FetchImpl;
+    return { impl, seen };
+  }
+
+  it.each(["Authorization", "cookie", "Proxy-Authorization"])(
+    "refuses %s with follow-checked (programmer error), allows it with error/manual",
+    async (h) => {
+      const headers = { [h]: "secret" };
+      await expect(
+        safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, headers, fetchImpl: routes({}) }),
+      ).rejects.toThrow(/follow-checked/);
+      const ok = routes({ "https://a.example/": text("x") });
+      expect(await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, headers, redirect: "error", fetchImpl: ok }))
+        .toMatchObject({ ok: true });
+    },
+  );
+
+  it("a cross-origin 307 drops the body and becomes a GET", async () => {
+    const { impl, seen } = recording({
+      "https://a.example/hook": redirect("https://b.example/elsewhere", 307),
+      "https://b.example/elsewhere": text("ok"),
+    });
+    await safeFetch("https://a.example/hook", {
+      method: "POST", body: "signed", headers: { "x-sig": "1" }, timeoutMs: 1000, maxBytes: 10, fetchImpl: impl,
+    });
+    expect(seen[1]).toMatchObject({ url: "https://b.example/elsewhere", method: "GET", body: undefined });
+  });
+
+  it("a same-origin 307 and an http→https upgrade keep method and body", async () => {
+    const { impl, seen } = recording({
+      "http://a.example/hook": redirect("https://a.example/hook", 308),
+      "https://a.example/hook": redirect("https://a.example/v2", 307),
+      "https://a.example/v2": text("ok"),
+    });
+    await safeFetch("http://a.example/hook", {
+      method: "POST", body: "signed", timeoutMs: 1000, maxBytes: 10, fetchImpl: impl,
+    });
+    expect(seen.map((r) => [r.method, r.body])).toEqual([["POST", "signed"], ["POST", "signed"], ["POST", "signed"]]);
+  });
+
+  it("allowRedirect refuses a hop before it is requested", async () => {
+    const { impl, seen } = recording({ "https://a.example/": redirect("https://b.example/") });
+    const r = await safeFetch("https://a.example/", {
+      timeoutMs: 1000, as: "none", allowRedirect: sameOriginOrUpgrade, fetchImpl: impl,
+    });
+    expect(r).toMatchObject({ ok: false, reason: "redirects", detail: "redirect-refused" });
+    expect(seen).toHaveLength(1);
+  });
+
+  it("sameOriginOrUpgrade", () => {
+    const u = (x: string) => new URL(x);
+    expect(sameOriginOrUpgrade(u("https://a.example/x"), u("https://a.example/y"))).toBe(true);
+    expect(sameOriginOrUpgrade(u("http://a.example/x"), u("https://a.example/y"))).toBe(true);
+    expect(sameOriginOrUpgrade(u("https://a.example/x"), u("http://a.example/y"))).toBe(false);
+    expect(sameOriginOrUpgrade(u("http://a.example:8080/x"), u("https://a.example/y"))).toBe(false);
+    expect(sameOriginOrUpgrade(u("https://a.example/x"), u("https://sub.a.example/y"))).toBe(false);
+  });
+
+  it("FETCH_DEFAULT_MAX_REDIRECTS matches fetch: 20 hops follow, the 21st fails", async () => {
+    const chain = (n: number) => {
+      const t: Record<string, () => Response> = {};
+      for (let i = 0; i < n; i++) t[`https://a.example/${i}`] = redirect(`https://a.example/${i + 1}`);
+      t[`https://a.example/${n}`] = text("end");
+      return routes(t);
+    };
+    const opts = { timeoutMs: 1000, maxBytes: 10, maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS };
+    expect(await safeFetch("https://a.example/0", { ...opts, fetchImpl: chain(20) })).toMatchObject({ ok: true, body: "end" });
+    expect(await safeFetch("https://a.example/0", { ...opts, fetchImpl: chain(21) }))
+      .toMatchObject({ ok: false, reason: "redirects", detail: "limit" });
+  });
+});
+
 describe("safeFetch — body", () => {
+  it("a 204 / null body is ok and empty in every body form", async () => {
+    const impl = routes({ "https://a.example/": () => new Response(null, { status: 204 }) });
+    expect(await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, fetchImpl: impl }))
+      .toMatchObject({ ok: true, status: 204, body: "" });
+    const bytes = await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, as: "bytes", fetchImpl: impl });
+    expect(bytes.ok && bytes.body.byteLength).toBe(0);
+    expect(await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 10, as: "json", fetchImpl: impl }))
+      .toMatchObject({ ok: false, reason: "invalid_json", detail: "empty-body" });
+  });
+
+  it("beforeBody refuses from headers without reading a byte", async () => {
+    let pulled = false;
+    const impl = routes({
+      "https://a.example/": () =>
+        new Response(
+          new ReadableStream({
+            pull(c) {
+              pulled = true;
+              c.enqueue(new Uint8Array(4));
+              c.close();
+            },
+          }, { highWaterMark: 0 }),
+          { headers: { "content-type": "text/html" } },
+        ),
+    });
+    const r = await safeFetch("https://a.example/", {
+      timeoutMs: 1000,
+      maxBytes: 10,
+      beforeBody: (_s, h) => (h.get("content-type")?.startsWith("image/") ? undefined : "not-an-image"),
+      fetchImpl: impl,
+    });
+    expect(r).toMatchObject({ ok: false, reason: "rejected", detail: "not-an-image" });
+    expect(pulled).toBe(false);
+  });
+
   it("rejects an oversize chunked body (no Content-Length)", async () => {
     const impl = routes({ "https://a.example/": chunked(10, 1000) });
     expect(await safeFetch("https://a.example/", { timeoutMs: 1000, maxBytes: 5000, fetchImpl: impl }))

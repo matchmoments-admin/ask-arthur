@@ -1,6 +1,6 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -75,6 +75,8 @@ async function fetchSecurityTxt(domain: string): Promise<string | null> {
     maxBytes: 64 * 1024,
     truncate: true,
     redirect: "follow-checked",
+    // Was a plain redirect: "follow" — keep fetch's hop limit.
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
     headers: { "user-agent": "AskArthur security-contact discovery (askarthur.au)" },
     as: "text",
   });

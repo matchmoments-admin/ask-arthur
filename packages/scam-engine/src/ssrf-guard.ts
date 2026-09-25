@@ -50,7 +50,9 @@ export function checkOutboundUrl(rawUrl: string): OutboundUrlCheck {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { ok: false, reason: `Blocked scheme: ${parsed.protocol}` };
   }
-  const hostname = parsed.hostname.toLowerCase();
+  // A fully-qualified name ("localhost.", "metadata.google.internal.")
+  // resolves exactly like the bare one, so compare without trailing dots.
+  const hostname = parsed.hostname.toLowerCase().replace(/\.+$/, "");
   if (BLOCKED_HOSTS.has(hostname)) {
     return { ok: false, reason: `Blocked host: ${hostname}` };
   }

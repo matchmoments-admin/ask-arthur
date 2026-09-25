@@ -1,6 +1,6 @@
 // security.txt check — validate RFC 9116 security policy file
 
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import type { CheckResult } from "../types";
 
 const FETCH_TIMEOUT_MS = 3000;
@@ -15,6 +15,8 @@ export async function checkSecurityTxt(baseUrl: string): Promise<CheckResult> {
     const res = await safeFetch(url, {
       method: "GET",
       redirect: "follow-checked",
+      // Was a plain redirect: "follow" — keep fetch's hop limit.
+      maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
       timeoutMs: FETCH_TIMEOUT_MS,
       maxBytes: MAX_BYTES,
       truncate: true,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import {
   detectInjectionAttempt,
@@ -116,6 +116,8 @@ async function fetchPageText(url: string): Promise<{ url: string; text: string |
       Accept: "text/html,application/xhtml+xml,text/plain",
     },
     redirect: "follow-checked",
+    // Was a plain redirect: "follow" — keep fetch's hop limit.
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
     timeoutMs: FETCH_TIMEOUT_MS,
     // Only the first MAX_PAGE_TEXT_LENGTH chars of text survive stripping;
     // never pull more than this much markup.

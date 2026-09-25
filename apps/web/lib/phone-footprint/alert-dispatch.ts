@@ -16,7 +16,7 @@ import { createHmac } from "node:crypto";
 import { Resend } from "resend";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { safeFetch, sameOriginOrUpgrade } from "@askarthur/scam-engine/safe-fetch";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import type {
   Footprint,
@@ -268,7 +268,9 @@ async function sendAlertWebhook(args: {
   const signatureHeader = `t=${epoch},v1=${sig}`;
 
   // The webhook URL is org-configured, so it gets the full outbound guard:
-  // private-host check, SSRF-safe dispatcher at connect, no redirects.
+  // private-host check on every hop, SSRF-safe dispatcher at connect. A
+  // redirect is followed only within the same origin or as an http→https
+  // upgrade of the same host — the signed payload never goes elsewhere.
   const res = await safeFetch(org.fleet_webhook_url, {
     method: "POST",
     headers: {
@@ -277,7 +279,8 @@ async function sendAlertWebhook(args: {
       "x-askarthur-event": "phone-footprint.alert.v1",
     },
     body: payload,
-    redirect: "error",
+    redirect: "follow-checked",
+    allowRedirect: sameOriginOrUpgrade,
     as: "none",
     timeoutMs: 5000,
   });

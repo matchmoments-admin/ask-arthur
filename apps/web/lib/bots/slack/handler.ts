@@ -1,7 +1,7 @@
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { logger } from "@askarthur/utils/logger";
 
 // Slack's slash-command webhook hands us a `response_url` we POST the
@@ -85,15 +85,18 @@ export async function handleSlashCommand(payload: SlackSlashPayload): Promise<vo
  * POST to a Slack `response_url`. Shared by the slash-command handler and the
  * message-shortcut route. safeFetch enforces the host allowlist (Slack
  * response_urls are always hooks.slack.com), the private-host guard, the
- * SSRF-safe dispatcher at connect, no redirects, and a timeout.
+ * SSRF-safe dispatcher at connect, per-hop redirect checks (every hop must
+ * stay on the allowlist), and a timeout.
  */
 export async function postToResponseUrl(url: string, body: unknown): Promise<void> {
   const res = await safeFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    // Every hop must stay on hooks.slack.com; fetch's default hop limit.
     allowHosts: SLACK_RESPONSE_HOSTS,
-    redirect: "error",
+    redirect: "follow-checked",
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
     as: "none",
     timeoutMs: 10_000,
   });

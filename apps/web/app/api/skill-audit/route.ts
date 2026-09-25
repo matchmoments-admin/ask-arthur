@@ -4,7 +4,7 @@ import { scanSkill } from "@askarthur/mcp-audit";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { readZipEntryTextCapped } from "@askarthur/utils/zip-entry-capped";
 
 const MAX_SKILL_ZIP_BYTES = 5 * 1024 * 1024;
@@ -47,6 +47,7 @@ async function fetchSkillFromGithub(owner: string, repo: string): Promise<{ cont
       try {
         const res = await safeFetch(url, {
           timeoutMs: 10_000,
+          maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
           maxBytes: MAX_SKILL_MD_BYTES,
           as: "text",
         });
@@ -184,11 +185,13 @@ export async function POST(req: NextRequest) {
         const [metaRes, versionRes] = await Promise.all([
           safeFetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}`, {
             timeoutMs: 10_000,
+            maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
             maxBytes: MAX_CLAWHUB_JSON_BYTES,
             as: "json",
           }),
           safeFetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}/versions/latest`, {
             timeoutMs: 10_000,
+            maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
             maxBytes: MAX_CLAWHUB_JSON_BYTES,
             as: "json",
           }),
@@ -209,6 +212,7 @@ export async function POST(req: NextRequest) {
         const downloadUrl = `https://clawhub.ai/api/v1/download?slug=${cleanSlug}`;
         const dl = await safeFetch(downloadUrl, {
           timeoutMs: 15_000,
+          maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
           maxBytes: MAX_SKILL_ZIP_BYTES,
           as: "bytes",
         });
@@ -221,13 +225,13 @@ export async function POST(req: NextRequest) {
         // UNCOMPRESSED size — a small archive can inflate without limit.
         if (!dl.ok) {
           if (dl.reason === "too_large") return skillTooLarge("package");
-          if (dl.reason === "no_body") {
-            return skillNotAssessed("ClawHub returned an empty package, so it was not assessed.", 502);
-          }
           return skillNotAssessed(
             `Could not download "${cleanSlug}" from ClawHub (${dl.status ?? dl.detail}), so it was not assessed.`,
             502,
           );
+        }
+        if (dl.body.byteLength === 0) {
+          return skillNotAssessed("ClawHub returned an empty package, so it was not assessed.", 502);
         }
         const zipBody = { bytes: dl.body };
         const zip = await JSZip.loadAsync(zipBody.bytes);

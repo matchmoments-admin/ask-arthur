@@ -71,6 +71,11 @@ export async function fetchShopPage(
     as: "text",
   });
   if (r.ok) {
+    // safeFetch reads a 204 / null body as ""; this fetcher has always called
+    // a page with nothing in it a failure.
+    if (r.body === "") {
+      return { html: null, finalUrl: r.finalUrl, status: r.status, error: "empty-body" };
+    }
     return { html: r.body, finalUrl: r.finalUrl, status: r.status, error: null };
   }
   const error = legacyFetchError(r);
@@ -99,17 +104,18 @@ export function legacyFetchError(r: Extract<SafeFetchResult<unknown>, { ok: fals
       if (r.detail === "private-redirect") return "blocked-private-redirect";
       return "network-error"; // refused at connect (resolved to a private IP)
     case "redirects":
-      if (r.detail === "no-location") return "redirect-no-location";
       if (r.detail === "invalid-location") return "invalid-redirect";
       return "too-many-redirects"; // limit, or a loop (which used to run to the limit)
     case "http":
+      // A 3xx without Location is returned as a final response by safeFetch.
+      if (r.status !== null && r.status >= 300 && r.status < 400 && !r.headers?.get("location")) {
+        return "redirect-no-location";
+      }
       return `http-${r.status}`;
-    case "no_body":
-      return "empty-body";
     case "too_large":
       return "body-too-large";
     case "invalid_json":
-      return "invalid-json";
+      return r.detail === "empty-body" ? "empty-body" : "invalid-json";
     case "timeout":
       return "timeout";
     default:
@@ -121,7 +127,6 @@ function keepsFinalUrl(r: Extract<SafeFetchResult<unknown>, { ok: false }>): boo
   return (
     r.reason === "http" ||
     r.reason === "redirects" ||
-    r.reason === "no_body" ||
     (r.reason === "blocked" && r.detail === "private-redirect")
   );
 }

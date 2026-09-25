@@ -1,6 +1,6 @@
 // Exposed admin path detection — HEAD requests to common sensitive paths
 
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import type { CheckResult } from "../types";
 
 // Common paths that should not be publicly accessible
@@ -46,6 +46,8 @@ export async function checkExposedAdminPaths(
       const res = await safeFetch(url, {
         method: "HEAD",
         redirect: "follow-checked",
+        // Was a plain redirect: "follow" — keep fetch's hop limit.
+        maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
         as: "none",
         timeoutMs,
       });

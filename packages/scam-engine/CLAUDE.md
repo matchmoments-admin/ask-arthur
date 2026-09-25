@@ -9,7 +9,7 @@ Scoped guidance for the scam-engine package — Claude AI integration, threat en
 - **Pipeline writes** — `pipeline.ts` (scrubs PII, normalises, calls RPCs to persist scam reports / entities / wallets / IPs)
 - **Inngest durable functions** — under `src/inngest/` (28+ functions: enrichment, cron, retention, embeddings, brand alerts)
 - **Sub-domain modules** — `news-intel/`, `phone-footprint/`
-- **Outbound Fetch Module** — `safe-fetch.ts` (`@askarthur/scam-engine/safe-fetch`) is the ONE way to fetch a URL we don't control: guard on every redirect hop, `ssrfSafeDispatcher`, streamed byte cap, one timeout. `ssrf-guard.ts` holds the single host blocklist (`checkOutboundUrl` / `assertSafeURL`). A raw `fetch(` outside it fails `apps/web/__tests__/noRawExternalFetch.test.ts` unless the file is on its fixed-host allowlist with a reason.
+- **Outbound Fetch Module** — `safe-fetch.ts` (`@askarthur/scam-engine/safe-fetch`) is the ONE way to fetch a URL we don't control: guard on every redirect hop, `ssrfSafeDispatcher`, streamed byte cap, one timeout. `ssrf-guard.ts` holds the single host blocklist (`checkOutboundUrl` / `assertSafeURL`). A raw `fetch(` outside it fails `apps/web/__tests__/noRawExternalFetch.test.ts` unless that CALL SITE (file + source line) is on its fixed-host allowlist with a reason, or is a same-origin `"/…"` call.
 
 ## What it doesn't own
 

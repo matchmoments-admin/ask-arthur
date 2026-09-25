@@ -37,6 +37,15 @@ describe("probeLivenessVerdict", () => {
     });
   });
 
+  it("treats a 302 with no Location as proved live (a final response, not a failure)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 302 })));
+    expect(await probeLivenessVerdict("https://parked.example/")).toEqual({
+      live: true,
+      reason: "http",
+      status: 302,
+    });
+  });
+
   it("treats a 5xx as inconclusive, not dead — reachable but not serving", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 502 })));
     const v = await probeLivenessVerdict("https://5xx.example/");

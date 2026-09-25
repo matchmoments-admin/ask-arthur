@@ -1,5 +1,5 @@
 import { logger } from "@askarthur/utils/logger";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const DOWNLOAD_TIMEOUT_MS = 10_000;
@@ -27,6 +27,7 @@ export async function downloadMessengerAttachment(url: string): Promise<string |
     // streams the body with a hard cap.
     const res = await safeFetch(url, {
       timeoutMs: DOWNLOAD_TIMEOUT_MS,
+      maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
       maxBytes: MAX_FILE_SIZE,
       as: "bytes",
     });

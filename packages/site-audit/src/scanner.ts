@@ -1,7 +1,7 @@
 // Site audit scanner orchestrator — runs all checks via Promise.allSettled
 
 import { isPrivateURL } from "@askarthur/scam-engine/safebrowsing";
-import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 
 /** Enough for every header/meta/script check; larger pages are truncated. */
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
@@ -92,6 +92,8 @@ async function attemptFetch(
     // The audit only needs the head of the document.
     truncate: true,
     redirect: "follow-checked",
+    // Was a plain redirect: "follow" — keep fetch's hop limit.
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
     okStatus: (s) => s !== 403 && s !== 429 && s !== 503,
     as: "text",
   });
