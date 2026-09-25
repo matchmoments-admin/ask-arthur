@@ -96,6 +96,10 @@ export interface AuthResultsSummary {
  * gating scan@ replies on DMARC. The FIRST verdict per method wins (the
  * receiving MTA's own header is prepended above any forwarded ones).
  */
+// LOGGING ONLY. The first spf=/dkim=/dmarc= token is taken from the
+// Authentication-Results header as delivered; unless it is proven that Email
+// Routing prepends its own header, a sender can supply one. Do not gate replies
+// on this value until a week of logs shows a Cloudflare-stamped header.
 export function summariseAuthResults(value: string | null): AuthResultsSummary {
   const verdict = (method: string): string | null => {
     if (!value) return null;
