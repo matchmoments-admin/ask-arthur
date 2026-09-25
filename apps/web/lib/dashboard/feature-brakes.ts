@@ -34,6 +34,7 @@ export const KNOWN_BRAKE_KEYS = [
   "clone_netcraft_auto",
   "clone_netcraft_issue",
   "clone_netcraft_resubmit",
+  "deepfake",
   "document_check",
   "extension_image_check",
   "hive_ai",

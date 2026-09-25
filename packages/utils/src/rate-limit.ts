@@ -12,6 +12,7 @@ let _dailyLimiter: Ratelimit | null = null;
 let _formLimiter: Ratelimit | null = null;
 let _imageUploadLimiter: Ratelimit | null = null;
 let _documentUploadLimiter: Ratelimit | null = null;
+let _deepfakeLimiter: Ratelimit | null = null;
 
 function getBurstLimiter() {
   if (!_burstLimiter) {
@@ -259,6 +260,52 @@ export async function checkDocumentUploadRateLimit(
   } catch (err) {
     logger.error("checkDocumentUploadRateLimit: store error", { error: String(err) });
     return storeUnavailable(failMode, "checkDocumentUploadRateLimit");
+  }
+}
+
+/** Audio deepfake checks call a paid vendor per request. */
+export const DEEPFAKE_LIMIT_PER_HOUR = 10;
+
+function getDeepfakeLimiter() {
+  if (!_deepfakeLimiter) {
+    _deepfakeLimiter = new Ratelimit({
+      redis: new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      }),
+      limiter: Ratelimit.slidingWindow(DEEPFAKE_LIMIT_PER_HOUR, "1 h"),
+      prefix: "askarthur:deepfake",
+      analytics: true,
+      timeout: 1000,
+    });
+  }
+  return _deepfakeLimiter;
+}
+
+export async function checkDeepfakeRateLimit(
+  ip: string,
+  failMode: FailMode = defaultFailMode()
+): Promise<RateLimitResult> {
+  // Each request can reach a paid detection vendor; same fail-closed-in-prod
+  // posture as the other paid upload paths.
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, "checkDeepfakeRateLimit");
+  }
+
+  try {
+    const result = await getDeepfakeLimiter().limit(`ip:${ip}`);
+    if (!result.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(result.reset),
+        message: "Too many audio checks. Try again later.",
+      };
+    }
+    return { allowed: true, remaining: result.remaining, resetAt: null };
+  } catch (err) {
+    logger.error("checkDeepfakeRateLimit: store error", { error: String(err) });
+    return storeUnavailable(failMode, "checkDeepfakeRateLimit");
   }
 }
 

@@ -69,3 +69,93 @@ describe("extractPdfText", () => {
     expect(await extractPdfText(buildTextPdf([]))).toBeNull();
   });
 });
+
+describe("readPdfPages — bounded work", () => {
+  const fakeDoc = (numPages: number, textPerPage = "page text") => {
+    const read: number[] = [];
+    return {
+      read,
+      doc: {
+        numPages,
+        async getPage(n: number) {
+          read.push(n);
+          return {
+            async getTextContent() {
+              return { items: [{ str: `${textPerPage} ${n}`, hasEOL: true }] };
+            },
+          };
+        },
+      },
+    };
+  };
+
+  it("never touches a page beyond the cap", async () => {
+    const { readPdfPages } = await import("../document-check/pdf-text");
+    const f = fakeDoc(5000);
+    const out = await readPdfPages(f.doc, 20);
+    expect(f.read).toHaveLength(20);
+    expect(Math.max(...f.read)).toBe(20);
+    expect(out).toContain("page text 20");
+    expect(out).not.toContain("page text 21");
+  });
+
+  it("stops at the character cap", async () => {
+    const { readPdfPages } = await import("../document-check/pdf-text");
+    const f = fakeDoc(50, "x".repeat(1000));
+    await readPdfPages(f.doc, 50, 2500);
+    expect(f.read.length).toBeLessThanOrEqual(3);
+  });
+
+  it("stops when told to (the timeout)", async () => {
+    const { readPdfPages } = await import("../document-check/pdf-text");
+    const f = fakeDoc(50);
+    let calls = 0;
+    await readPdfPages(f.doc, 50, 200_000, () => ++calls > 3);
+    expect(f.read).toHaveLength(3);
+  });
+});
+
+describe("extractPdfText — a load that outlives the timeout", () => {
+  it("destroys the document when the load resolves after the timeout", async () => {
+    const { extractPdfText } = await import("../document-check/pdf-text");
+    let destroyed = false;
+    let resolveLoad!: (d: unknown) => void;
+    const loadDocument = () =>
+      new Promise((r) => {
+        resolveLoad = r;
+      }) as never;
+
+    const out = await extractPdfText(Buffer.from("%PDF-1.4"), { timeoutMs: 20, loadDocument });
+    expect(out).toBeNull(); // timed out → not assessed
+
+    resolveLoad({
+      numPages: 1,
+      getPage: async () => ({ getTextContent: async () => ({ items: [] }) }),
+      loadingTask: {
+        destroy: async () => {
+          destroyed = true;
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(destroyed).toBe(true);
+  });
+
+  it("destroys the document after a normal extraction too", async () => {
+    const { extractPdfText } = await import("../document-check/pdf-text");
+    let destroyed = false;
+    const out = await extractPdfText(Buffer.from("%PDF-1.4"), {
+      loadDocument: async () => ({
+        numPages: 1,
+        getPage: async () => ({ getTextContent: async () => ({ items: [{ str: "hello" }] }) }),
+        loadingTask: {
+          destroy: async () => {
+            destroyed = true;
+          },
+        },
+      }),
+    });
+    expect(out).toBe("hello");
+    expect(destroyed).toBe(true);
+  });
+});

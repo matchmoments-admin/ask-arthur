@@ -1,7 +1,10 @@
 import { logger } from "@askarthur/utils/logger";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { readBodyCapped } from "@askarthur/utils/read-body-capped";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const DOWNLOAD_TIMEOUT_MS = 10_000;
 
 const SUPPORTED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -25,7 +28,10 @@ export async function downloadMessengerAttachment(url: string): Promise<string |
     // internal/metadata hosts at zero cost in case the trust posture ever changes.
     assertSafeURL(url);
 
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
+    });
     if (!response.ok) {
       logger.error("Messenger attachment download failed", { status: response.status });
       return null;
@@ -40,20 +46,14 @@ export async function downloadMessengerAttachment(url: string): Promise<string |
       return null;
     }
 
-    // Bail before buffering if the server declares an over-limit size.
-    const declaredSize = Number(response.headers.get("content-length") ?? 0);
-    if (declaredSize > MAX_FILE_SIZE) {
-      logger.warn("Messenger attachment: declared size too large", { size: declaredSize });
+    // Streamed with a hard cap — a declared Content-Length is advisory.
+    const body = await readBodyCapped(response, MAX_FILE_SIZE);
+    if (!body.ok) {
+      logger.warn("Messenger attachment: file too large or empty", { reason: body.reason });
       return null;
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > MAX_FILE_SIZE) {
-      logger.warn("Messenger attachment: file too large", { size: buffer.length });
-      return null;
-    }
-
-    return buffer.toString("base64");
+    return Buffer.from(body.bytes).toString("base64");
   } catch (err) {
     logger.error("Messenger attachment download error", { error: String(err) });
     return null;

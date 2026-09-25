@@ -17,6 +17,7 @@ import SiteAuditProgress from "./SiteAuditProgress";
 import SiteAuditReport from "./SiteAuditReport";
 import type { SiteAuditResult } from "./SiteAuditReport";
 import ScanResultReport from "./ScanResultReport";
+import { apiErrorMessage } from "@/lib/api-error-message";
 
 type Status = "idle" | "scanning" | "complete" | "error" | "rate_limited";
 
@@ -100,7 +101,7 @@ export default function UniversalScanner() {
           }
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            throw new Error(data.message || "Scan failed");
+            throw new Error(apiErrorMessage(data));
           }
 
           // Parse SSE stream
@@ -137,7 +138,7 @@ export default function UniversalScanner() {
                 }
                 if (eventType === "share") setShareUrl(parsed.url);
                 if (eventType === "error") {
-                  setErrorMsg(parsed.message || "Scan failed");
+                  setErrorMsg(apiErrorMessage(parsed));
                   setStatus("error");
                 }
               } catch {
@@ -178,7 +179,7 @@ export default function UniversalScanner() {
           }
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            throw new Error(data.message || "Scan failed");
+            throw new Error(apiErrorMessage(data));
           }
 
           const data = await res.json();

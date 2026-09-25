@@ -2,6 +2,10 @@
 
 import { isPrivateURL } from "@askarthur/scam-engine/safebrowsing";
 import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
+import { readTextCapped } from "@askarthur/utils/read-body-capped";
+
+/** Enough for every header/meta/script check; larger pages are truncated. */
+const MAX_HTML_BYTES = 2 * 1024 * 1024;
 import { extractDomain } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
 import { checkSecurityHeaders } from "./checks/security-headers";
@@ -92,14 +96,18 @@ async function attemptFetch(
       ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
     });
 
-    clearTimeout(fetchTimeout);
-
     // Treat 403/429/503 as blocked
     if (res.status === 403 || res.status === 429 || res.status === 503) {
+      clearTimeout(fetchTimeout);
+      await res.body?.cancel().catch(() => undefined);
       return { ok: false, error: new Error(`HTTP ${res.status}`), statusCode: res.status };
     }
 
-    const html = await res.text();
+    // Bounded read, still inside the timeout: the audit only needs the head of
+    // the document, so an oversized page is truncated rather than failed.
+    const html =
+      (await readTextCapped(res, MAX_HTML_BYTES, { truncate: true })) ?? "";
+    clearTimeout(fetchTimeout);
     return { ok: true, headers: res.headers, html, finalUrl: res.url };
   } catch (err) {
     return { ok: false, error: err };

@@ -6,7 +6,7 @@
 // hand-roll. It runs under strict containment:
 // - only AFTER the dependency-free structural walk admitted the file;
 // - a hard timeout;
-// - page and character caps;
+// - page and character caps, enforced while reading (page by page);
 // - any failure returns null — the content layer reports "not assessed"
 //   (the ADR-0009 unverified discipline), never a finding.
 //
@@ -38,6 +38,52 @@ const MAX_CHARS = 200_000;
 interface ExtractOptions {
   timeoutMs?: number;
   maxPages?: number;
+  /** Test seam: replaces unpdf's getDocumentProxy. */
+  loadDocument?: (
+    data: Uint8Array,
+  ) => Promise<PdfDocLike & { loadingTask: { destroy(): Promise<void> } }>;
+}
+
+/** The slice of pdfjs's document proxy this module uses — narrow so tests can
+ *  drive `readPdfPages` with a fake. */
+export interface PdfDocLike {
+  numPages: number;
+  getPage(n: number): Promise<{
+    // pdfjs mixes text items with marked-content items (no `str`).
+    getTextContent(): Promise<{ items: ReadonlyArray<object> }>;
+    cleanup?(): unknown;
+  }>;
+}
+
+/**
+ * Read text page by page — at most `maxPages` pages and `maxChars`
+ * characters, stopping early once either bound is hit or `shouldStop()` turns
+ * true (the timeout). unpdf's `extractText` reads EVERY page before returning,
+ * so capping its result afterwards did not bound the work.
+ */
+export async function readPdfPages(
+  doc: PdfDocLike,
+  maxPages: number,
+  maxChars: number = MAX_CHARS,
+  shouldStop: () => boolean = () => false,
+): Promise<string> {
+  const pages = Math.min(doc.numPages, maxPages);
+  let out = "";
+  for (let i = 1; i <= pages; i++) {
+    if (shouldStop()) break;
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    let text = "";
+    for (const item of content.items) {
+      const t = item as { str?: unknown; hasEOL?: unknown };
+      if (typeof t.str !== "string") continue;
+      text += t.str + (t.hasEOL ? "\n" : "");
+    }
+    page.cleanup?.();
+    out += (out ? "\n" : "") + text;
+    if (out.length >= maxChars) break;
+  }
+  return out;
 }
 
 /** Extract plain text from a PDF, or null when extraction can't run or
@@ -51,28 +97,36 @@ export async function extractPdfText(
   const maxPages = opts.maxPages ?? MAX_PAGES;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  let loadingTask: { destroy(): Promise<void> } | undefined;
   try {
-    const { extractText, getDocumentProxy } = await import("unpdf");
-
+    const getDocumentProxy =
+      opts.loadDocument ?? (await import("unpdf")).getDocumentProxy;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("pdf_text_timeout")), timeoutMs);
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(new Error("pdf_text_timeout"));
+      }, timeoutMs);
     });
+
+    // Copy: the parser may transfer/detach the buffer it is given.
+    const loading = getDocumentProxy(new Uint8Array(buffer));
+    // A load that finishes AFTER the timeout (or after the finally below has
+    // already run) must still be released — nothing else would destroy it.
+    void loading.then(
+      (doc) => {
+        if (timedOut) void doc.loadingTask.destroy().catch(() => undefined);
+      },
+      () => undefined,
+    );
 
     const extracted = await Promise.race([
       (async () => {
-        // Copy: the parser may transfer/detach the buffer it is given.
-        const doc = await getDocumentProxy(new Uint8Array(buffer));
-        const pages = Math.min(doc.numPages, maxPages);
-        // mergePages:false returns per-page strings so the page cap is a
-        // real bound on work, not a post-hoc slice.
-        const { text } = await extractText(doc, { mergePages: false });
-        const chosen = Array.isArray(text) ? text.slice(0, pages) : [String(text)];
-        let out = "";
-        for (const part of chosen) {
-          out += (out ? "\n" : "") + part;
-          if (out.length >= MAX_CHARS) break;
-        }
-        return out;
+        const doc = await loading;
+        loadingTask = doc.loadingTask;
+        // Page by page, so the page cap and the timeout bound the work
+        // itself rather than trimming a result that was fully computed.
+        return readPdfPages(doc, maxPages, MAX_CHARS, () => timedOut);
       })(),
       timeout,
     ]);
@@ -85,5 +139,8 @@ export async function extractPdfText(
     return null;
   } finally {
     if (timer) clearTimeout(timer);
+    // Release the parser's resources (and abort any in-flight page work after
+    // a timeout) — a raced promise alone does not stop the work.
+    if (loadingTask) await loadingTask.destroy().catch(() => undefined);
   }
 }

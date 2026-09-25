@@ -11,6 +11,7 @@
 
 import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
 import { validateImageMagicBytes } from "./image-validate";
+import { readBodyCapped } from "@askarthur/utils/read-body-capped";
 
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_BYTES = 5_000_000;
@@ -37,11 +38,12 @@ export async function fetchImageBytes(imageUrl: string): Promise<FetchedImage | 
     });
     if (!res.ok) return null;
 
-    const declared = parseInt(res.headers.get("content-length") ?? "0", 10);
-    if (declared > MAX_BYTES) return null;
-
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0 || buffer.length > MAX_BYTES) return null;
+    // Streamed with a hard cap: a missing or wrong Content-Length can't make
+    // us buffer more than MAX_BYTES.
+    const body = await readBodyCapped(res, MAX_BYTES);
+    if (!body.ok) return null;
+    const buffer = Buffer.from(body.bytes);
+    if (buffer.length === 0) return null;
 
     const base64 = buffer.toString("base64");
     const { valid } = validateImageMagicBytes(base64);

@@ -346,3 +346,15 @@ describe("classifySubmitPrecheck", () => {
   });
 });
 
+// Candidate URLs are attacker-registered and the probe follows redirects, so
+// every fetch must go through the SSRF-safe dispatcher.
+describe("probeLivenessVerdict — outbound guard", () => {
+  it("fetches through the SSRF-safe dispatcher", async () => {
+    const { ssrfSafeDispatcher } = await import("@askarthur/scam-engine/ssrf-dispatcher");
+    const fetchMock = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await probeLivenessVerdict("https://up.example/", RESOLVES);
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as { dispatcher?: unknown };
+    expect(init.dispatcher).toBe(ssrfSafeDispatcher);
+  });
+});
