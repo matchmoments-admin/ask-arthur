@@ -9,19 +9,26 @@
 #   3. Or create per-tag rules: acsc+ingest@..., scamwatch+ingest@..., etc.
 #   4. wrangler secret put INBOUND_EMAIL_WEBHOOK_SECRET
 #   5. wrangler secret put SUPABASE_EDGE_FUNCTION_URL
-#   6. wrangler deploy
+#   6. Verify the quarantine inbox as an Email Routing destination address,
+#      then set QUARANTINE_ADDRESS under [vars] below.
+#   7. wrangler deploy
 
 name = "askarthur-intel-inbound-email"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Email Routing binding — Cloudflare routes inbound messages to this Worker's
-# email() handler. No queue/KV needed for the MVP.
-[[send_email]]
-name = "QUARANTINE_FORWARDER"
-# Optional: forward parse failures to an operator inbox. Uncomment when set up.
-# destination_address = "ops@askarthur.au"
+# Quarantine: messages the Worker cannot deliver (MIME parse failure, missing
+# scan endpoint, fetch error, 5xx from the target) are forwarded with
+# `message.forward(QUARANTINE_ADDRESS)` for manual replay. The address MUST be
+# a VERIFIED destination address in Cloudflare Email Routing (dashboard →
+# Email → Email Routing → Destination addresses) — forward() rejects any other
+# address, and the Worker logs that failure. Unset → the Worker logs loudly
+# and the message is dropped. (Replaces the old [[send_email]]
+# QUARANTINE_FORWARDER binding, whose send() could not carry an inbound
+# message and whose failures were swallowed.)
+[vars]
+# QUARANTINE_ADDRESS = "ops@askarthur.au"
 
 [observability]
 enabled = true
