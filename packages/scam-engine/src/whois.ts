@@ -1,6 +1,7 @@
 // WHOIS enrichment via whoisjson.com (1,000 free/month, no credit card)
 // Domain-level lookup — cached in scam_urls DB to avoid redundant calls.
 
+import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "./cost-log";
 
@@ -29,14 +30,99 @@ const EMPTY_RESULT: WhoisResult = {
 };
 
 /**
+ * Monthly quota guard. whoisjson's free tier is 1,000 lookups/month and the
+ * fleet was running ~1,200–1,300 (2026-09 review): past the cap every caller
+ * silently got nothing for the rest of the month. Callers declare a priority so
+ * batch enrichment stops early and user-facing checks keep headroom:
+ *   - `interactive` (persona-check, scam-URL reports, shop/checkout and charity
+ *     checks): may use up to 950 this month.
+ *   - `batch` (clone-watch attribution, entity/URL enrichment crons): stops at 700.
+ *
+ * The count is this month's SERVED lookups — the `whois`/`whoisjson` rows this
+ * module writes on a 200. Non-200 responses aren't counted, so the provider's
+ * own quota may be consumed faster than this counter shows; the margins below
+ * 1,000 absorb that.
+ */
+export type WhoisPriority = "interactive" | "batch";
+export const WHOISJSON_MONTHLY_GUARD: Record<WhoisPriority, number> = {
+  interactive: 950,
+  batch: 700,
+};
+const QUOTA_CACHE_MS = 10 * 60 * 1000;
+let quotaCache: { month: string; count: number; fetchedAt: number } | null = null;
+let lastGuardWarnKey: string | null = null;
+
+/** Reset the in-process quota cache — tests only. */
+export function __resetWhoisQuotaCacheForTests(): void {
+  quotaCache = null;
+  lastGuardWarnKey = null;
+}
+
+function monthKey(now: Date): string {
+  return now.toISOString().slice(0, 7);
+}
+
+/** This month's served whoisjson lookups, or null when the count can't be
+ *  read (the guard then fails OPEN — a telemetry blip must not stop lookups). */
+async function whoisjsonUsedThisMonth(now: Date): Promise<number | null> {
+  const month = monthKey(now);
+  if (
+    quotaCache &&
+    quotaCache.month === month &&
+    now.getTime() - quotaCache.fetchedAt < QUOTA_CACHE_MS
+  ) {
+    return quotaCache.count;
+  }
+  const sb = createServiceClient();
+  if (!sb) return null;
+  const start = `${month}-01T00:00:00.000Z`;
+  const { count, error } = await sb
+    .from("cost_telemetry")
+    .select("id", { count: "exact", head: true })
+    .eq("feature", "whois")
+    .eq("provider", "whoisjson")
+    .gte("created_at", start);
+  // A failed head-count returns count=null with NO error (204, no body) — the
+  // null is the signal, not `error` (memory: head-count failures carry no error).
+  if (error || count === null) {
+    logger.warn("whoisjson quota count unavailable — guard open", {
+      error: error?.message ?? "count null",
+    });
+    return null;
+  }
+  quotaCache = { month, count, fetchedAt: now.getTime() };
+  return count;
+}
+
+/**
  * Look up WHOIS data for a domain via whoisjson.com.
  * Free tier: 1,000 requests/month, 20 req/min rate limit.
  * 5s timeout, non-blocking — failures return empty result.
  */
-export async function lookupWhois(domain: string): Promise<WhoisResult> {
+export async function lookupWhois(
+  domain: string,
+  opts: { priority?: WhoisPriority } = {},
+): Promise<WhoisResult> {
+  const priority: WhoisPriority = opts.priority ?? "interactive";
   const apiKey = process.env.WHOIS_API_KEY;
   if (!apiKey) {
     logger.warn("WHOIS_API_KEY not set, skipping WHOIS lookup");
+    return EMPTY_RESULT;
+  }
+
+  const now = new Date();
+  const used = await whoisjsonUsedThisMonth(now);
+  const guard = WHOISJSON_MONTHLY_GUARD[priority];
+  if (used !== null && used >= guard) {
+    const warnKey = `${monthKey(now)}:${priority}`;
+    if (lastGuardWarnKey !== warnKey) {
+      lastGuardWarnKey = warnKey;
+      logger.warn("whoisjson monthly guard reached — lookups skipped until next month", {
+        used,
+        guard,
+        priority,
+      });
+    }
     return EMPTY_RESULT;
   }
 
@@ -64,6 +150,7 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
     // chain, entity-enrichment, and persona-check all drive it. This is the
     // fleet-review "no cost signal → invisible" lesson applied to a free API.
     // Fire-and-forget (void) — telemetry never adds latency to or breaks the lookup.
+    if (quotaCache && quotaCache.month === monthKey(now)) quotaCache.count += 1;
     void logCost({
       feature: "whois",
       provider: "whoisjson",

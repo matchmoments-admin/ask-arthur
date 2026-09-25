@@ -1,0 +1,104 @@
+import { readFileSync } from "node:fs";
+import { PGlite } from "@electric-sql/pglite";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+// Runs the REAL v326 recheck worklist SQL (worklist-gate-starvation rule: an
+// exclusion must be counted, and the rows it keeps must still rotate).
+const migration = (name: string) =>
+  readFileSync(new URL(`../../../supabase/${name}`, import.meta.url), "utf8");
+
+let db: PGlite;
+beforeAll(async () => {
+  db = new PGlite();
+  await db.exec(`
+    CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+    CREATE TABLE shopfront_clone_alerts (
+      id bigint PRIMARY KEY, candidate_domain text, candidate_url text,
+      source text DEFAULT 'nrd', lifecycle_state text DEFAULT 'declined',
+      urlscan_classification text, urlscan_uuid text, urlscan_evidence jsonb,
+      urlscan_failure_streak integer DEFAULT 0, recheck_count integer DEFAULT 0,
+      last_rechecked_at timestamptz, first_seen_at timestamptz DEFAULT now(),
+      signals jsonb, attribution jsonb, inferred_target_domain text
+    );
+    CREATE TABLE clone_watch_classifications (
+      alert_id bigint, is_clone boolean, confidence real, attack_intent text, clone_tactic text
+    );
+    CREATE TABLE known_brands (brand_domain text, brand_category text);
+  `);
+  await db.exec(migration("migration-v326-recheck-dead-dormancy-and-age-taper.sql"));
+}, 30_000);
+afterAll(async () => db?.close());
+beforeEach(async () => db.exec("DELETE FROM shopfront_clone_alerts"));
+
+type Row = {
+  id: number;
+  uuid?: string | null;
+  streak?: number;
+  status?: string | null;
+  ageDays?: number;
+  lastHoursAgo?: number | null;
+  recheckCount?: number;
+};
+async function insert(r: Row) {
+  await db.query(
+    `INSERT INTO shopfront_clone_alerts
+       (id, candidate_domain, urlscan_uuid, urlscan_failure_streak, urlscan_evidence,
+        first_seen_at, last_rechecked_at, recheck_count)
+     VALUES ($1, $2, $3, $4, $5::jsonb,
+       now() - make_interval(days => $6::int),
+       CASE WHEN $7::int IS NULL THEN NULL ELSE now() - make_interval(hours => $7::int) END,
+       $8)`,
+    [
+      r.id,
+      `d${r.id}.example`,
+      r.uuid ?? null,
+      r.streak ?? 0,
+      r.status ? JSON.stringify({ status: r.status }) : null,
+      r.ageDays ?? 1,
+      r.lastHoursAgo ?? null,
+      r.recheckCount ?? 0,
+    ],
+  );
+}
+const due = async () =>
+  (await db.query<{ id: number }>("SELECT id FROM list_clone_alerts_for_recheck(500, 6, 168)"))
+    .rows.map((r) => Number(r.id));
+const dormant = async () =>
+  (await db.query<{ n: number }>("SELECT count_clone_recheck_dormant_dead() AS n")).rows[0]!.n;
+
+describe("v326 recheck worklist", () => {
+  it("holds out a never-scanned 400 row with streak >= 8, and counts it", async () => {
+    await insert({ id: 1, uuid: null, streak: 8, status: "400" });
+    await insert({ id: 2, uuid: null, streak: 7, status: "400" }); // still inside the window
+    expect(await due()).toEqual([2]);
+    expect(await dormant()).toBe(1);
+  });
+
+  it("never holds out a row that has a scan uuid, a non-400 or a NULL status", async () => {
+    await insert({ id: 1, uuid: "scan-1", streak: 12, status: "400" });
+    await insert({ id: 2, uuid: null, streak: 12, status: "429" });
+    await insert({ id: 3, uuid: null, streak: 12, status: null }); // no evidence at all
+    expect((await due()).sort()).toEqual([1, 2, 3]);
+    expect(await dormant()).toBe(0);
+  });
+
+  it("tapers rows older than 45 days to daily, keeps young rows at 6 h", async () => {
+    await insert({ id: 1, ageDays: 60, lastHoursAgo: 12 }); // old, rechecked 12h ago → not due
+    await insert({ id: 2, ageDays: 60, lastHoursAgo: 30 }); // old, 30h ago → due
+    await insert({ id: 3, ageDays: 10, lastHoursAgo: 12 }); // young, 12h ago → due
+    expect((await due()).sort()).toEqual([2, 3]);
+  });
+
+  it("keeps the dead (168h) and v317 backoff precedence over the taper", async () => {
+    await insert({ id: 1, ageDays: 60, lastHoursAgo: 30, status: "400", streak: 2 }); // dead cadence → not due
+    await insert({ id: 2, ageDays: 60, lastHoursAgo: 30, recheckCount: 9 }); // weekly → not due
+    expect(await due()).toEqual([]);
+  });
+
+  it("rotation: a held-out row does not block the rest of the pool", async () => {
+    for (let i = 1; i <= 5; i++) await insert({ id: i, uuid: null, streak: 20, status: "400" });
+    await insert({ id: 6 });
+    expect(await due()).toEqual([6]);
+    expect(await dormant()).toBe(5);
+  });
+});

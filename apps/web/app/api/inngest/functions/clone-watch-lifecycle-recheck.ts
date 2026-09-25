@@ -1,5 +1,5 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
-import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { LANES, recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
@@ -234,13 +234,33 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         return { skipped: true, reason: "cooldown_active" };
       }
 
-      const pool = await step.run("load-recheck-candidates", async () => {
-        const { data } = await sb.rpc("list_clone_alerts_for_recheck", {
-          p_limit: RECHECK_FETCH_LIMIT,
-          p_cadence_hours: RECHECK_CADENCE_HOURS,
-        });
-        return (data as RecheckRow[] | null) ?? [];
+      // The worklist holds out never-scanned dead rows (v326: no uuid, 400
+      // status, failure streak >= 8); the same step reads how many, so the
+      // exclusion is counted in the Outcome Row instead of being silent
+      // (worklist-gate-starvation rule). A failed count reads as null, never 0.
+      const loaded = await step.run("load-recheck-candidates", async () => {
+        const [{ data, error }, dormant] = await Promise.all([
+          sb.rpc("list_clone_alerts_for_recheck", {
+            p_limit: RECHECK_FETCH_LIMIT,
+            p_cadence_hours: RECHECK_CADENCE_HOURS,
+          }),
+          sb.rpc("count_clone_recheck_dormant_dead"),
+        ]);
+        // A failed worklist read must not look like a quiet "nothing due" run
+        // (that is exactly how a broken read hides) — record it and throw.
+        if (error) {
+          await recordLaneError("shopfront-clone-lifecycle-recheck", error.message);
+          throw new Error(`list_clone_alerts_for_recheck failed: ${error.message}`);
+        }
+        return {
+          rows: (data as RecheckRow[] | null) ?? [],
+          dormantDead:
+            !dormant.error && typeof dormant.data === "number" ? dormant.data : null,
+        };
       });
+      // A run memoised before this step returned an object replays the array.
+      const pool: RecheckRow[] = Array.isArray(loaded) ? loaded : loaded.rows;
+      const dormantDead: number | null = Array.isArray(loaded) ? null : loaded.dormantDead;
 
       if (pool.length === 0) {
         // Quiet-run Outcome Row (#1145/#1166): "nothing due" used to write
@@ -254,6 +274,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             rechecked: 0,
             submitted: 0,
             submit_failed: 0,
+            dormant_dead: dormantDead,
           }),
         );
         return { ok: true, rechecked: 0, reason: "nothing_due" };
@@ -369,6 +390,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             dns_servfail: dnsServfail,
             rate_limited: rateLimited,
             unreached,
+            dormant_dead: dormantDead,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
               .length,
             monitoring: candidates.filter(

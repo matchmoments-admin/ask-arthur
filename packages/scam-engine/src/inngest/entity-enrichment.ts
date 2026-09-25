@@ -88,7 +88,7 @@ async function enrichPhone(value: string): Promise<Record<string, unknown>> {
 async function enrichDomain(value: string): Promise<Record<string, unknown>> {
   const checks: Promise<unknown>[] = [
     analyzeDomain(value),
-    lookupWhois(value),
+    lookupWhois(value, { priority: "batch" }),
     checkSSL(value),
   ];
 
@@ -215,7 +215,7 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
     analyzeEmail(value),
     (async () => {
       const [whois, ssl] = await Promise.all([
-        lookupWhois(domain),
+        lookupWhois(domain, { priority: "batch" }),
         checkSSL(domain),
       ]);
       return {

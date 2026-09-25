@@ -92,7 +92,7 @@ describe("getDomainCreatedDate", () => {
     mockedWhois.mockResolvedValue(WHOIS_RESULT);
     const result = await getDomainCreatedDate("widgets.com.au");
     expect(result).toEqual({ createdDate: "2018-01-01", source: "live" });
-    expect(mockedWhois).toHaveBeenCalledWith("widgets.com.au");
+    expect(mockedWhois).toHaveBeenCalledWith("widgets.com.au", { priority: "interactive" });
   });
 
   it("does a live lookup when no Supabase client is available", async () => {

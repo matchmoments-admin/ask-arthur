@@ -145,7 +145,7 @@ export async function enrichCloneAttribution(
   now: Date = new Date(),
 ): Promise<CloneAttribution> {
   const [whois, ct, ipRep, geo, auRaw] = await Promise.all([
-    lookupDomainRegistration(domain).catch(() => null),
+    lookupDomainRegistration(domain, { priority: "batch" }).catch(() => null),
     featureFlags.ctLookup ? lookupCT(domain).catch(() => null) : null,
     hosting.ip && featureFlags.abuseIPDB
       ? checkAbuseIPDB(hosting.ip).catch(() => null)

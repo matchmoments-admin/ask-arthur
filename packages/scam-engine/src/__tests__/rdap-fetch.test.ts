@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchRdapDomain } from "../rdap";
+import { __setRdapRetryDelayForTests, fetchRdapDomain, fetchRdapDomainOutcome } from "../rdap";
 import { logCost } from "../cost-log";
 import { getRdapBootstrap } from "../rdap-bootstrap";
 
@@ -21,6 +21,8 @@ function stubFetch(impl: (url: string) => unknown) {
     vi.fn(async (url: string) => impl(url)),
   );
 }
+
+__setRdapRetryDelayForTests(() => 0);
 
 describe("fetchRdapDomain — direct-registry with rdap.org fallback", () => {
   beforeEach(() => {
@@ -110,5 +112,45 @@ describe("fetchRdapDomain — direct-registry with rdap.org fallback", () => {
 
     expect(out).toBeNull();
     expect(logCost).not.toHaveBeenCalled();
+  });
+
+  // 2026-09-26: registries 404 transiently under bursts (.shop / GMO), so a
+  // registry 404 is retried once; rdap.org is never asked after a registry 404.
+  it("registry 404 then 404 on retry → not_found, rdap.org never called", async () => {
+    vi.mocked(getRdapBootstrap).mockResolvedValue(COM_MAP);
+    const urls: string[] = [];
+    stubFetch((u) => {
+      urls.push(u);
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    const out = await fetchRdapDomainOutcome("unregistered.com");
+    expect(out).toEqual({ json: null, outcome: "not_found" });
+    expect(urls).toHaveLength(2);
+    expect(urls.some((u) => u.includes("rdap.org"))).toBe(false);
+  });
+
+  it("registry 404 then 200 on retry → found", async () => {
+    vi.mocked(getRdapBootstrap).mockResolvedValue(COM_MAP);
+    let n = 0;
+    stubFetch(() =>
+      ++n === 1
+        ? { ok: false, status: 404, json: async () => ({}) }
+        : { ok: true, json: async () => RDAP_JSON },
+    );
+    const out = await fetchRdapDomainOutcome("flaky.com");
+    expect(out.outcome).toBe("found");
+    expect(n).toBe(2);
+  });
+
+  it("registry error then rdap.org error → error", async () => {
+    vi.mocked(getRdapBootstrap).mockResolvedValue(COM_MAP);
+    stubFetch(() => ({ ok: false, status: 503, json: async () => ({}) }));
+    expect((await fetchRdapDomainOutcome("x.com")).outcome).toBe("error");
+  });
+
+  it("no registry for the TLD and rdap.org 404 → no_server", async () => {
+    vi.mocked(getRdapBootstrap).mockResolvedValue(COM_MAP);
+    stubFetch(() => ({ ok: false, status: 404, json: async () => ({}) }));
+    expect((await fetchRdapDomainOutcome("cartales.ru")).outcome).toBe("no_server");
   });
 });

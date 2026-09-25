@@ -169,17 +169,25 @@ export function parseRdapResponse(
   };
 }
 
+/** What one RDAP GET said. `not_found` is a 404 (registries return these
+ *  transiently under load, so one alone proves little); `error` is anything else that failed
+ *  (non-404 status, timeout, network), which proves nothing about the domain. */
+type RdapGet =
+  | { kind: "found"; json: RdapDomain }
+  | { kind: "not_found" }
+  | { kind: "error" };
+
 /**
- * One RDAP GET → raw JSON (or null on 404/error). `via` tags the cost row so
- * telemetry shows which path served each success (registry-direct vs the
- * rdap.org fallback). The registry server (and rdap.org's 302 target) is dialed
- * through ssrfSafeDispatcher so a hostile response can't reach internal IPs.
+ * One RDAP GET, tagged. `via` tags the cost row so telemetry shows which path
+ * served each success (registry-direct vs the rdap.org fallback). The registry
+ * server (and rdap.org's 302 target) is dialed through ssrfSafeDispatcher so a
+ * hostile response can't reach internal IPs.
  */
 async function rdapGet(
   url: string,
   domain: string,
   via: "registry" | "rdap.org",
-): Promise<RdapDomain | null> {
+): Promise<RdapGet> {
   try {
     const res = await fetch(url, {
       headers: { accept: "application/rdap+json" },
@@ -191,10 +199,9 @@ async function rdapGet(
 
     if (!res.ok) {
       // 404 = unregistered / unsupported TLD (common, not an error).
-      if (res.status !== 404) {
-        logger.warn("RDAP lookup non-200", { status: res.status, domain, via });
-      }
-      return null;
+      if (res.status === 404) return { kind: "not_found" };
+      logger.warn("RDAP lookup non-200", { status: res.status, domain, via });
+      return { kind: "error" };
     }
 
     void logCost({
@@ -206,59 +213,113 @@ async function rdapGet(
       metadata: { via },
     });
 
-    return (await res.json()) as RdapDomain;
+    return { kind: "found", json: (await res.json()) as RdapDomain };
   } catch (err) {
     logger.warn("RDAP lookup error", {
       error: err instanceof Error ? err.message : String(err),
       domain,
       via,
     });
-    return null;
+    return { kind: "error" };
   }
 }
 
 /**
- * Low-level RDAP fetch → raw JSON (or null on 404/error). Shared by lookupRdap
- * and the .au registrant lookup so the fetch + SSRF-safe dispatch + cost log
- * live in one place.
+ * How an RDAP lookup ended — the caller's fallback policy depends on it:
+ *   - `found`      RDAP answered (the record may still lack a registrar).
+ *   - `not_found`  the TLD's own registry RDAP server returned 404 twice
+ *                  (one jittered retry). Registries 404 transiently under
+ *                  bursts, so this is NOT final — callers may still ask whoisjson.
+ *   - `no_server`  the TLD has no registry RDAP server in the IANA bootstrap
+ *                  (e.g. .ru) or the bootstrap is unavailable, and rdap.org had
+ *                  nothing — RDAP can't answer for this name.
+ *   - `error`      a lookup failed (timeout / non-404 status / network).
+ */
+export type RdapOutcome = "found" | "not_found" | "no_server" | "error";
+
+/** Backoff before the single retry of a registry 404. Registry servers answer
+ *  404 transiently under bursts (2026-09-26: .shop / rdap.gmoregistry.net
+ *  404'd domains that answered 200 minutes later), so one 404 is not proof. */
+let registryRetryDelay = (): number => 1500 + Math.floor(Math.random() * 1500);
+/** Tests only: make the retry backoff immediate. */
+export function __setRdapRetryDelayForTests(fn: () => number): void {
+  registryRetryDelay = fn;
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Low-level RDAP fetch → raw JSON plus how it ended. Shared by lookupRdap and
+ * the .au registrant lookup so the fetch + SSRF-safe dispatch + cost log live in
+ * one place.
  *
  * Fast path: resolve the TLD's registry RDAP server from IANA's cached bootstrap
  * and query it DIRECTLY (registry servers don't rate-limit our burst the way the
- * shared rdap.org redirector does — see rdap-bootstrap.ts). Fallback: rdap.org,
- * which is exactly the prior behaviour, so the worst case is unchanged. The
- * registry base comes only from the IANA bootstrap (never attacker-derived), and
- * every fetch keeps ssrfSafeDispatcher; the constructed registry URL is also
- * assertSafeURL-checked.
+ * shared rdap.org redirector does — see rdap-bootstrap.ts). A registry 404 is
+ * retried once after a short jittered backoff; if it persists the lookup ends
+ * as not_found without asking rdap.org (which redirects to the same registry).
+ * On a registry ERROR, fall back to rdap.org — the
+ * prior behaviour. The registry base comes only from the IANA bootstrap (never
+ * attacker-derived), every fetch keeps ssrfSafeDispatcher, and the constructed
+ * registry URL is also assertSafeURL-checked.
  */
-export async function fetchRdapDomain(
+export async function fetchRdapDomainOutcome(
   domain: string,
-): Promise<RdapDomain | null> {
+): Promise<{ json: RdapDomain | null; outcome: RdapOutcome }> {
   const bootstrap = await getRdapBootstrap();
-  if (bootstrap) {
-    const base = resolveRegistryBase(domain, bootstrap);
-    if (base) {
-      try {
-        const url = buildRegistryDomainUrl(base, domain);
-        assertSafeURL(url); // throws → skip direct path, fall through to rdap.org
-        const result = await rdapGet(url, domain, "registry");
-        if (result !== null) return result;
-        // Registry returned null (404 or transient error): fall through to
-        // rdap.org, which 404s too on a genuinely-unregistered domain (→ null →
-        // whoisjson). One extra request only on the rare registry miss.
-      } catch (err) {
-        logger.warn("RDAP registry path skipped", {
-          error: err instanceof Error ? err.message : String(err),
-          domain,
-        });
+  const base = bootstrap ? resolveRegistryBase(domain, bootstrap) : null;
+  if (base) {
+    try {
+      const url = buildRegistryDomainUrl(base, domain);
+      assertSafeURL(url); // throws → skip direct path, fall through to rdap.org
+      let direct = await rdapGet(url, domain, "registry");
+      if (direct.kind === "not_found") {
+        // One jittered retry: a registry 404 under load is not reliably final.
+        await sleep(registryRetryDelay());
+        direct = await rdapGet(url, domain, "registry");
       }
+      if (direct.kind === "found") return { json: direct.json, outcome: "found" };
+      // Still 404 after the retry. rdap.org redirects to this same registry
+      // (0 rdap.org successes in 30 d), so it is not asked; the caller decides
+      // whether another source is worth asking.
+      if (direct.kind === "not_found") return { json: null, outcome: "not_found" };
+      // Registry error: fall through to rdap.org (one extra request only on
+      // the rare registry failure).
+    } catch (err) {
+      logger.warn("RDAP registry path skipped", {
+        error: err instanceof Error ? err.message : String(err),
+        domain,
+      });
     }
   }
 
-  return rdapGet(
+  const viaOrg = await rdapGet(
     `https://rdap.org/domain/${encodeURIComponent(domain)}`,
     domain,
     "rdap.org",
   );
+  if (viaOrg.kind === "found") return { json: viaOrg.json, outcome: "found" };
+  if (viaOrg.kind === "error") return { json: null, outcome: "error" };
+  // rdap.org 404: authoritative only when the TLD has a registry server (it
+  // redirects there); with no registry in the bootstrap it just means RDAP has
+  // nothing for this TLD.
+  return { json: null, outcome: base ? "not_found" : "no_server" };
+}
+
+/** Raw JSON (or null on 404/error) — the pre-outcome shape, kept for callers
+ *  that don't need to know why (the .au registrant lookup). */
+export async function fetchRdapDomain(
+  domain: string,
+): Promise<RdapDomain | null> {
+  return (await fetchRdapDomainOutcome(domain)).json;
+}
+
+/** Parsed RDAP plus how the lookup ended — what the whoisjson fallback policy
+ *  in domain-registration.ts needs. */
+export async function lookupRdapOutcome(
+  domain: string,
+): Promise<{ result: RdapResult | null; outcome: RdapOutcome }> {
+  const { json, outcome } = await fetchRdapDomainOutcome(domain);
+  return { result: json ? parseRdapResponse(json, domain) : null, outcome };
 }
 
 /**

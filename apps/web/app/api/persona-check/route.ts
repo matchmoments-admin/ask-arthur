@@ -166,7 +166,7 @@ async function enrichEmail(email: string): Promise<string> {
 
   const [emailIntel, whoisData] = await Promise.all([
     analyzeEmail(email),
-    lookupWhois(domain),
+    lookupWhois(domain, { priority: "interactive" }),
   ]);
 
   const lines: string[] = [`Email domain intelligence for ${domain}:`];
