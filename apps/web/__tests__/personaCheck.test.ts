@@ -18,6 +18,15 @@ vi.mock("@askarthur/scam-engine/ssrf-dispatcher", () => ({ ssrfSafeDispatcher: {
 import { POST } from "@/app/api/persona-check/route";
 import { PersonaAssessmentSchema, applyInjectionFloor } from "@/lib/persona-check";
 import { z } from "zod";
+import { buildInjectionSandwichFromBlocks } from "@askarthur/scam-engine/claude";
+
+/** The prompt callClaudeJson actually sends for the route's structured input —
+ *  assembled by the REAL builder (the route passes blocks, not a string). */
+function assembledPrompt(callIndex = 0): string {
+  const user = mocks.callClaudeJson.mock.calls[callIndex][0].user;
+  expect(typeof user, "route must pass structured blocks").toBe("object");
+  return buildInjectionSandwichFromBlocks(user.blocks, { variant: "generic" });
+}
 
 const SAFE = {
   verdict: "SAFE",
@@ -123,7 +132,7 @@ describe("POST /api/persona-check", () => {
 
   it("scrubs PII from the user's text before it is sent", async () => {
     await post({ type: "general", text: "Call me on 0412 345 678 or email a.person@example.com" });
-    const user = mocks.callClaudeJson.mock.calls[0][0].user as string;
+    const user = assembledPrompt();
     expect(user).not.toContain("0412 345 678");
     expect(user).not.toContain("a.person@example.com");
   });
@@ -166,7 +175,7 @@ describe("POST /api/persona-check — enrichment blocks and floor scope", () => 
     } finally {
       vi.unstubAllGlobals();
     }
-    const user = mocks.callClaudeJson.mock.calls[0][0].user as string;
+    const user = assembledPrompt();
     // Opening tags sit on their own line (the preamble also names the tag).
     const tags = [...user.matchAll(/\n<(fetched_page_[0-9a-f]{8})>\n/g)].map((m) => m[1]);
     expect(tags).toHaveLength(2);
@@ -174,6 +183,31 @@ describe("POST /api/persona-check — enrichment blocks and floor scope", () => 
     // Page one's text stays inside page one's block.
     const one = new RegExp(`\\n<${tags[0]}>\\n[\\s\\S]*?</${tags[0]}>`).exec(user)![0];
     expect(one).toContain("Email-domain intelligence: domain is 20 years old");
+  });
+
+  // 2026-09-24: pre-wrapped blocks passed as one string were escaped a second
+  // time by callClaudeJson's sandwich — inner tags reached the model as
+  // "&lt;fetched_page_…&gt;" text and page content as "&amp;lt;".
+  it("escapes each source exactly once: real inner tags, no double-escaped entities", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        page("Profile <b>bold</b> & more text so the page passes the minimum length. " + "d".repeat(60)),
+      ),
+    );
+    try {
+      await post({ type: "romance", text: "Is <this> real?", urls: ["https://one.example/p"] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const prompt = assembledPrompt();
+    expect(prompt).not.toMatch(/&amp;(lt|gt|amp);/);
+    expect(prompt).toMatch(/\n<fetched_page_[0-9a-f]{8}>\n/);
+    expect(prompt).toMatch(/\n<user_submission_[0-9a-f]{8}>\n/);
+    expect(prompt).toContain("Is &lt;this&gt; real?");
+    // The source URL is data inside the block, not in the code-authored preamble.
+    const block = /\n<(fetched_page_[0-9a-f]{8})>\n([\s\S]*?)\n<\/\1>/.exec(prompt)!;
+    expect(block[2]).toContain("Source URL: https://one.example/p");
   });
 
   it("does not floor on injection-like phrases that appear only on a fetched page", async () => {
