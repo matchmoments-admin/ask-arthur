@@ -50,9 +50,13 @@ Migrations that rewrite tables, take >1 min, or hold locks on a hot table must b
 
 ### 7. New objects get no anon/authenticated privileges — GRANT explicitly (v324)
 
-Since v324 (`ALTER DEFAULT PRIVILEGES FOR ROLE postgres`), tables, sequences and functions
-created in `public` get **no** privileges for `anon` / `authenticated` and no `EXECUTE` for
-`PUBLIC`. Before v324 every new table was writable through PostgREST the moment it existed
+Since v324 (`ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public`), tables,
+sequences and functions created in `public` get **no** privileges for `anon` /
+`authenticated`. `service_role` keeps its own default grants. Postgres's built-in `PUBLIC`
+EXECUTE on new functions is **not** revoked (it can't be scoped to one schema): new
+SECURITY INVOKER functions stay executable via PUBLIC — they run with the caller's rights
+and RLS applies — and SECURITY DEFINER functions are covered by the per-function
+`REVOKE … FROM PUBLIC` the migration lint requires. Before v324 every new table was writable through PostgREST the moment it existed
 (v321/v322 had to claw grants back). So:
 
 - A table the app reads with a user-scoped client needs an explicit
