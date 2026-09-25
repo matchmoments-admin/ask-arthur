@@ -32,21 +32,30 @@ const EMPTY_RESULT: WhoisResult = {
 /**
  * Monthly quota guard. whoisjson's free tier is 1,000 lookups/month and the
  * fleet was running ~1,200–1,300 (2026-09 review): past the cap every caller
- * silently got nothing for the rest of the month. Stop at a margin below it so
- * the lookups that DO matter late in the month still have headroom next month
- * rather than failing unannounced. The count is this month's served lookups
- * (the `whois`/`whoisjson` cost rows this module writes), cached briefly per
- * instance and advanced locally after each call.
+ * silently got nothing for the rest of the month. Callers declare a priority so
+ * batch enrichment stops early and user-facing checks keep headroom:
+ *   - `interactive` (persona-check, scam-URL reports, shop/checkout and charity
+ *     checks): may use up to 950 this month.
+ *   - `batch` (clone-watch attribution, entity/URL enrichment crons): stops at 700.
+ *
+ * The count is this month's SERVED lookups — the `whois`/`whoisjson` rows this
+ * module writes on a 200. Non-200 responses aren't counted, so the provider's
+ * own quota may be consumed faster than this counter shows; the margins below
+ * 1,000 absorb that.
  */
-export const WHOISJSON_MONTHLY_GUARD = 950;
+export type WhoisPriority = "interactive" | "batch";
+export const WHOISJSON_MONTHLY_GUARD: Record<WhoisPriority, number> = {
+  interactive: 950,
+  batch: 700,
+};
 const QUOTA_CACHE_MS = 10 * 60 * 1000;
 let quotaCache: { month: string; count: number; fetchedAt: number } | null = null;
-let lastGuardWarnMonth: string | null = null;
+let lastGuardWarnKey: string | null = null;
 
 /** Reset the in-process quota cache — tests only. */
 export function __resetWhoisQuotaCacheForTests(): void {
   quotaCache = null;
-  lastGuardWarnMonth = null;
+  lastGuardWarnKey = null;
 }
 
 function monthKey(now: Date): string {
@@ -90,7 +99,11 @@ async function whoisjsonUsedThisMonth(now: Date): Promise<number | null> {
  * Free tier: 1,000 requests/month, 20 req/min rate limit.
  * 5s timeout, non-blocking — failures return empty result.
  */
-export async function lookupWhois(domain: string): Promise<WhoisResult> {
+export async function lookupWhois(
+  domain: string,
+  opts: { priority?: WhoisPriority } = {},
+): Promise<WhoisResult> {
+  const priority: WhoisPriority = opts.priority ?? "interactive";
   const apiKey = process.env.WHOIS_API_KEY;
   if (!apiKey) {
     logger.warn("WHOIS_API_KEY not set, skipping WHOIS lookup");
@@ -99,13 +112,15 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
 
   const now = new Date();
   const used = await whoisjsonUsedThisMonth(now);
-  if (used !== null && used >= WHOISJSON_MONTHLY_GUARD) {
-    const month = monthKey(now);
-    if (lastGuardWarnMonth !== month) {
-      lastGuardWarnMonth = month;
+  const guard = WHOISJSON_MONTHLY_GUARD[priority];
+  if (used !== null && used >= guard) {
+    const warnKey = `${monthKey(now)}:${priority}`;
+    if (lastGuardWarnKey !== warnKey) {
+      lastGuardWarnKey = warnKey;
       logger.warn("whoisjson monthly guard reached — lookups skipped until next month", {
         used,
-        guard: WHOISJSON_MONTHLY_GUARD,
+        guard,
+        priority,
       });
     }
     return EMPTY_RESULT;

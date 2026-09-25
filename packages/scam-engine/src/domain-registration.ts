@@ -1,10 +1,11 @@
 // The single seam that decides where domain-registration data comes from.
 // RDAP-first (free, unmetered, richer — statuses / IANA id / abuse contact),
-// falling back to whoisjson (1,000/month free tier) ONLY when RDAP could not
-// answer: the TLD has no RDAP server, or the lookup errored. A definitive RDAP
-// answer — a record (even one without a registrar) or the registry's own 404 —
-// is final; whoisjson would say the same and spend quota doing it (2026-09-26:
-// ~40% of whoisjson calls were RDAP-supported TLDs re-asking after a 404). Gated by
+// falling back to whoisjson (1,000/month free tier) only when RDAP produced no
+// record: no RDAP server for the TLD, an error, or a registry 404 that
+// persisted through one retry (registries 404 transiently under bursts — .shop
+// fallbacks found data 41% of the time, 2026-09-26). An RDAP record, even one
+// without a registrar, is final (it carries statuses + name servers). The
+// fallback is subject to whoisjson's monthly guard at the caller's priority. Gated by
 // FF_RDAP_LOOKUP so it's a no-op (whoisjson only, byte-identical to before)
 // until canaried.
 //
@@ -13,7 +14,7 @@
 // resolution without duplicating it. whois-cached.ts (shop-signal /
 // charity-check) intentionally stays on whoisjson this wave.
 
-import { lookupWhois, type WhoisResult } from "./whois";
+import { lookupWhois, type WhoisPriority, type WhoisResult } from "./whois";
 import { lookupRdapOutcome, type RdapResult } from "./rdap";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
@@ -80,20 +81,20 @@ function fromRdap(rdap: RdapResult): DomainRegistration {
 
 export async function lookupDomainRegistration(
   domain: string,
+  opts: { priority?: WhoisPriority } = {},
 ): Promise<DomainRegistration> {
   if (featureFlags.rdapLookup) {
     const { result: rdap, outcome } = await lookupRdapOutcome(domain).catch(
       () => ({ result: null, outcome: "error" as const }),
     );
     if (rdap && !rdapIsEmpty(rdap)) return fromRdap(rdap);
-    // A definitive RDAP answer is final — no whoisjson call. A record without
+    // An RDAP record is final — no whoisjson call. A record without
     // registrar/created date still carries statuses + name servers.
     if (outcome === "found") return rdap ? fromRdap(rdap) : NONE;
-    if (outcome === "not_found") return NONE;
-    // no_server / error → whoisjson is the only source that can answer.
+    // not_found (after one retry) / no_server / error → whoisjson may answer.
   }
 
-  const whois = await lookupWhois(domain).catch(() => null);
+  const whois = await lookupWhois(domain, { priority: opts.priority }).catch(() => null);
   if (!whois) return NONE;
   return fromWhois(whois);
 }

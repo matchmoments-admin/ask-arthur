@@ -74,10 +74,11 @@ describe("v326 recheck worklist", () => {
     expect(await dormant()).toBe(1);
   });
 
-  it("never holds out a row that has a scan uuid or a non-400 status", async () => {
+  it("never holds out a row that has a scan uuid, a non-400 or a NULL status", async () => {
     await insert({ id: 1, uuid: "scan-1", streak: 12, status: "400" });
     await insert({ id: 2, uuid: null, streak: 12, status: "429" });
-    expect((await due()).sort()).toEqual([1, 2]);
+    await insert({ id: 3, uuid: null, streak: 12, status: null }); // no evidence at all
+    expect((await due()).sort()).toEqual([1, 2, 3]);
     expect(await dormant()).toBe(0);
   });
 

@@ -56,7 +56,7 @@ async function enrichDomain(entry: {
   const attemptedAt = new Date().toISOString();
   try {
     const [whois, ssl] = await Promise.all([
-      lookupWhois(entry.domain),
+      lookupWhois(entry.domain, { priority: "batch" }),
       checkSSL(entry.domain),
     ]);
 

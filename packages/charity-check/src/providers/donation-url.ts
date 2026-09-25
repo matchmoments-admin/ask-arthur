@@ -69,7 +69,7 @@ export const donationUrlProvider: CharityProviderContract = {
 
     const [reputationSettled, whoisSettled] = await Promise.allSettled([
       checkURLReputation([input.donationUrl]),
-      lookupWhois(domain),
+      lookupWhois(domain, { priority: "interactive" }),
     ]);
 
     const detail: Record<string, unknown> = { domain };

@@ -69,6 +69,17 @@ describe("worker recovery", () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "DB unavailable" } });
     await expect(invoke(cloneWatchUrlscanRetrieve)).rejects.toThrow("DB unavailable");
   });
+  it("fails visibly on a broken recheck worklist instead of reporting nothing_due", async () => {
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === "list_clone_alerts_for_recheck"
+        ? { data: null, error: { message: "worklist read failed" } }
+        : { data: 0, error: null },
+    );
+    await expect(invoke(cloneWatchLifecycleRecheck)).rejects.toThrow("worklist read failed");
+    expect(mocks.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ reason: "nothing_due" }) }),
+    );
+  });
   it("does not mark candidates skipped by the wall-clock guard as rechecked", async () => {
     const candidates = [1, 2].map(id => ({ id, candidate_url: `https://clone${id}.example`, candidate_domain: `clone${id}.example`, lifecycle_state: "monitoring", last_rechecked_at: null }));
     mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? candidates : null, error: null }));

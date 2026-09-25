@@ -109,7 +109,7 @@ export const onDemandUrlEnrich = inngest.createFunction(
           if (urlIds.length === 0) return { rows: 0 };
 
           const [whois, ssl] = await Promise.all([
-            lookupWhois(domain),
+            lookupWhois(domain, { priority: "batch" }),
             checkSSL(domain),
           ]);
 

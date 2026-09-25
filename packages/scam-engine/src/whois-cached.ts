@@ -94,7 +94,7 @@ export async function getDomainCreatedDate(
     }
   }
 
-  const whois = await lookupWhois(domain);
+  const whois = await lookupWhois(domain, { priority: "interactive" });
 
   if (supabase) {
     // Best-effort write-back onto rows that already exist for this domain.

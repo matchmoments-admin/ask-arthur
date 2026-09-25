@@ -12,6 +12,11 @@
 --    cadence) and a 400 status is excluded. The threshold keeps the early
 --    window where the three observed 400 → likely_phishing flips happened (at
 --    3, 9 and 80 days; all three had streaks well under 8 when they flipped).
+--    Both predicates use COALESCE(status, '') so a NULL evidence status can
+--    never make the worklist and the count disagree.
+--    Dormancy is reversible: the month-end liveness job (#1225) clears
+--    urlscan_failure_streak for dormant-dead rows whose DNS now resolves, which
+--    returns them to the pool on the next run.
 --    Nothing is deleted or re-stated: the rows keep their state, and
 --    count_clone_recheck_dormant_dead() reports how many are held out so the
 --    lane's Outcome Row makes the exclusion visible (worklist-gate-starvation
@@ -54,7 +59,7 @@ AS $function$
     AND NOT (
       sca.urlscan_uuid IS NULL
       AND sca.urlscan_failure_streak >= 8
-      AND sca.urlscan_evidence ->> 'status' = '400'
+      AND COALESCE(sca.urlscan_evidence ->> 'status', '') = '400'
     )
     AND (
       sca.last_rechecked_at IS NULL
@@ -94,7 +99,7 @@ AS $function$
     AND sca.first_seen_at > pg_catalog.now() - pg_catalog.make_interval(days => 90)
     AND sca.urlscan_uuid IS NULL
     AND sca.urlscan_failure_streak >= 8
-    AND sca.urlscan_evidence ->> 'status' = '400';
+    AND COALESCE(sca.urlscan_evidence ->> 'status', '') = '400';
 $function$;
 
 REVOKE ALL ON FUNCTION public.list_clone_alerts_for_recheck(integer, integer, integer) FROM PUBLIC, anon, authenticated;

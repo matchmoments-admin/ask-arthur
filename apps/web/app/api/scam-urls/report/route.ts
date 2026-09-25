@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
           // Fresh WHOIS + SSL lookups
           try {
             const [whois, ssl] = await Promise.all([
-              lookupWhois(norm.domain),
+              lookupWhois(norm.domain, { priority: "interactive" }),
               checkSSL(norm.domain),
             ]);
 

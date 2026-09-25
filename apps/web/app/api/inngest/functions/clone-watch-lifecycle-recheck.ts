@@ -1,5 +1,5 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
-import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import { LANES, recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
@@ -239,13 +239,19 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // exclusion is counted in the Outcome Row instead of being silent
       // (worklist-gate-starvation rule). A failed count reads as null, never 0.
       const loaded = await step.run("load-recheck-candidates", async () => {
-        const [{ data }, dormant] = await Promise.all([
+        const [{ data, error }, dormant] = await Promise.all([
           sb.rpc("list_clone_alerts_for_recheck", {
             p_limit: RECHECK_FETCH_LIMIT,
             p_cadence_hours: RECHECK_CADENCE_HOURS,
           }),
           sb.rpc("count_clone_recheck_dormant_dead"),
         ]);
+        // A failed worklist read must not look like a quiet "nothing due" run
+        // (that is exactly how a broken read hides) — record it and throw.
+        if (error) {
+          await recordLaneError("shopfront-clone-lifecycle-recheck", error.message);
+          throw new Error(`list_clone_alerts_for_recheck failed: ${error.message}`);
+        }
         return {
           rows: (data as RecheckRow[] | null) ?? [],
           dormantDead:

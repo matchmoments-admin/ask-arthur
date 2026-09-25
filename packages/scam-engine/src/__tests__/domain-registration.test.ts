@@ -79,15 +79,7 @@ describe("lookupDomainRegistration", () => {
     expect(r.statuses).toEqual(["client hold"]);
   });
 
-  it("flag ON + registry 404 (not_found) → none, whoisjson NOT called", async () => {
-    flags.rdapLookup = true;
-    lookupRdapOutcome.mockResolvedValue({ result: null, outcome: "not_found" });
-    const r = await lookupDomainRegistration("x.shop");
-    expect(lookupWhois).not.toHaveBeenCalled();
-    expect(r.source).toBe("none");
-  });
-
-  it.each(["error", "no_server"] as const)(
+  it.each(["error", "no_server", "not_found"] as const)(
     "flag ON + RDAP %s → falls back to whoisjson",
     async (outcome) => {
       flags.rdapLookup = true;
@@ -98,6 +90,14 @@ describe("lookupDomainRegistration", () => {
       expect(r.source).toBe("whoisjson");
     },
   );
+
+  it("passes the caller's priority through to the whoisjson guard", async () => {
+    flags.rdapLookup = true;
+    lookupRdapOutcome.mockResolvedValue({ result: null, outcome: "error" });
+    lookupWhois.mockResolvedValue(WHOIS);
+    await lookupDomainRegistration("x.shop", { priority: "batch" });
+    expect(lookupWhois).toHaveBeenCalledWith("x.shop", { priority: "batch" });
+  });
 
   it("flag ON + lookup throws → treated as error → whoisjson", async () => {
     flags.rdapLookup = true;
