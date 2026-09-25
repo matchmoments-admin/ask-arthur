@@ -34,7 +34,84 @@ interface Env {
    *  intel newsletter Edge Function so user-forwarded scam reports are
    *  analysed and replied to rather than written to feed_items. */
   SCAN_REPORT_ENDPOINT_URL?: string;
-  QUARANTINE_FORWARDER?: SendEmail; // optional; routes parse failures to ops@
+  /** Verified Email Routing destination that receives messages the Worker
+   *  could not deliver (parse failure, missing endpoint, fetch error, 5xx).
+   *  Must be a verified destination address in Cloudflare Email Routing —
+   *  `forward()` rejects anything else. Unset → quarantine is logged loudly
+   *  and the message is dropped. */
+  QUARANTINE_ADDRESS?: string;
+}
+
+// ── Quarantine ──────────────────────────────────────────────────────────
+
+/**
+ * Forward an undeliverable message to the operator inbox so it can be
+ * replayed. Replaces the old `send_email` binding call, which could never
+ * work: `SendEmail.send()` takes an `EmailMessage` built from
+ * `cloudflare:email`, not the inbound `ForwardableEmailMessage`, and every
+ * call's rejection was swallowed — so a 5xx from the scan endpoint silently
+ * lost the user's mail. Failures are logged, never swallowed.
+ */
+export async function quarantine(
+  message: Pick<ForwardableEmailMessage, "forward" | "to" | "from">,
+  env: Pick<Env, "QUARANTINE_ADDRESS">,
+  reason: string,
+): Promise<boolean> {
+  const address = env.QUARANTINE_ADDRESS?.trim();
+  if (!address) {
+    console.error("inbound-email: QUARANTINE_ADDRESS unset — message dropped", {
+      reason,
+      to: message.to,
+    });
+    return false;
+  }
+  try {
+    const headers = new Headers({ "X-AskArthur-Quarantine-Reason": reason });
+    await message.forward(address, headers);
+    console.warn("inbound-email: quarantined", { reason, to: message.to });
+    return true;
+  } catch (err) {
+    console.error("inbound-email: quarantine forward failed — message dropped", {
+      reason,
+      to: message.to,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+// ── Sender authentication visibility ────────────────────────────────────
+
+export interface AuthResultsSummary {
+  present: boolean;
+  spf: string | null;
+  dkim: string | null;
+  dmarc: string | null;
+}
+
+/**
+ * Verdict tokens from the `Authentication-Results` header(s) — method results
+ * only (spf=pass, dkim=fail, dmarc=pass…), never addresses or other content.
+ * Logged per message so we can learn what Email Routing supplies before
+ * gating scan@ replies on DMARC. The FIRST verdict per method wins (the
+ * receiving MTA's own header is prepended above any forwarded ones).
+ */
+// LOGGING ONLY. The first spf=/dkim=/dmarc= token is taken from the
+// Authentication-Results header as delivered; unless it is proven that Email
+// Routing prepends its own header, a sender can supply one. Do not gate replies
+// on this value until a week of logs shows a Cloudflare-stamped header.
+export function summariseAuthResults(value: string | null): AuthResultsSummary {
+  const verdict = (method: string): string | null => {
+    if (!value) return null;
+    const m = new RegExp(`(?:^|[\\s;])${method}=([a-z]+)`, "i").exec(value);
+    return m ? m[1]!.toLowerCase() : null;
+  };
+  return {
+    present: !!value,
+    spf: verdict("spf"),
+    dkim: verdict("dkim"),
+    dmarc: verdict("dmarc"),
+  };
 }
 
 // ── Source-attribution table ────────────────────────────────────────────
@@ -262,12 +339,16 @@ export default {
       to: message.to,
       from: message.from,
       headers_message_id: message.headers.get("message-id") ?? "(none)",
+      auth_results: summariseAuthResults(message.headers.get("authentication-results")),
     });
 
     let parsed: Awaited<ReturnType<PostalMime["parse"]>>;
     try {
+      // Buffer the raw stream once and parse the buffer, so nothing later in
+      // the handler depends on an already-consumed stream.
+      const raw = await new Response(message.raw).arrayBuffer();
       const parser = new PostalMime();
-      parsed = await parser.parse(message.raw as unknown as ReadableStream);
+      parsed = await parser.parse(raw);
     } catch (err) {
       console.error("inbound-email: postal-mime parse failed", {
         err: err instanceof Error ? err.message : String(err),
@@ -277,9 +358,7 @@ export default {
       // Don't 'setReject' — bouncing an inbound email could disrupt the
       // upstream subscription. Drop silently; subscription delivery
       // failures show in Cloudflare Email Routing logs.
-      if (env.QUARANTINE_FORWARDER) {
-        await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
-      }
+      await quarantine(message, env, "parse_failed");
       return;
     }
 
@@ -362,9 +441,7 @@ export default {
           externalId,
           to: payload.to,
         });
-        if (env.QUARANTINE_FORWARDER) {
-          await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
-        }
+        await quarantine(message, env, "scan_endpoint_missing");
         return;
       }
       targetUrl = env.SCAN_REPORT_ENDPOINT_URL;
@@ -410,9 +487,7 @@ export default {
         externalId,
         target_url: targetUrl,
       });
-      if (env.QUARANTINE_FORWARDER) {
-        await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
-      }
+      await quarantine(message, env, "fetch_threw");
       return;
     }
 
@@ -428,8 +503,8 @@ export default {
       // Cloudflare Email Worker runtime doesn't redeliver on its own, so
       // there's no retry storm risk either way. Quarantine on 5xx so the
       // operator can replay manually.
-      if (resp.status >= 500 && env.QUARANTINE_FORWARDER) {
-        await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
+      if (resp.status >= 500) {
+        await quarantine(message, env, `upstream_${resp.status}`);
       }
       return;
     }
