@@ -1,10 +1,17 @@
+import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import { AuthUnavailableError, getSupabaseUserOrThrow } from "@/lib/auth";
+
+const InviteBody = z.object({
+  groupId: z.string().min(1),
+  email: z.string().trim().toLowerCase().email().max(320),
+});
 
 export async function POST(req: NextRequest) {
   if (!featureFlags.familyPlan) {
@@ -32,12 +39,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { groupId: string; email: string };
+  let raw: unknown;
   try {
-    body = await req.json();
+    raw = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+  // Every invite is addressed to a real email: join only redeems a code for
+  // the account whose confirmed email matches, so an empty/invalid address
+  // must never reach the table (it would make the code redeemable by anyone).
+  const parsed = InviteBody.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "A valid groupId and email are required" }, { status: 400 });
+  }
+  const body = parsed.data;
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -66,8 +81,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Group is full" }, { status: 400 });
   }
 
-  // Generate invite code
-  const inviteCode = crypto.randomUUID().slice(0, 8).toUpperCase();
+  // 128-bit, URL-safe invite code (was 32 bits from a UUID prefix). The row's
+  // expires_at defaults to now() + 7 days (v323); join enforces it.
+  const inviteCode = randomBytes(16).toString("base64url");
 
   const { data, error } = await supabase
     .from("family_members")

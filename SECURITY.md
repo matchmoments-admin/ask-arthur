@@ -101,6 +101,7 @@ All user text is sanitized before Claude analysis:
 - Max 5 active API keys per user (enforced in `generate_api_key_record` RPC)
 - Subscription ownership verified in Paddle webhook (prevents subscription theft via customData manipulation)
 - User profile role column is immutable via RLS WITH CHECK constraint
+- **Revoke all admin sessions:** bump `ADMIN_SESSION_EPOCH` in Vercel (any new value) and redeploy with a `[build]` commit — the epoch is part of the admin-cookie HMAC key, so every outstanding HMAC admin cookie stops verifying. Only the `timestamp:nonce:hmac` cookie format is accepted.
 
 ### 4. Security Headers
 
