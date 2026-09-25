@@ -3,96 +3,6 @@ import { Redis } from "@upstash/redis";
 import { logger } from "./logger";
 import { hashIdentifier } from "./hash";
 
-// Two-tier rate limiting:
-// - Burst: 3 checks per hour (covers quick succession use case)
-// - Daily: 10 checks per day (outer safety limit)
-
-let _burstLimiter: Ratelimit | null = null;
-let _dailyLimiter: Ratelimit | null = null;
-let _formLimiter: Ratelimit | null = null;
-let _imageUploadLimiter: Ratelimit | null = null;
-let _documentUploadLimiter: Ratelimit | null = null;
-let _deepfakeLimiter: Ratelimit | null = null;
-
-function getBurstLimiter() {
-  if (!_burstLimiter) {
-    _burstLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(3, "1 h"),
-      prefix: "askarthur:burst",
-    });
-  }
-  return _burstLimiter;
-}
-
-function getDailyLimiter() {
-  if (!_dailyLimiter) {
-    _dailyLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(10, "24 h"),
-      prefix: "askarthur:daily",
-    });
-  }
-  return _dailyLimiter;
-}
-
-function getFormLimiter() {
-  if (!_formLimiter) {
-    _formLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(5, "1 h"),
-      prefix: "askarthur:form",
-    });
-  }
-  return _formLimiter;
-}
-
-function getImageUploadLimiter() {
-  if (!_imageUploadLimiter) {
-    _imageUploadLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(5, "1 h"),
-      prefix: "askarthur:image-upload",
-      analytics: true,
-      timeout: 1000,
-    });
-  }
-  return _imageUploadLimiter;
-}
-
-/** Free document checks per IP per hour. Exported so user-facing copy can
- *  state the real number instead of hardcoding one that silently drifts
- *  from the limiter. */
-export const DOCUMENT_UPLOAD_LIMIT_PER_HOUR = 5;
-
-function getDocumentUploadLimiter() {
-  if (!_documentUploadLimiter) {
-    _documentUploadLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(DOCUMENT_UPLOAD_LIMIT_PER_HOUR, "1 h"),
-      prefix: "askarthur:doc-upload",
-      analytics: true,
-      timeout: 1000,
-    });
-  }
-  return _documentUploadLimiter;
-}
-
 export type RateLimitResult = {
   allowed: boolean;
   remaining: number;
@@ -160,6 +70,130 @@ function storeUnavailable(mode: FailMode, label: string): RateLimitResult {
   };
 }
 
+// =============================================================================
+// The limiter factory — the ONE place a bucket's Upstash wiring, key shape,
+// result shaping and fail-mode handling live. Every exported check below is a
+// declaration (prefix / limit / window / message) through `defineLimiter`.
+// Before this factory each bucket hand-copied the same ~40 lines (lazy Redis,
+// env guard, try/catch, result objects); the copies are pinned, byte-for-byte
+// in behaviour, by __tests__/rate-limit-pinned.test.ts.
+// =============================================================================
+
+type Window = Parameters<typeof Ratelimit.slidingWindow>[1];
+
+export interface LimiterSpec {
+  /** Upstash key prefix — changing it resets every user's quota. */
+  prefix: string;
+  /** Sliding-window size: `limit` requests per `window`. */
+  limit: number;
+  window: Window;
+  /** User-facing text on the exceeded result. */
+  message: string;
+  /** Log label for store errors / fail-mode decisions. */
+  label: string;
+  analytics?: boolean;
+  /** Upstash request timeout (ms). */
+  timeout?: number;
+  /** Map the caller's identifier to the Redis key (normalise, hash, prefix). */
+  key?: (id: string) => string | Promise<string>;
+  /** Set `reason` on ok/exceeded results too. Limiters written before the
+   *  `reason` field existed leave it off; kept per-limiter so the refactor
+   *  changed no result shape. */
+  reasonOnDecision?: boolean;
+  /** "env" (default): closed in production, open in dev. A fixed mode also
+   *  ignores any mode the caller passes. */
+  failModeDefault?: "env" | FailMode;
+}
+
+export type LimiterCheck = (
+  id: string,
+  failMode?: FailMode,
+) => Promise<RateLimitResult>;
+
+/** A lazily-constructed Upstash sliding-window limiter (one per bucket). */
+function lazyRatelimit(
+  spec: Pick<LimiterSpec, "prefix" | "limit" | "window" | "analytics" | "timeout">,
+): () => Ratelimit {
+  let instance: Ratelimit | null = null;
+  return () => {
+    if (!instance) {
+      instance = new Ratelimit({
+        redis: new Redis({
+          url: process.env.UPSTASH_REDIS_REST_URL!,
+          token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+        }),
+        limiter: Ratelimit.slidingWindow(spec.limit, spec.window),
+        prefix: spec.prefix,
+        ...(spec.analytics !== undefined ? { analytics: spec.analytics } : {}),
+        ...(spec.timeout !== undefined ? { timeout: spec.timeout } : {}),
+      });
+    }
+    return instance;
+  };
+}
+
+export function defineLimiter(spec: LimiterSpec): LimiterCheck {
+  const get = lazyRatelimit(spec);
+  const fixedMode =
+    spec.failModeDefault && spec.failModeDefault !== "env"
+      ? spec.failModeDefault
+      : null;
+  const reason = <R extends "ok" | "exceeded">(r: R) =>
+    spec.reasonOnDecision ? { reason: r } : {};
+
+  return async (id, failMode) => {
+    const mode = fixedMode ?? failMode ?? defaultFailMode();
+    if (!process.env.UPSTASH_REDIS_REST_URL) {
+      return storeUnavailable(mode, spec.label);
+    }
+    const key = spec.key ? await spec.key(id) : id;
+    try {
+      const res = await get().limit(key);
+      if (!res.success) {
+        return {
+          allowed: false,
+          remaining: 0,
+          resetAt: new Date(res.reset),
+          message: spec.message,
+          ...reason("exceeded"),
+        };
+      }
+      return {
+        allowed: true,
+        remaining: res.remaining,
+        resetAt: null,
+        ...reason("ok"),
+      };
+    } catch (err) {
+      logger.error(`${spec.label}: store error`, { error: String(err) });
+      return storeUnavailable(mode, spec.label);
+    }
+  };
+}
+
+/** Declare a family of buckets sharing one check function (label
+ *  `<fnName>:<bucket>`). */
+function defineBuckets<B extends string>(
+  fnName: string,
+  shared: Omit<LimiterSpec, "prefix" | "limit" | "window" | "label">,
+  buckets: Record<B, { prefix: string; limit: number; window: Window }>,
+): Record<B, LimiterCheck> {
+  const out = {} as Record<B, LimiterCheck>;
+  for (const b of Object.keys(buckets) as B[]) {
+    out[b] = defineLimiter({ ...shared, ...buckets[b], label: `${fnName}:${b}` });
+  }
+  return out;
+}
+
+// =============================================================================
+// Web checker — two-tier (burst 3/h, then daily 10/24h) on a hashed IP+UA.
+// Doesn't fit a single defineLimiter (two windows, tier-specific messages,
+// min-remaining across tiers); it reuses the factory's lazy constructor.
+// =============================================================================
+
+const getBurstLimiter = lazyRatelimit({ prefix: "askarthur:burst", limit: 3, window: "1 h" });
+const getDailyLimiter = lazyRatelimit({ prefix: "askarthur:daily", limit: 10, window: "24 h" });
+
 export async function checkRateLimit(
   ip: string,
   userAgent: string,
@@ -207,775 +241,254 @@ export async function checkRateLimit(
   }
 }
 
-export async function checkImageUploadRateLimit(
-  ip: string,
-  failMode: FailMode = defaultFailMode()
-): Promise<RateLimitResult> {
-  // Image vision calls cost ~$0.002-$0.01 each. Default failMode is "closed"
-  // in production — the cost of a miss (unbounded Anthropic spend) far
-  // exceeds the cost of a rare false block during a Redis blip.
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkImageUploadRateLimit");
-  }
+// =============================================================================
+// Single-bucket limiters
+// =============================================================================
 
-  try {
-    const result = await getImageUploadLimiter().limit(`ip:${ip}`);
-    if (!result.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(result.reset),
-        message: "Too many image uploads. Try again later.",
-      };
-    }
-    return { allowed: true, remaining: result.remaining, resetAt: null };
-  } catch (err) {
-    logger.error("checkImageUploadRateLimit: store error", { error: String(err) });
-    return storeUnavailable(failMode, "checkImageUploadRateLimit");
-  }
-}
+/** Free document checks per IP per hour. Exported so user-facing copy can
+ *  state the real number instead of hardcoding one that silently drifts
+ *  from the limiter. */
+export const DOCUMENT_UPLOAD_LIMIT_PER_HOUR = 5;
 
-export async function checkDocumentUploadRateLimit(
-  ip: string,
-  failMode: FailMode = defaultFailMode()
-): Promise<RateLimitResult> {
-  // The document forensics path is CPU-only (no paid API), but it accepts
-  // 10 MB uploads from anonymous users — the limit bounds bandwidth/compute
-  // abuse. Same fail-closed-in-prod posture as image uploads.
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkDocumentUploadRateLimit");
-  }
+/** Image vision calls cost ~$0.002-$0.01 each — the cost of a miss (unbounded
+ *  Anthropic spend) far exceeds a rare false block during a Redis blip. */
+const imageUpload = defineLimiter({
+  label: "checkImageUploadRateLimit",
+  prefix: "askarthur:image-upload",
+  limit: 5,
+  window: "1 h",
+  analytics: true,
+  timeout: 1000,
+  key: (ip) => `ip:${ip}`,
+  message: "Too many image uploads. Try again later.",
+});
+export const checkImageUploadRateLimit = (ip: string, failMode?: FailMode) =>
+  imageUpload(ip, failMode);
 
-  try {
-    const result = await getDocumentUploadLimiter().limit(`ip:${ip}`);
-    if (!result.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(result.reset),
-        message: "Too many document checks. Try again later.",
-      };
-    }
-    return { allowed: true, remaining: result.remaining, resetAt: null };
-  } catch (err) {
-    logger.error("checkDocumentUploadRateLimit: store error", { error: String(err) });
-    return storeUnavailable(failMode, "checkDocumentUploadRateLimit");
-  }
-}
+/** Document forensics is CPU-only (no paid API) but accepts 10 MB anonymous
+ *  uploads — the limit bounds bandwidth/compute abuse. */
+const documentUpload = defineLimiter({
+  label: "checkDocumentUploadRateLimit",
+  prefix: "askarthur:doc-upload",
+  limit: DOCUMENT_UPLOAD_LIMIT_PER_HOUR,
+  window: "1 h",
+  analytics: true,
+  timeout: 1000,
+  key: (ip) => `ip:${ip}`,
+  message: "Too many document checks. Try again later.",
+});
+export const checkDocumentUploadRateLimit = (ip: string, failMode?: FailMode) =>
+  documentUpload(ip, failMode);
 
-/** Audio deepfake checks call a paid vendor per request. */
+/** Audio deepfake checks call a paid vendor per request — same
+ *  fail-closed-in-prod posture as the other paid upload paths. */
 export const DEEPFAKE_LIMIT_PER_HOUR = 10;
 
-function getDeepfakeLimiter() {
-  if (!_deepfakeLimiter) {
-    _deepfakeLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(DEEPFAKE_LIMIT_PER_HOUR, "1 h"),
-      prefix: "askarthur:deepfake",
-      analytics: true,
-      timeout: 1000,
-    });
-  }
-  return _deepfakeLimiter;
-}
+const deepfake = defineLimiter({
+  label: "checkDeepfakeRateLimit",
+  prefix: "askarthur:deepfake",
+  limit: DEEPFAKE_LIMIT_PER_HOUR,
+  window: "1 h",
+  analytics: true,
+  timeout: 1000,
+  key: (ip) => `ip:${ip}`,
+  message: "Too many audio checks. Try again later.",
+});
+export const checkDeepfakeRateLimit = (ip: string, failMode?: FailMode) =>
+  deepfake(ip, failMode);
 
-export async function checkDeepfakeRateLimit(
-  ip: string,
-  failMode: FailMode = defaultFailMode()
-): Promise<RateLimitResult> {
-  // Each request can reach a paid detection vendor; same fail-closed-in-prod
-  // posture as the other paid upload paths.
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkDeepfakeRateLimit");
-  }
-
-  try {
-    const result = await getDeepfakeLimiter().limit(`ip:${ip}`);
-    if (!result.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(result.reset),
-        message: "Too many audio checks. Try again later.",
-      };
-    }
-    return { allowed: true, remaining: result.remaining, resetAt: null };
-  } catch (err) {
-    logger.error("checkDeepfakeRateLimit: store error", { error: String(err) });
-    return storeUnavailable(failMode, "checkDeepfakeRateLimit");
-  }
-}
-
-export async function checkFormRateLimit(
-  ip: string,
-  failMode: FailMode = defaultFailMode()
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkFormRateLimit");
-  }
-
-  try {
-    const identifier = ip;
-    const result = await getFormLimiter().limit(identifier);
-
-    if (!result.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(result.reset),
-        message: "Too many submissions. Please try again later.",
-      };
-    }
-
-    return {
-      allowed: true,
-      remaining: result.remaining,
-      resetAt: null,
-    };
-  } catch (err) {
-    logger.error("checkFormRateLimit: store error", { error: String(err) });
-    return storeUnavailable(failMode, "checkFormRateLimit");
-  }
-}
+const form = defineLimiter({
+  label: "checkFormRateLimit",
+  prefix: "askarthur:form",
+  limit: 5,
+  window: "1 h",
+  message: "Too many submissions. Please try again later.",
+});
+export const checkFormRateLimit = (ip: string, failMode?: FailMode) =>
+  form(ip, failMode);
 
 // =============================================================================
-// Phone Footprint — dedicated buckets
-// =============================================================================
-// Buckets are separate from the generic burst/daily limiters because the
-// Phone Footprint product has stricter per-tier rules and its own cost
+// Phone Footprint — dedicated buckets (MOTHBALLED product; kept wired).
+// Separate from the generic limiters because of per-tier rules and real cost
 // exposure (Twilio Verify ~$0.10/OTP, Vonage NI ~$0.04, LeakCheck ~$0.002).
-// Abuse on these routes burns real money, so every bucket defaults to
-// fail-closed in production (see defaultFailMode).
+// Windows per docs/plans/phone-footprint-v2.md §9:
+//   anon_burst 3/h + anon_daily 10/day (teaser), user 60/min, verify_otp_phone
+//   3/day per phone (OTP cost ceiling), verify_otp_ip 10/day per IP,
+//   org_fleet_bulk 3/h per org, msisdn_cross_ip 3/24h distinct-IP count per
+//   msisdn_hash (stalker/enumeration defence), pdf_render 5/day per user.
+// =============================================================================
 
-type PfBucket =
-  | "anon_burst"        // teaser lookup, unauthenticated
-  | "anon_daily"        // teaser lookup, unauthenticated — outer cap
-  | "user"              // authenticated paid lookup
-  | "verify_otp_phone"  // OTP send attempts per phone number
-  | "verify_otp_ip"     // OTP send attempts per IP
-  | "org_fleet_bulk"    // CSV bulk upload per org
-  | "msisdn_cross_ip"   // enumeration detection: N distinct IPs per msisdn
-  | "pdf_render";       // expensive PDF generation
+const phoneFootprint = defineBuckets(
+  "checkPhoneFootprintRateLimit",
+  { analytics: true, message: "Too many requests. Please try again later." },
+  {
+    anon_burst:       { prefix: "askarthur:pf:anon:burst", limit: 3,  window: "1 h" },
+    anon_daily:       { prefix: "askarthur:pf:anon:daily", limit: 10, window: "24 h" },
+    user:             { prefix: "askarthur:pf:user",       limit: 60, window: "1 m" },
+    verify_otp_phone: { prefix: "askarthur:pf:otp:phone",  limit: 3,  window: "24 h" },
+    verify_otp_ip:    { prefix: "askarthur:pf:otp:ip",     limit: 10, window: "24 h" },
+    org_fleet_bulk:   { prefix: "askarthur:pf:fleet:bulk", limit: 3,  window: "1 h" },
+    msisdn_cross_ip:  { prefix: "askarthur:pf:xip",        limit: 3,  window: "24 h" },
+    pdf_render:       { prefix: "askarthur:pf:pdf",        limit: 5,  window: "24 h" },
+  },
+);
+type PfBucket = keyof typeof phoneFootprint;
 
-const _pfLimiters = new Map<PfBucket, Ratelimit>();
-
-function getPfLimiter(bucket: PfBucket): Ratelimit {
-  const existing = _pfLimiters.get(bucket);
-  if (existing) return existing;
-
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-
-  // Per-bucket configuration. Window shapes chosen to match the abuse model
-  // described in docs/plans/phone-footprint-v2.md §9:
-  //   anon_burst: 3/hr (sliding) — covers legitimate "check my number" use
-  //   anon_daily: 10/day — outer safety cap for teaser
-  //   user: 60/min — plenty of headroom for UI autocompletion
-  //   verify_otp_phone: 3/day per phone — hard ceiling on OTP cost exposure
-  //   verify_otp_ip: 10/day per IP — bot throttle
-  //   org_fleet_bulk: 3/hr per org — CSV upload cadence
-  //   msisdn_cross_ip: 3/24h distinct-IP count per msisdn_hash — stalker /
-  //     enumeration defence. Exceed → route forces teaser-only for 24h.
-  //   pdf_render: 5/day per user — R2 egress + memory cap.
-  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
-  const config: Record<
-    PfBucket,
-    { algo: ReturnType<typeof slidingWindow>; prefix: string }
-  > = {
-    anon_burst:       { algo: slidingWindow(3,  "1 h"),  prefix: "askarthur:pf:anon:burst" },
-    anon_daily:       { algo: slidingWindow(10, "24 h"), prefix: "askarthur:pf:anon:daily" },
-    user:             { algo: slidingWindow(60, "1 m"),  prefix: "askarthur:pf:user" },
-    verify_otp_phone: { algo: slidingWindow(3,  "24 h"), prefix: "askarthur:pf:otp:phone" },
-    verify_otp_ip:    { algo: slidingWindow(10, "24 h"), prefix: "askarthur:pf:otp:ip" },
-    org_fleet_bulk:   { algo: slidingWindow(3,  "1 h"),  prefix: "askarthur:pf:fleet:bulk" },
-    msisdn_cross_ip:  { algo: slidingWindow(3,  "24 h"), prefix: "askarthur:pf:xip" },
-    pdf_render:       { algo: slidingWindow(5,  "24 h"), prefix: "askarthur:pf:pdf" },
-  };
-
-  const lim = new Ratelimit({
-    redis,
-    limiter: config[bucket].algo,
-    prefix: config[bucket].prefix,
-    analytics: true,
-  });
-  _pfLimiters.set(bucket, lim);
-  return lim;
-}
-
-/**
- * Check a Phone Footprint rate-limit bucket.
- *
- * All Phone Footprint routes default to fail-closed in production — a Redis
- * outage must NOT open the floodgates on Twilio Verify or Vonage spend. In
- * development, fail-open for local iteration without Redis.
- */
-export async function checkPhoneFootprintRateLimit(
+/** Phone Footprint bucket check; fail-closed in production — a Redis outage
+ *  must NOT open the floodgates on Twilio Verify or Vonage spend. */
+export const checkPhoneFootprintRateLimit = (
   bucket: PfBucket,
   identifier: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, `checkPhoneFootprintRateLimit:${bucket}`);
-  }
-  try {
-    const res = await getPfLimiter(bucket).limit(identifier);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "Too many requests. Please try again later.",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-    };
-  } catch (err) {
-    logger.error(`checkPhoneFootprintRateLimit:${bucket}: store error`, { error: String(err) });
-    return storeUnavailable(failMode, `checkPhoneFootprintRateLimit:${bucket}`);
-  }
-}
+  failMode?: FailMode,
+) => phoneFootprint[bucket](identifier, failMode);
 
 // =============================================================================
-// Breach Defence — dedicated buckets
+// Breach Defence — dedicated buckets (MOTHBALLED product; kept wired).
+//   bd_lookup 5/h/IP (consumer email/phone/ID hash search, HIBP-style polite
+//   cap), bd_extension 60/min/IP (chatty content script), bd_b2b 30/min/key
+//   (identifier is the API key hash; validateApiKey adds a daily cap on top).
 // =============================================================================
-// Same rationale as the Phone Footprint section: separate per-route rate
-// limits because the breach-defence endpoints have distinct abuse models
-// and distinct cost exposure (lookup hits Supabase directly, extension is
-// CORS-anonymous + chatty, B2B is API-key-gated and high-volume).
-//
-//   bd_lookup    — public /api/breach/lookup (consumer email/phone/ID hash
-//                  search). 5/hr/IP. Mirrors HIBP's polite cap; a real user
-//                  rarely needs more than a handful of checks.
-//   bd_extension — /api/breach-extension called by the WXT content script.
-//                  60/min/IP — chatty by design (every domain visit) but
-//                  bounded to keep abusive scraping in check.
-//   bd_b2b       — /api/v1/breach/exposure POST. 30/min/key (validateApiKey
-//                  also applies its own daily cap on top). Identifier is
-//                  the API key hash, not IP.
 
-type BdBucket = "bd_lookup" | "bd_extension" | "bd_b2b";
+const breachDefence = defineBuckets(
+  "checkBreachDefenceRateLimit",
+  { analytics: true, message: "Too many requests. Please try again later." },
+  {
+    bd_lookup:    { prefix: "askarthur:bd:lookup", limit: 5,  window: "1 h" },
+    bd_extension: { prefix: "askarthur:bd:ext",    limit: 60, window: "1 m" },
+    bd_b2b:       { prefix: "askarthur:bd:b2b",    limit: 30, window: "1 m" },
+  },
+);
+type BdBucket = keyof typeof breachDefence;
 
-const _bdLimiters = new Map<BdBucket, Ratelimit>();
-
-function getBdLimiter(bucket: BdBucket): Ratelimit {
-  const existing = _bdLimiters.get(bucket);
-  if (existing) return existing;
-
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-
-  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
-  const config: Record<
-    BdBucket,
-    { algo: ReturnType<typeof slidingWindow>; prefix: string }
-  > = {
-    bd_lookup:    { algo: slidingWindow(5,  "1 h"),  prefix: "askarthur:bd:lookup" },
-    bd_extension: { algo: slidingWindow(60, "1 m"),  prefix: "askarthur:bd:ext" },
-    bd_b2b:       { algo: slidingWindow(30, "1 m"),  prefix: "askarthur:bd:b2b" },
-  };
-
-  const lim = new Ratelimit({
-    redis,
-    limiter: config[bucket].algo,
-    prefix: config[bucket].prefix,
-    analytics: true,
-  });
-  _bdLimiters.set(bucket, lim);
-  return lim;
-}
-
-/**
- * Check a Breach Defence rate-limit bucket.
- *
- * Defaults to fail-closed in production. The bd_lookup bucket in particular
- * is a privacy-sensitive surface (user types email or AU identity number);
- * a Redis outage allowing unbounded requests is worse than the rare false
- * reject during a Redis blip.
- */
-export async function checkBreachDefenceRateLimit(
+/** Breach Defence bucket check; fail-closed in production (bd_lookup is a
+ *  privacy-sensitive surface). */
+export const checkBreachDefenceRateLimit = (
   bucket: BdBucket,
   identifier: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, `checkBreachDefenceRateLimit:${bucket}`);
-  }
-  try {
-    const res = await getBdLimiter(bucket).limit(identifier);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "Too many requests. Please try again later.",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-    };
-  } catch (err) {
-    logger.error(`checkBreachDefenceRateLimit:${bucket}: store error`, { error: String(err) });
-    return storeUnavailable(failMode, `checkBreachDefenceRateLimit:${bucket}`);
-  }
-}
+  failMode?: FailMode,
+) => breachDefence[bucket](identifier, failMode);
 
 // =============================================================================
-// Charity Check — dedicated buckets
+// Charity Check — cc_lookup 5/h/IP (the only ABR caller — caps third-party
+// exposure), cc_autocomplete 60/min/IP (typeahead over a local RPC).
 // =============================================================================
-// Same rationale as Phone Footprint / Breach Defence: each surface has a
-// distinct abuse model.
-//
-//   cc_lookup        — POST /api/charity-check (the verdict request).
-//                      5/hr/IP. The route is the only thing that calls
-//                      ABR Lookup, so this caps third-party-API exposure
-//                      per-IP. Mirrors HIBP-style polite caps.
-//   cc_autocomplete  — GET /api/charity-check/autocomplete (typeahead).
-//                      60/min/IP. High frequency by design (one call per
-//                      keystroke after the debounce window) but still
-//                      bounded — autocomplete hitting a local Postgres
-//                      RPC, so the abuse cost is DB CPU, not paid API.
 
-type CcBucket = "cc_lookup" | "cc_autocomplete";
+const charityCheck = defineBuckets(
+  "checkCharityCheckRateLimit",
+  { analytics: true, message: "Too many requests. Please try again later." },
+  {
+    cc_lookup:       { prefix: "askarthur:cc:lookup",       limit: 5,  window: "1 h" },
+    cc_autocomplete: { prefix: "askarthur:cc:autocomplete", limit: 60, window: "1 m" },
+  },
+);
+type CcBucket = keyof typeof charityCheck;
 
-const _ccLimiters = new Map<CcBucket, Ratelimit>();
-
-function getCcLimiter(bucket: CcBucket): Ratelimit {
-  const existing = _ccLimiters.get(bucket);
-  if (existing) return existing;
-
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-
-  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
-  const config: Record<
-    CcBucket,
-    { algo: ReturnType<typeof slidingWindow>; prefix: string }
-  > = {
-    cc_lookup:       { algo: slidingWindow(5,  "1 h"), prefix: "askarthur:cc:lookup" },
-    cc_autocomplete: { algo: slidingWindow(60, "1 m"), prefix: "askarthur:cc:autocomplete" },
-  };
-
-  const lim = new Ratelimit({
-    redis,
-    limiter: config[bucket].algo,
-    prefix: config[bucket].prefix,
-    analytics: true,
-  });
-  _ccLimiters.set(bucket, lim);
-  return lim;
-}
-
-/**
- * Check a Charity Check rate-limit bucket. Defaults to fail-closed in
- * production — same reasoning as Breach Defence: a Redis blip allowing
- * unbounded ABR API calls would amount to free credential-stuffing of the
- * paid third-party endpoint.
- */
-export async function checkCharityCheckRateLimit(
+/** Charity Check bucket check; fail-closed in production (unbounded ABR
+ *  calls during a Redis blip would be free credential-stuffing of a paid
+ *  third-party endpoint). */
+export const checkCharityCheckRateLimit = (
   bucket: CcBucket,
   identifier: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, `checkCharityCheckRateLimit:${bucket}`);
-  }
-  try {
-    const res = await getCcLimiter(bucket).limit(identifier);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "Too many requests. Please try again later.",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-    };
-  } catch (err) {
-    logger.error(`checkCharityCheckRateLimit:${bucket}: store error`, { error: String(err) });
-    return storeUnavailable(failMode, `checkCharityCheckRateLimit:${bucket}`);
-  }
-}
+  failMode?: FailMode,
+) => charityCheck[bucket](identifier, failMode);
 
 // =============================================================================
-// Shop Signal — Deep Shop Check buckets
+// Shop Signal — sc_deep_check 5/10min/IP (spends APIVoid credits + a
+// whoisjson free-tier call; fail-closed), sc_poll 120/min/IP (the tray polls
+// every 2s for ≤60s → ≈30 GETs/min legit; the GET route passes "open").
 // =============================================================================
-// sc_deep_check — POST /api/shop-check, the user-initiated enrichment that
-//   spends APIVoid credits + a whoisjson.com free-tier call per run. Capped
-//   tightly per-IP (a real user rarely deep-checks more than a handful of
-//   shops in a sitting) and fail-closed in production: a Redis blip must not
-//   open unbounded paid-API spend.
-// sc_poll — GET /api/shop-check/[id], the poll the tray issues every ~2s
-//   while enrichment runs. Generous cap, and the caller passes failMode
-//   "open" (see the GET route): the read is a single indexed PK lookup, so
-//   a Redis outage must fail toward letting the poll through rather than
-//   breaking a user's live check.
 
-type ShopSignalBucket = "sc_deep_check" | "sc_poll";
-
-const _ssLimiters = new Map<ShopSignalBucket, Ratelimit>();
-
-function getSsLimiter(bucket: ShopSignalBucket): Ratelimit {
-  const existing = _ssLimiters.get(bucket);
-  if (existing) return existing;
-
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-
-  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
-  const config: Record<
-    ShopSignalBucket,
-    { algo: ReturnType<typeof slidingWindow>; prefix: string }
-  > = {
-    sc_deep_check: {
-      algo: slidingWindow(5, "10 m"),
-      prefix: "askarthur:shop:deep-check",
-    },
-    // The tray polls every 2s for up to ~60s per check (≤30 GETs), and the
-    // sc_deep_check cap allows 5 checks / 10 min — a legit client tops out
-    // near 30 GETs/min. 120/min/IP gives ~4× headroom while still throttling
-    // a script hammering a known uuid.
-    sc_poll: {
-      algo: slidingWindow(120, "1 m"),
-      prefix: "askarthur:shop:poll",
-    },
-  };
-
-  const lim = new Ratelimit({
-    redis,
-    limiter: config[bucket].algo,
-    prefix: config[bucket].prefix,
+const shopSignal = defineBuckets(
+  "checkShopSignalRateLimit",
+  {
     analytics: true,
-  });
-  _ssLimiters.set(bucket, lim);
-  return lim;
-}
+    reasonOnDecision: true,
+    message: "Too many shop checks. Please try again later.",
+  },
+  {
+    sc_deep_check: { prefix: "askarthur:shop:deep-check", limit: 5,   window: "10 m" },
+    sc_poll:       { prefix: "askarthur:shop:poll",       limit: 120, window: "1 m" },
+  },
+);
+type ShopSignalBucket = keyof typeof shopSignal;
 
-/**
- * Check a Shop Signal rate-limit bucket. Defaults to fail-closed in
- * production — the Deep Shop Check spends real money (APIVoid credits +
- * whoisjson.com free-tier draw), so a Redis outage allowing unbounded
- * requests is worse than a rare false reject during a blip.
- */
-export async function checkShopSignalRateLimit(
+export const checkShopSignalRateLimit = (
   bucket: ShopSignalBucket,
   identifier: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, `checkShopSignalRateLimit:${bucket}`);
-  }
-  try {
-    const res = await getSsLimiter(bucket).limit(identifier);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "Too many shop checks. Please try again later.",
-        reason: "exceeded",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-      reason: "ok",
-    };
-  } catch (err) {
-    logger.error(`checkShopSignalRateLimit:${bucket}: store error`, {
-      error: String(err),
-    });
-    return storeUnavailable(failMode, `checkShopSignalRateLimit:${bucket}`);
-  }
-}
+  failMode?: FailMode,
+) => shopSignal[bucket](identifier, failMode);
 
 // =============================================================================
-// Org invite accept — per-user accept-attempt cap
+// Org invites
 // =============================================================================
-// Caps attempts to POST /api/org/invite/accept per authenticated user. Pairs
-// with the email-binding check on that route so a logged-in attacker can't
-// brute-force token guesses or hammer the route looking for tokens that hash
-// to a target email. 10 attempts / hour is generous enough for a legitimate
-// invitee who fat-fingers a token a few times, tight enough to make
-// enumeration impractical.
 
-const _orgInviteAcceptLimiter = { current: null as Ratelimit | null };
+/** Accept attempts per authenticated user: 10/h — pairs with the route's
+ *  email-binding check so token guessing/enumeration is impractical. */
+const orgInviteAccept = defineLimiter({
+  label: "checkOrgInviteAcceptRateLimit",
+  prefix: "askarthur:org-invite-accept",
+  limit: 10,
+  window: "1 h",
+  analytics: true,
+  reasonOnDecision: true,
+  message: "Too many invite-accept attempts. Try again later.",
+});
+export const checkOrgInviteAcceptRateLimit = (userId: string, failMode?: FailMode) =>
+  orgInviteAccept(userId, failMode);
 
-function getOrgInviteAcceptLimiter(): Ratelimit {
-  if (_orgInviteAcceptLimiter.current) return _orgInviteAcceptLimiter.current;
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-  const lim = new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(10, "1 h"),
-    prefix: "askarthur:org-invite-accept",
-    analytics: true,
-  });
-  _orgInviteAcceptLimiter.current = lim;
-  return lim;
-}
+/** Invite sends per inviter: 20/24h — each call emails from the Ask Arthur
+ *  sender, so it is bounded like any other outbound send. */
+const orgInviteSend = defineLimiter({
+  label: "checkOrgInviteSendRateLimit",
+  prefix: "askarthur:org-invite-send",
+  limit: 20,
+  window: "24 h",
+  analytics: true,
+  reasonOnDecision: true,
+  message: "Too many invitations sent. Try again later.",
+});
+export const checkOrgInviteSendRateLimit = (userId: string, failMode?: FailMode) =>
+  orgInviteSend(userId, failMode);
 
-/**
- * Check the org-invite-accept rate-limit bucket for an authenticated user.
- * 10 attempts / hour, fail-closed in production.
- */
-export async function checkOrgInviteAcceptRateLimit(
-  userId: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkOrgInviteAcceptRateLimit");
-  }
-  try {
-    const res = await getOrgInviteAcceptLimiter().limit(userId);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "Too many invite-accept attempts. Try again later.",
-        reason: "exceeded",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-      reason: "ok",
-    };
-  } catch (err) {
-    logger.error("checkOrgInviteAcceptRateLimit: store error", {
-      error: String(err),
-    });
-    return storeUnavailable(failMode, "checkOrgInviteAcceptRateLimit");
-  }
-}
+// =============================================================================
+// Inbound scan (scan@) — 3 forwards / day per sender. The key strips +tags and
+// lowercases so "alice+x@gmail.com" and "Alice@Gmail.com" share one quota.
+// Each forward costs ~A$0.001 Claude + one Resend send; heavy users are
+// pointed to the free web scanner by the 4th-message reply.
+// =============================================================================
 
-// ─── Org-invite send rate limiter ───────────────────────────────────────
-//
-// Per-inviter quota for `POST /api/org/invite`. Each call sends an email from
-// the Ask Arthur sender, so it is bounded like any other outbound send.
-// 20 invites / 24h per user comfortably covers onboarding a whole team.
+const inboundScan = defineLimiter({
+  label: "checkInboundScanRateLimit",
+  prefix: "askarthur:inbound-scan",
+  limit: 3,
+  window: "1 d",
+  analytics: true,
+  reasonOnDecision: true,
+  key: (email) => email.trim().toLowerCase().replace(/(\+[^@]*)(@)/, "$2"),
+  message:
+    "You've hit today's free-forward limit (3 per day). Paste suspicious messages at askarthur.au any time — no daily cap on the web scanner.",
+});
+export const checkInboundScanRateLimit = (senderEmail: string, failMode?: FailMode) =>
+  inboundScan(senderEmail, failMode);
 
-const _orgInviteSendLimiter = { current: null as Ratelimit | null };
+// =============================================================================
+// Admin triage (PR-G, #496) — 200 triage POSTs / 5 min per admin (4× a noisy
+// day's bulk action; bounds a compromised token). The key is
+// SHA-256(identifier, "clone-watch-triage") so no raw token lands in Redis.
+// ALWAYS fail-open: a Redis outage must not lock the operator out; the
+// per-brand Inngest send cap is the real downstream backstop.
+// =============================================================================
 
-function getOrgInviteSendLimiter(): Ratelimit {
-  if (_orgInviteSendLimiter.current) return _orgInviteSendLimiter.current;
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-  const lim = new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(20, "24 h"),
-    prefix: "askarthur:org-invite-send",
-    analytics: true,
-  });
-  _orgInviteSendLimiter.current = lim;
-  return lim;
-}
-
-/**
- * Check the org-invite-send rate-limit bucket for an authenticated user.
- * 20 sends / 24h, fail-closed in production.
- */
-export async function checkOrgInviteSendRateLimit(
-  userId: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkOrgInviteSendRateLimit");
-  }
-  try {
-    const res = await getOrgInviteSendLimiter().limit(userId);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "Too many invitations sent. Try again later.",
-        reason: "exceeded",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-      reason: "ok",
-    };
-  } catch (err) {
-    logger.error("checkOrgInviteSendRateLimit: store error", {
-      error: String(err),
-    });
-    return storeUnavailable(failMode, "checkOrgInviteSendRateLimit");
-  }
-}
-
-// ─── Inbound-scan rate limiter (F1) ─────────────────────────────────────
-//
-// Per-sender quota for `/api/inbound-scan` — users forwarding suspicious
-// emails to `scan+report@askarthur-inbound.com`. Identifier is the
-// normalised sender email (lowercased, local-part stripped of plus tags)
-// so the same person can't bypass by adding +123 suffixes.
-//
-// Hard cap: 3 forwards / 24h per sender. The product hypothesis is that
-// scam-forwards are sparse (a few per week, not per day) — anyone
-// flooding the channel is almost certainly testing or abusing. Each
-// forward costs ~A$0.001 Claude + an outbound Resend; capping at 3/day
-// keeps the per-sender daily ceiling under A$0.005 even at zero
-// optimisation. Heavy users get directed to the free web scanner via
-// the 4th-message rate-limit reply.
-
-const _inboundScanLimiter = { current: null as Ratelimit | null };
-
-function getInboundScanLimiter(): Ratelimit {
-  if (_inboundScanLimiter.current) return _inboundScanLimiter.current;
-
-  const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-
-  const lim = new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(3, "1 d"),
-    prefix: "askarthur:inbound-scan",
-    analytics: true,
-  });
-  _inboundScanLimiter.current = lim;
-  return lim;
-}
-
-/**
- * Check the inbound-scan rate-limit bucket for a sender email. 3/day
- * default. Fail-closed in production so a Redis outage doesn't let a
- * single forwarder rack up unbounded Claude spend.
- */
-export async function checkInboundScanRateLimit(
-  senderEmail: string,
-  failMode: FailMode = defaultFailMode(),
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return storeUnavailable(failMode, "checkInboundScanRateLimit");
-  }
-  // Strip +tag and lowercase so "alice+x@gmail.com" and "Alice@Gmail.com"
-  // share quota.
-  const normalised = senderEmail
-    .trim()
-    .toLowerCase()
-    .replace(/(\+[^@]*)(@)/, "$2");
-  try {
-    const res = await getInboundScanLimiter().limit(normalised);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message:
-          "You've hit today's free-forward limit (3 per day). Paste suspicious messages at askarthur.au any time — no daily cap on the web scanner.",
-        reason: "exceeded",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-      reason: "ok",
-    };
-  } catch (err) {
-    logger.error("checkInboundScanRateLimit: store error", { error: String(err) });
-    return storeUnavailable(failMode, "checkInboundScanRateLimit");
-  }
-}
-
-/**
- * Admin-triage rate-limit (PR-G, #496). Caps the number of triage POSTs a
- * single admin can issue against /api/admin/clone-watch/triage in a 5-min
- * sliding window.
- *
- * Sizing: 200 / 5 min. A legitimate noise-day workflow looks like ~50 FPs
- * in a brand-group bulk action (PR-F). 200 is 4x that — comfortable
- * headroom while still bounding a compromised-token blast radius.
- *
- * Identifier: SHA-256(admin_token_or_user_id) — never stores the raw
- * token in Redis. Anonymous admin (HMAC token only, no Supabase user) +
- * Supabase admin (uid only, no HMAC token) both hash through.
- *
- * Fail mode: open. A Redis outage shouldn't lock the operator out of the
- * dashboard — the per-brand Inngest rate-limit (5 sends per brand per 24h)
- * is the actual blast-radius backstop downstream.
- */
-let _adminTriageLimiter: Ratelimit | null = null;
-function getAdminTriageLimiter() {
-  if (!_adminTriageLimiter) {
-    _adminTriageLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
-      limiter: Ratelimit.slidingWindow(200, "5 m"),
-      prefix: "askarthur:clone-watch:triage",
-      analytics: false,
-    });
-  }
-  return _adminTriageLimiter;
-}
-
-export async function checkAdminTriageRateLimit(
-  adminIdentifier: string,
-): Promise<RateLimitResult> {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    // Fail-open intentionally — see header comment above.
-    return storeUnavailable("open", "checkAdminTriageRateLimit");
-  }
-  // The caller already supplies a hashed/stable identifier (token sha or
-  // Supabase uid). We add a small per-instance hash to keep the Redis
-  // key shape consistent with other limiters and obfuscate the raw
-  // identifier in Redis.
-  const identifier = await hashIdentifier(adminIdentifier, "clone-watch-triage");
-  try {
-    const res = await getAdminTriageLimiter().limit(identifier);
-    if (!res.success) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: new Date(res.reset),
-        message: "rate_limited",
-        reason: "exceeded",
-      };
-    }
-    return {
-      allowed: true,
-      remaining: res.remaining,
-      resetAt: null,
-      reason: "ok",
-    };
-  } catch (err) {
-    logger.error("checkAdminTriageRateLimit: store error", {
-      error: String(err),
-    });
-    return storeUnavailable("open", "checkAdminTriageRateLimit");
-  }
-}
+const adminTriage = defineLimiter({
+  label: "checkAdminTriageRateLimit",
+  prefix: "askarthur:clone-watch:triage",
+  limit: 200,
+  window: "5 m",
+  analytics: false,
+  reasonOnDecision: true,
+  failModeDefault: "open",
+  key: (id) => hashIdentifier(id, "clone-watch-triage"),
+  message: "rate_limited",
+});
+export const checkAdminTriageRateLimit = (adminIdentifier: string) =>
+  adminTriage(adminIdentifier);
