@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
-  user: { id: "u1", email: "Invitee@Example.com" } as { id: string; email: string } | null,
+  user: {
+    id: "u1",
+    email: "Invitee@Example.com",
+    email_confirmed_at: "2026-09-01T00:00:00Z",
+  } as { id: string; email: string; email_confirmed_at?: string | null } | null,
   member: null as null | Record<string, unknown>,
   updated: [{ id: 5 }] as { id: number }[] | null,
   rate: { allowed: true, remaining: 1, resetAt: null } as Record<string, unknown>,
@@ -52,7 +56,7 @@ const join = (body: unknown) =>
 const future = () => new Date(Date.now() + 86_400_000).toISOString();
 
 beforeEach(() => {
-  m.user = { id: "u1", email: "Invitee@Example.com" };
+  m.user = { id: "u1", email: "Invitee@Example.com", email_confirmed_at: "2026-09-01T00:00:00Z" };
   m.member = { id: 5, group_id: "g1", email: "invitee@example.com", expires_at: future() };
   m.updated = [{ id: 5 }];
   m.rate = { allowed: true, remaining: 1, resetAt: null };
@@ -81,6 +85,18 @@ describe("POST /api/family/join", () => {
 
   it("rejects a code addressed to a different email", async () => {
     m.member = { ...m.member, email: "someone.else@example.com" };
+    expect((await join({ inviteCode: CODE })).status).toBe(404);
+    expect(m.updateCalls).toHaveLength(0);
+  });
+
+  it("never redeems an invite with no addressed email", async () => {
+    m.member = { ...m.member, email: "" };
+    expect((await join({ inviteCode: CODE })).status).toBe(404);
+    expect(m.updateCalls).toHaveLength(0);
+  });
+
+  it("requires the joining account's email to be confirmed", async () => {
+    m.user = { id: "u1", email: "Invitee@Example.com", email_confirmed_at: null };
     expect((await join({ inviteCode: CODE })).status).toBe(404);
     expect(m.updateCalls).toHaveLength(0);
   });

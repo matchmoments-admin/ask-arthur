@@ -43,3 +43,9 @@ ALTER TABLE public.family_members
 UPDATE public.family_members
    SET expires_at = created_at + interval '7 days'
  WHERE expires_at IS NULL AND joined_at IS NULL;
+
+-- NOTE for future migrations: after v323 `authenticated` holds COLUMN-level
+-- SELECT on organizations. A column added later is NOT readable by members until
+-- a migration grants it explicitly (GRANT SELECT (new_col) ON public.organizations
+-- TO authenticated), and a user-scoped `select("*")` on this table would fail.
+-- All current readers use the service role.

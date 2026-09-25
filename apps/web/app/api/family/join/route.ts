@@ -80,10 +80,15 @@ export async function POST(req: NextRequest) {
   if (!member.expires_at || Date.parse(member.expires_at) <= Date.now()) {
     return invalid();
   }
-  // An invite addressed to an email can only be redeemed by that account.
+  // An invite can only be redeemed by the account it was addressed to, and
+  // only once that account has CONFIRMED the email (otherwise signing up as
+  // the invitee's address would be enough). An invite with no address is
+  // never redeemable — the invite route no longer creates one.
+  const invitedEmail = (member.email ?? "").trim().toLowerCase();
   if (
-    member.email &&
-    member.email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase()
+    !invitedEmail ||
+    !user.email_confirmed_at ||
+    invitedEmail !== (user.email ?? "").trim().toLowerCase()
   ) {
     return invalid();
   }
