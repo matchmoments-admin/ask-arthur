@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyDnsLookups,
   classifyHostLookups,
+  classifySubmitPrecheck,
   isCandidateLive,
   probeLivenessDetailed,
   probeLivenessVerdict,
@@ -316,3 +317,32 @@ describe("classifyHostLookups (A or AAAA present)", () => {
     );
   });
 });
+
+// The urlscan SUBMIT precheck (2026-09-25). SERVFAIL may skip a scan — every
+// SERVFAIL name measured in prod was also refused by urlscan — but it must
+// never leak into the lifecycle verdict (classifyDnsLookups above keeps
+// SERVFAIL inconclusive, the PR 7 lesson).
+describe("classifySubmitPrecheck", () => {
+  const rec = (...r: string[]) => ({ records: r });
+  const err = (errorCode: string) => ({ errorCode });
+  it.each([
+    ["A record", rec("1.2.3.4"), err("ESERVFAIL"), "host"],
+    ["AAAA record only", err("ESERVFAIL"), rec("::1"), "host"],
+    ["NODATA + NXDOMAIN", err("ENODATA"), err("ENOTFOUND"), "no_host"],
+    ["SERVFAIL + SERVFAIL", err("ESERVFAIL"), err("ESERVFAIL"), "servfail"],
+    ["SERVFAIL + NODATA", err("ESERVFAIL"), err("ENODATA"), "servfail"],
+    ["NXDOMAIN + SERVFAIL", err("ENOTFOUND"), err("ESERVFAIL"), "servfail"],
+    ["empty answer + SERVFAIL", rec(), err("ESERVFAIL"), "servfail"],
+    ["SERVFAIL + TIMEOUT", err("ESERVFAIL"), err("ETIMEOUT"), "unknown"],
+    ["TIMEOUT + TIMEOUT", err("ETIMEOUT"), err("ETIMEOUT"), "unknown"],
+    ["REFUSED + SERVFAIL", err("EREFUSED"), err("ESERVFAIL"), "unknown"],
+  ])("%s → %s", (_label, a, aaaa, want) => {
+    expect(classifySubmitPrecheck(a, () => aaaa)).toBe(want);
+  });
+
+  it("SERVFAIL still proves nothing for the lifecycle verdict", () => {
+    expect(classifyDnsLookups(err("ESERVFAIL"), () => err("ESERVFAIL"))).toBeNull();
+    expect(classifyHostLookups(err("ESERVFAIL"), () => err("ESERVFAIL"))).toBeNull();
+  });
+});
+

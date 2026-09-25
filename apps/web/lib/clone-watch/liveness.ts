@@ -171,6 +171,56 @@ export function classifyHostLookups(
   return answeredNoAddress(a) && answeredNoAddress(v6) ? false : null;
 }
 
+/** Resolver failure codes for a DNS SERVFAIL answer (c-ares / Node). */
+const SERVFAIL_CODES = new Set(["ESERVFAIL", "SERVFAIL"]);
+
+function isServfail(l: DnsLookup): boolean {
+  return "errorCode" in l && SERVFAIL_CODES.has(l.errorCode);
+}
+
+/**
+ * What the urlscan SUBMIT precheck should do with a name. SUBMIT-ONLY — the
+ * lifecycle question stays {@link classifyDnsLookups} (NXDOMAIN only) and the
+ * re-emergence question stays {@link classifyHostLookups}.
+ *
+ *   "host"     — an A or AAAA record exists: submit.
+ *   "no_host"  — both answered with no address (NODATA/NXDOMAIN/empty): skip.
+ *   "servfail" — no address anywhere, and at least one lookup SERVFAILed while
+ *                the other SERVFAILed or answered no-address: skip.
+ *   "unknown"  — anything else (a timeout, REFUSED, an unknown code): submit,
+ *                exactly as before.
+ *
+ * Why SERVFAIL may skip here but never proves "gone": PR 7 turned SERVFAIL into
+ * lifecycle deadness and produced false dead verdicts, so for the LIFECYCLE a
+ * SERVFAIL still proves nothing. The submit precheck is a different trade:
+ * every SERVFAIL domain measured in prod (18/18, 2026-09-24/25) was also
+ * refused by urlscan with "DNS Error - Could not resolve domain", and urlscan's
+ * refusal already stamps the row onto the same 168 h dead-domain cadence
+ * (status 400). Skipping only saves the reputation + urlscan calls and stops
+ * the refusal reading as a submit failure; a domain that recovers is retried
+ * on the identical schedule. A TIMEOUT is not a SERVFAIL (lame delegations
+ * sometimes time out, but so does a slow resolver) and stays "unknown".
+ */
+export type SubmitPrecheck = "host" | "no_host" | "servfail" | "unknown";
+
+export function classifySubmitPrecheck(
+  a: DnsLookup,
+  aaaa: () => DnsLookup,
+): SubmitPrecheck {
+  const verdict = classifyHostLookups(a, aaaa);
+  if (verdict === true) return "host";
+  if (verdict === false) return "no_host";
+  const v6 = aaaa();
+  const noAddress = (l: DnsLookup) =>
+    ("records" in l && l.records.length === 0) || isNoData(l) || provesAbsent(l);
+  const servfailOrEmpty = (l: DnsLookup) => isServfail(l) || noAddress(l);
+  return (isServfail(a) || isServfail(v6)) &&
+    servfailOrEmpty(a) &&
+    servfailOrEmpty(v6)
+    ? "servfail"
+    : "unknown";
+}
+
 /** Run one resolver query, capturing the error code instead of discarding it. */
 async function lookup(fn: () => Promise<string[]>): Promise<DnsLookup> {
   try {
@@ -220,6 +270,24 @@ export async function resolvesToHost(hostname: string): Promise<boolean | null> 
     return classifyHostLookups(a, () => aaaa ?? { errorCode: "UNKNOWN" });
   } catch {
     return null;
+  }
+}
+
+/**
+ * The urlscan submit precheck — see {@link classifySubmitPrecheck}. Both A and
+ * AAAA are always queried unless A already has records (the servfail verdict
+ * needs both answers). Cheap (~ms, 4 s cap per query).
+ */
+export async function submitPrecheck(hostname: string): Promise<SubmitPrecheck> {
+  if (!hostname) return "unknown";
+  const r = resolver();
+  try {
+    const a = await lookup(() => r.resolve4(hostname));
+    const needAaaa = !("records" in a && a.records.length > 0);
+    const aaaa = needAaaa ? await lookup(() => r.resolve6(hostname)) : null;
+    return classifySubmitPrecheck(a, () => aaaa ?? { errorCode: "UNKNOWN" });
+  } catch {
+    return "unknown";
   }
 }
 

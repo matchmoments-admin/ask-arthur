@@ -9,7 +9,7 @@
 import { submitURLScanWithDetails } from "@askarthur/scam-engine/urlscan";
 import { checkURLReputation } from "@askarthur/scam-engine";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { resolvesToHost } from "@/lib/clone-watch/liveness";
+import { submitPrecheck } from "@/lib/clone-watch/liveness";
 import {
   serialiseSubmitEvidence,
   serialiseSubmitFailure,
@@ -36,6 +36,10 @@ export interface SubmitOutcome {
     // were NOT called (the saving). Stamped like urlscan's 400 so the v277
     // dead-domain cadence applies; counted apart from real submit failures.
     | "dns_no_host"
+    // DNS precheck: A and AAAA both SERVFAIL (a dead/lame delegation — every
+    // one measured in prod was also refused by urlscan as "could not resolve").
+    // Not submitted; stamped like dns_no_host; counted apart from both.
+    | "dns_servfail"
     | "submit_failed"
     | "no_client";
   reputationMalicious: boolean;
@@ -56,6 +60,11 @@ export interface SubmitOutcome {
  *  distinguishes who decided. Rows stamped before PR B (3 in prod) carry the
  *  old value `dns_nxdomain_precheck`. */
 export const DNS_PRECHECK_ERROR = "dns_no_host_precheck";
+/** Recorded instead of a urlscan call when A and AAAA both SERVFAIL. Same
+ *  status-400 evidence shape as DNS_PRECHECK_ERROR, so the v277/v317 dead-domain
+ *  cadence (`urlscan_evidence->>'status' = '400'`, 168 h) applies — the same
+ *  cadence urlscan's own "could not resolve" refusal already put these rows on. */
+export const DNS_SERVFAIL_PRECHECK_ERROR = "dns_servfail_precheck";
 
 export async function submitCloneCandidate(
   candidate: CloneCandidate,
@@ -69,25 +78,33 @@ export async function submitCloneCandidate(
   // PROVABLY points at no host (no A and no AAAA — including a zone still
   // delegated with its A removed) skips; an inconclusive resolver answer falls
   // through to the scan exactly as before.
-  const host = await resolvesToHost(candidate.candidate_domain);
-  if (host === false) {
+  // SERVFAIL on both A and AAAA also skips (2026-09-25): those names were the
+  // entire residue of "submit_failed" — urlscan refused every one with "DNS
+  // Error - Could not resolve domain". A timeout or any other resolver error
+  // still falls through to the scan (see classifySubmitPrecheck).
+  const precheck = await submitPrecheck(candidate.candidate_domain);
+  if (precheck === "no_host" || precheck === "servfail") {
+    const servfail = precheck === "servfail";
+    const errorCode = servfail ? DNS_SERVFAIL_PRECHECK_ERROR : DNS_PRECHECK_ERROR;
     const nowIso = new Date().toISOString();
     const { error } = await sb.rpc("record_clone_alert_urlscan_submit", {
       p_alert_id: candidate.id,
       p_urlscan_uuid: null,
       p_evidence: serialiseSubmitFailure(
-        DNS_PRECHECK_ERROR,
+        errorCode,
         400,
         { isMalicious: false, sources: [] },
         nowIso,
-        "DNS precheck: no A and no AAAA record — not submitted to urlscan",
+        servfail
+          ? "DNS precheck: A and AAAA both SERVFAIL — not submitted to urlscan"
+          : "DNS precheck: no A and no AAAA record — not submitted to urlscan",
       ),
     });
     if (error) throw new Error(`record dns precheck failed: ${error.message}`);
     return {
-      kind: "dns_no_host",
+      kind: servfail ? "dns_servfail" : "dns_no_host",
       reputationMalicious: false,
-      error: DNS_PRECHECK_ERROR,
+      error: errorCode,
     };
   }
 
@@ -175,6 +192,9 @@ export interface SubmitTally {
   rateLimited: number;
   /** DNS precheck proved no host; no urlscan call. */
   dnsSkipped: number;
+  /** DNS precheck: A and AAAA both SERVFAIL; no urlscan call. Attempted
+   *  (stamped), never a failure. */
+  dnsServfail: number;
   /** Genuine submit failure, no client, or a thrown row. */
   submitFailed: number;
   reputationHits: number;
@@ -204,6 +224,7 @@ export async function submitCandidateBatch(
     submitted: 0,
     rateLimited: 0,
     dnsSkipped: 0,
+    dnsServfail: 0,
     submitFailed: 0,
     reputationHits: 0,
     attemptedIds: [],
@@ -230,6 +251,9 @@ export async function submitCandidateBatch(
           continue; // not attempted: leave it unstamped so it retries first
         case "dns_no_host":
           tally.dnsSkipped++;
+          break;
+        case "dns_servfail":
+          tally.dnsServfail++;
           break;
         default:
           tally.submitFailed++;

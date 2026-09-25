@@ -3,14 +3,18 @@ const m = vi.hoisted(() => ({ rpc: vi.fn(), reputation: vi.fn(), submit: vi.fn()
 vi.mock("@askarthur/supabase/server", () => ({ createServiceClient: () => ({ rpc: m.rpc }) }));
 vi.mock("@askarthur/scam-engine", () => ({ checkURLReputation: m.reputation }));
 vi.mock("@askarthur/scam-engine/urlscan", () => ({ submitURLScanWithDetails: m.submit }));
-vi.mock("@/lib/clone-watch/liveness", () => ({ resolvesToHost: m.host }));
-import { DNS_PRECHECK_ERROR, submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
+vi.mock("@/lib/clone-watch/liveness", () => ({ submitPrecheck: m.host }));
+import {
+ DNS_PRECHECK_ERROR,
+ DNS_SERVFAIL_PRECHECK_ERROR,
+ submitCloneCandidate,
+} from "@/lib/clone-watch/urlscan-submit-one";
 const candidate = { id: 1, candidate_url: "https://clone.example", candidate_domain: "clone.example" };
 beforeEach(() => {
  vi.clearAllMocks();
  m.reputation.mockResolvedValue([{ isMalicious: false, sources: [] }]);
  m.rpc.mockResolvedValue({ error: { message: "write failed" } });
- m.host.mockResolvedValue(true);
+ m.host.mockResolvedValue("host");
 });
 it("does not report success when recording a successful external submission fails", async () => {
  m.submit.mockResolvedValue({ ok: true, uuid: "scan-1" });
@@ -41,7 +45,7 @@ it("leaves the database untouched on quota exhaustion", async () => {
 // not "not NXDOMAIN": a zone with NS but no A (prod sucway.net, apple.co.mw,
 // amazom.yoga) still drew urlscan's "400 DNS Error" under the old check.
 it("skips urlscan + reputation for a name with no host and stamps a 400", async () => {
- m.host.mockResolvedValue(false);
+ m.host.mockResolvedValue("no_host");
  m.rpc.mockResolvedValue({ error: null });
  const out = await submitCloneCandidate(candidate);
  expect(DNS_PRECHECK_ERROR).toBe("dns_no_host_precheck");
@@ -52,9 +56,24 @@ it("skips urlscan + reputation for a name with no host and stamps a 400", async 
  expect(evidence).toMatchObject({ status: 400, error: DNS_PRECHECK_ERROR });
 });
 it("an inconclusive resolver answer still scans", async () => {
- m.host.mockResolvedValue(null);
+ m.host.mockResolvedValue("unknown");
  m.rpc.mockResolvedValue({ error: null });
  m.submit.mockResolvedValue({ ok: true, uuid: "scan-2" });
  await submitCloneCandidate(candidate);
  expect(m.submit).toHaveBeenCalledTimes(1);
 });
+
+// 2026-09-25: A and AAAA both SERVFAIL — every such name measured in prod was
+// also refused by urlscan ("could not resolve"). Skipped like no_host, stamped
+// with the same status-400 shape (same 168 h cadence), counted apart.
+it("skips urlscan + reputation for a SERVFAIL name and stamps a 400 with its own error", async () => {
+ m.host.mockResolvedValue("servfail");
+ m.rpc.mockResolvedValue({ error: null });
+ const out = await submitCloneCandidate(candidate);
+ expect(out).toMatchObject({ kind: "dns_servfail", error: DNS_SERVFAIL_PRECHECK_ERROR });
+ expect(m.submit).not.toHaveBeenCalled();
+ expect(m.reputation).not.toHaveBeenCalled();
+ const evidence = m.rpc.mock.calls[0][1].p_evidence;
+ expect(evidence).toMatchObject({ status: 400, error: "dns_servfail_precheck", stage: "submit_failed" });
+});
+
