@@ -127,4 +127,21 @@ describe("ocrLanyard", () => {
     expect(out.abn).toBeUndefined();
     expect(out.extracted).toBe(true); // charity_name is enough
   });
+
+  it("sends the image first, then the fixed instruction (vision request shape)", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: '{"charity_name":"Real Charity"}' }],
+    });
+    await ocrLanyard("aW1n", "image/png");
+    const req = createMock.mock.calls[0][0];
+    expect(req.model).toBe("claude-haiku-4-5-20251001");
+    expect(req.max_tokens).toBe(400);
+    const [image, text] = req.messages[0].content;
+    expect(image).toEqual({
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "aW1n" },
+    });
+    expect(text.type).toBe("text");
+    expect(text.text).toMatch(/^Read the visible text in this image/);
+  });
 });

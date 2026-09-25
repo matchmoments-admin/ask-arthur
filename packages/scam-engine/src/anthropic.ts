@@ -176,6 +176,12 @@ export class ClaudeTruncatedOutputError extends Error {
   }
 }
 
+/** One base64 image for a vision request. `base64` has no `data:` prefix. */
+export interface ClaudeImageInput {
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  base64: string;
+}
+
 export interface CallClaudeJsonOptions<T> {
   model: ClaudeModelKey;
   /** System prompt — cached when `cacheSystem` is true (default). */
@@ -187,6 +193,11 @@ export interface CallClaudeJsonOptions<T> {
    *  string passed here is escaped a second time). Blocks are always wrapped;
    *  `userIsTrusted` does not apply to them. */
   user: string | { blocks: readonly UntrustedBlockInput[] };
+  /** Images sent before the text part (vision input). Image content is
+   *  untrusted by nature and cannot be delimited like text — keep the
+   *  system prompt's instructions explicit about treating printed text in
+   *  the image as data. Omitted/empty = text-only request, unchanged. */
+  images?: readonly ClaudeImageInput[];
   /** Zod schema the parsed JSON output must satisfy. Throws on mismatch. */
   schema: z.ZodType<T>;
   /** Output token ceiling. */
@@ -264,6 +275,7 @@ export async function callClaudeJson<T>(
     model,
     system,
     user,
+    images = [],
     schema,
     maxTokens,
     timeoutMs = 30_000,
@@ -323,7 +335,27 @@ export async function callClaudeJson<T>(
     model: spec.id,
     max_tokens: maxTokens,
     system: systemBlock,
-    messages: [{ role: "user", content: userContent }],
+    messages: [
+      {
+        role: "user",
+        // Text-only requests keep the plain-string content they always had;
+        // a vision request puts the image parts first, then the text.
+        content:
+          images.length === 0
+            ? userContent
+            : [
+                ...images.map((img) => ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: img.mediaType,
+                    data: img.base64,
+                  },
+                })),
+                { type: "text" as const, text: userContent },
+              ],
+      },
+    ],
   };
   if (useToolUse) {
     // io: 'input' — we want the schema BEFORE Zod transforms run (so
