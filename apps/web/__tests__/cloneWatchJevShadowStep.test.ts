@@ -79,7 +79,7 @@ const invoke = async () => {
   return (out.results?.[0] ?? out) as unknown;
 };
 /** The batch's own boundaries — per-alert work no longer owns a step. */
-const BATCH_STEPS = ["check-brake", "classify-batch", "log-outcome"];
+const BATCH_STEPS = ["classify-batch", "log-outcome"];
 
 function query(result: unknown) {
   const chain: Record<string, unknown> = {
@@ -332,5 +332,36 @@ describe("primary mode (ADR-0026, FF_CLONE_WATCH_JEV_PRIMARY)", () => {
       provider: "typesafe",
       metadata: expect.objectContaining({ reason: "http_error", status: 529 }),
     });
+  });
+});
+
+// A run memoised by the pre-fold code returned a bare results ARRAY from
+// `classify-batch`. Replaying it after the deploy must still write the
+// Outcome Row, and must not re-run any vendor call (review 2026-09-24).
+describe("replay of a run memoised before the brake fold", () => {
+  it("reads a legacy array result as an unbraked batch", async () => {
+    const legacy = [
+      {
+        alertId: 42,
+        ok: true,
+        is_clone: true,
+        confidence: 0.9,
+        clone_tactic: "brandjack",
+        attack_intent: "credential_phishing",
+        jev: "off",
+      },
+    ];
+    const out = (await (
+      cloneWatchHaikuPreclassify as unknown as (ctx: unknown) => Promise<unknown>
+    )({
+      events: [EVENT],
+      step: {
+        run: (name: string, fn: () => unknown) =>
+          name === "classify-batch" ? legacy : fn(),
+      },
+    })) as { ok: boolean; classified: number };
+    expect(out).toMatchObject({ ok: true, classified: 1 });
+    expect(mocks.callClaude).not.toHaveBeenCalled();
+    expect(mocks.askJev).not.toHaveBeenCalled();
   });
 });
