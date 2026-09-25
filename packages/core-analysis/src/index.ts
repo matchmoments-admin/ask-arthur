@@ -1,6 +1,8 @@
 export {
   mergeVerdict,
   verdictRank,
+  isImageOnlySubmission,
+  IMAGE_ONLY_NEXT_STEP,
   type VerdictSignals,
   type VerdictMergeInput,
   type VerdictMergeOutput,

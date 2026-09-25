@@ -162,6 +162,47 @@ describe("/api/analyze input validation", () => {
     expect(data.verdict).toBeDefined();
   });
 
+  // Founder decision 2026-09-25: an image-only submission never returns SAFE.
+  it("lowers a model SAFE to UNCERTAIN for an image-only submission", async () => {
+    const { analyzeWithClaude } = await import("@askarthur/scam-engine/claude");
+    vi.mocked(analyzeWithClaude).mockResolvedValue({
+      verdict: "SAFE",
+      confidence: 0.95,
+      summary: "Looks like a normal delivery notice",
+      redFlags: [],
+      nextSteps: [],
+    });
+    const smallImage = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("payload"),
+    ]).toString("base64");
+    const res = await POST(makeRequest({ image: smallImage }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.verdict).toBe("UNCERTAIN");
+    expect(data.nextSteps[0]).toMatch(/can't confirm a screenshot is safe/);
+  });
+
+  it("keeps a model SAFE when the user typed text with the image", async () => {
+    const { analyzeWithClaude } = await import("@askarthur/scam-engine/claude");
+    vi.mocked(analyzeWithClaude).mockResolvedValue({
+      verdict: "SAFE",
+      confidence: 0.95,
+      summary: "Looks fine",
+      redFlags: [],
+      nextSteps: [],
+    });
+    const smallImage = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("payload"),
+    ]).toString("base64");
+    const res = await POST(
+      makeRequest({ text: "Is this from my bank?", image: smallImage }),
+    );
+    const data = await res.json();
+    expect(data.verdict).toBe("SAFE");
+  });
+
   // A-04: Text + image combined → 200
   it("returns 200 for text + image combined analysis", async () => {
     const smallImage = Buffer.concat([
