@@ -180,6 +180,10 @@ export interface LaneOutcome {
      *  first. Absent on quiet runs and rows before 2026-09-24 (when this lane
      *  still folded 429s into submit_failed). */
     rate_limited?: number;
+    /** Never-scanned dead rows the v326 worklist holds out (no uuid, 400
+     *  status, failure streak >= 8). null = the count failed; absent before
+     *  2026-09-26. */
+    dormant_dead?: number | null;
     /** Candidates the wall-clock budget stopped before; they re-present. */
     unreached?: number;
   };
