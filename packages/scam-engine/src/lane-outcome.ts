@@ -216,6 +216,28 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
+    /** Not-a-clone audit (#1238, v330). Kept OUT of `units`, `submitted` and
+     *  `dns_*` on purpose: those describe the regular gated batch, which is
+     *  what the silent-zero shape judges; the audit tally is separate. All
+     *  absent before v330. The FN rate itself is
+     *  clone_watch_not_a_clone_audit_summary(), not a per-run field. */
+    /** Sample rows the weekly draw marked on this run (0 on six days of seven,
+     *  and while the weekly flag is off). */
+    audit_drawn?: number;
+    /** Misses surfaced this run — each also shipped as an always-ship Axiom
+     *  warn, and stamped miss_warned_at only after this row is written. */
+    audit_misses?: number;
+    /** The alert ids of those misses: the durable record of what was surfaced. */
+    audit_miss_ids?: number[];
+    /** Audit samples in this run's batch (≤ AUDIT_SLOTS_PER_RUN). */
+    audit_offered?: number;
+    /** Samples tried (an attempt recorded; excludes 429s and unreached). */
+    audit_attempted?: number;
+    audit_submitted?: number;
+    /** no_host + SERVFAIL at the DNS precheck. */
+    audit_dns_skipped?: number;
+    audit_submit_failed?: number;
+    audit_rate_limited?: number;
   };
   "shopfront-clone-urlscan-retrieve": {
     classified: number;

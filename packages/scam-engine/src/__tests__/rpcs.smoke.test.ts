@@ -183,6 +183,19 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     }
   });
 
+  // v330 (#1238) — the two read-only not-a-clone audit RPCs the submit lane and
+  // the #1237 scorecard call. Both SECURITY DEFINER with search_path '' and a
+  // RETURNS TABLE, i.e. exactly the shape whose bites only surface on first call.
+  it("not-a-clone audit worklist + summary execute", async () => {
+    const supabase = getClient();
+    const list = await supabase.rpc("list_clone_not_a_clone_audit_pending", { p_limit: 1 });
+    expect(list.error).toBeNull();
+    expect(Array.isArray(list.data)).toBe(true);
+    const summary = await supabase.rpc("clone_watch_not_a_clone_audit_summary", { p_since: null });
+    expect(summary.error).toBeNull();
+    expect(Array.isArray(summary.data)).toBe(true);
+  });
+
   // Unactioned-lookalike age snapshot (v231).
   it("clone_watch_unactioned_age_stats executes without error", async () => {
     const supabase = getClient();

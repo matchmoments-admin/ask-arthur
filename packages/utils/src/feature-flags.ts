@@ -837,6 +837,15 @@ export const featureFlags = {
    *  until the clone-watch FP rate is validated. Server-side only. */
   cloneWatchFeedEntities: readBoolEnv("FF_CLONE_WATCH_FEED_ENTITIES"),
 
+  /** Not-a-clone audit, weekly sample (#1238, v330) — the daily urlscan submit
+   *  lane draws ~5% of the never-scanned pre-classifier is_clone=false pool
+   *  once per UTC ISO week and scans it from its existing 75-slot batch, so the
+   *  classifier's false-negative rate keeps being measured. The one-off
+   *  baseline sample is drawn by an operator and does NOT need this flag.
+   *  Default OFF: turn on after reading the baseline's FN rate. Server-side
+   *  only; no new urlscan volume (samples share the lane's slots). */
+  cloneWatchNotACloneAuditWeekly: readBoolEnv("FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY"),
+
   /** PR-B2 — auto-approve brand notifications instead of requiring an
    *  admin click in Telegram. Default OFF: every batch shows up as a
    *  Telegram preview with an HMAC-signed approve URL; the admin clicks

@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-// Runs the REAL v326 recheck worklist SQL (worklist-gate-starvation rule: an
-// exclusion must be counted, and the rows it keeps must still rotate).
+// Runs the REAL recheck worklist SQL (worklist-gate-starvation rule: an
+// exclusion must be counted, and the rows it keeps must still rotate). The
+// migrations load in order and v330 LAST, so every case below runs against the
+// CURRENT body (v330 = v328 + the not-a-clone audit cadence). Go-red
+// (2026-09-26): loading v330 with its dead-dormancy predicate removed failed
+// "holds out a never-scanned 400 row with streak >= 8, and counts it".
 const migration = (name: string) =>
   readFileSync(new URL(`../../../supabase/${name}`, import.meta.url), "utf8");
 
@@ -18,17 +22,29 @@ beforeAll(async () => {
       urlscan_classification text, urlscan_uuid text, urlscan_evidence jsonb,
       urlscan_failure_streak integer DEFAULT 0, recheck_count integer DEFAULT 0,
       last_rechecked_at timestamptz, first_seen_at timestamptz DEFAULT now(),
-      signals jsonb, attribution jsonb, inferred_target_domain text
+      signals jsonb, attribution jsonb, inferred_target_domain text,
+      -- v330 (read by its recheck clock + audit state function)
+      urlscan_scanned_at timestamptz, urlscan_submitted_at timestamptz,
+      triage_status text, weaponised_at timestamptz, evidence jsonb,
+      updated_at timestamptz
     );
     CREATE TABLE clone_watch_classifications (
-      alert_id bigint, is_clone boolean, confidence real, attack_intent text, clone_tactic text
+      alert_id bigint PRIMARY KEY, is_clone boolean, confidence real, attack_intent text,
+      clone_tactic text, model_id text, classified_at timestamptz
     );
     CREATE TABLE known_brands (brand_domain text, brand_category text);
+    CREATE TABLE clone_watch_scan_transitions (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, alert_id bigint NOT NULL,
+      new_classification text NOT NULL, scanned_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
   await db.exec(migration("migration-v326-recheck-dead-dormancy-and-age-taper.sql"));
   // v328 re-creates the worklist with due_total — the body every case below
   // now runs against (v326's predicates, unchanged).
   await db.exec(migration("migration-v328-recheck-due-total.sql"));
+  // v330 re-creates it again (audit cadence); loaded LAST so it is the body
+  // under test. It also creates clone_watch_not_a_clone_samples, which it reads.
+  await db.exec(migration("migration-v330-clone-not-a-clone-audit-sample.sql"));
 }, 30_000);
 afterAll(async () => db?.close());
 beforeEach(async () => db.exec("DELETE FROM shopfront_clone_alerts"));
