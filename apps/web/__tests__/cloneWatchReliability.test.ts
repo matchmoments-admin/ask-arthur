@@ -49,6 +49,16 @@ function query(result: unknown) {
     chain[method] = () => chain;
   return chain;
 }
+// #1229/v331: the recheck stamp is ONE array RPC per run. Returns the ids it
+// stamped, or null when it was not called. Asserts there is at most one call —
+// a regression to the per-id loop fails here, not only in the ids.
+function stampedIds(): number[] | null {
+  const calls = mocks.rpc.mock.calls.filter(([name]) =>
+    name === "mark_clone_alerts_rechecked" || name === "mark_clone_alert_rechecked");
+  expect(calls.every(([name]) => name === "mark_clone_alerts_rechecked")).toBe(true);
+  expect(calls.length).toBeLessThanOrEqual(1);
+  return calls.length ? (calls[0]![1] as { p_alert_ids: number[] }).p_alert_ids : null;
+}
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 beforeEach(() => {
   vi.clearAllMocks();
@@ -122,15 +132,14 @@ describe("worker recovery", () => {
     mocks.submit.mockImplementation(async () => { now += 500_000; return { kind: "submitted" }; });
     await invoke(cloneWatchLifecycleRecheck);
     expect(mocks.submit).toHaveBeenCalledTimes(1);
-    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked")).toEqual([
-      ["mark_clone_alert_rechecked", { p_alert_id: 1 }],
-    ]);
+    expect(stampedIds()).toEqual([1]);
   });
   it("does not mark a rate-limited submission as rechecked (quota says nothing about the URL)", async () => {
     mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? [{ id: 1, lifecycle_state: "monitoring" }] : null, error: null }));
     mocks.submit.mockResolvedValue({ kind: "rate_limited" });
     await invoke(cloneWatchLifecycleRecheck);
-    expect(mocks.rpc.mock.calls.some(([name]) => name === "mark_clone_alert_rechecked")).toBe(false);
+    // No ids → no RPC at all (not an empty-array call).
+    expect(stampedIds()).toBeNull();
     // …and it is counted as quota, not a failure (2026-09-24: this lane used to
     // fold 429s into submit_failed, which paged the digest as silent_zero).
     expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -150,10 +159,7 @@ describe("worker recovery", () => {
       .mockResolvedValueOnce({ kind: "submit_failed", error: "rejected" })
       .mockResolvedValueOnce({ kind: "submitted" });
     await invoke(cloneWatchLifecycleRecheck);
-    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked").map(([, args]) => args)).toEqual([
-      { p_alert_id: 1 },
-      { p_alert_id: 2 },
-    ]);
+    expect(stampedIds()).toEqual([1, 2]);
     expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
       feature: "shopfront_clone_recheck",
       metadata: expect.objectContaining({ rechecked: 2, submitted: 1, submit_failed: 1 }),
@@ -169,10 +175,7 @@ describe("worker recovery", () => {
       .mockResolvedValueOnce({ kind: "dns_no_host", error: "dns_no_host_precheck" })
       .mockResolvedValueOnce({ kind: "submitted" });
     await invoke(cloneWatchLifecycleRecheck);
-    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked").map(([, args]) => args)).toEqual([
-      { p_alert_id: 1 },
-      { p_alert_id: 2 },
-    ]);
+    expect(stampedIds()).toEqual([1, 2]);
     expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
       feature: "shopfront_clone_recheck",
       metadata: expect.objectContaining({ rechecked: 2, submitted: 1, submit_failed: 0, dns_skipped: 1 }),
@@ -182,9 +185,27 @@ describe("worker recovery", () => {
     mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? [{ id: 9, lifecycle_state: "declined" }] : null, error: null }));
     mocks.submit.mockRejectedValueOnce(new Error("record scan failure failed: boom"));
     await invoke(cloneWatchLifecycleRecheck);
-    expect(mocks.rpc.mock.calls.filter(([name]) => name === "mark_clone_alert_rechecked")).toEqual([
-      ["mark_clone_alert_rechecked", { p_alert_id: 9 }],
-    ]);
+    expect(stampedIds()).toEqual([9]);
+  });
+  // #1229/v331: one array RPC per run, however large the batch — the loop of
+  // per-id round trips it replaces sat inside a held Inngest slot. A throw on
+  // the batch write still fails the step (retry), never a silent half-stamp.
+  // Go-red (2026-09-26): restoring the per-id loop in mark-rechecked fails
+  // stampedIds()'s every-name and ≤1-call assertions here and above.
+  it("stamps the whole attempted batch in one RPC, and throws when it fails", async () => {
+    // Three rows: the submit lane paces starts 1.1s apart, so more is slow.
+    const candidates = [1, 2, 3].map(id => ({ id, candidate_url: `https://c${id}.example`, candidate_domain: `c${id}.example`, lifecycle_state: "declined", last_rechecked_at: null }));
+    mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? candidates : null, error: null }));
+    await invoke(cloneWatchLifecycleRecheck);
+    expect(stampedIds()?.slice().sort()).toEqual([1, 2, 3]);
+
+    mocks.rpc.mockReset();
+    mocks.rpc.mockImplementation(async name => name === "list_clone_alerts_for_recheck"
+      ? { data: candidates.slice(0, 1), error: null }
+      : name === "mark_clone_alerts_rechecked"
+        ? { data: null, error: { message: "boom" } }
+        : { data: null, error: null });
+    await expect(invoke(cloneWatchLifecycleRecheck)).rejects.toThrow("mark_clone_alerts_rechecked failed for 1 alerts: boom");
   });
   // From #1124 to #1141 the submit loop's budget was a spanning one measured
   // from event.ts. A cron event's ts is the scheduled tick; the fn reaches
