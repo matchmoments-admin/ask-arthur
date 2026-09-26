@@ -199,13 +199,22 @@ function auditSampleOf(embed: AuditSampleEmbed): { miss_at: string | null } | nu
 type AuditJudged = {
   clone_watch_not_a_clone_samples?: AuditSampleEmbed;
   clone_watch_classifications?: { is_clone: boolean | null } | null;
+  /** Read when the select carries it; absent = not operator-confirmed. */
+  triage_status?: string | null;
 };
+
+/** A human confirmed the lookalike is a real clone — the brand attribution is theirs, not the classifier's. */
+const OPERATOR_CONFIRMED = new Set(["tp_confirmed", "tp_actioned"]);
 
 /** True when the row's urlscan-derived facts must not be attributed to its brand. */
 export function isAuditWithheld(row: AuditJudged): boolean {
   return (
     auditSampleOf(row.clone_watch_not_a_clone_samples) !== null &&
-    row.clone_watch_classifications?.is_clone !== true
+    row.clone_watch_classifications?.is_clone !== true &&
+    // Released by a re-classification to is_clone=true (the v330 rule) OR by
+    // an operator confirming it (review of #1258: only the classifier writes
+    // is_clone, so without this a human-confirmed miss stayed "unclassified").
+    !OPERATOR_CONFIRMED.has(row.triage_status ?? "")
   );
 }
 

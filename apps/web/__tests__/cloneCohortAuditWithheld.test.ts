@@ -41,6 +41,8 @@ import {
  *   - cohort mask: drop `.map(withholdAuditVerdict)` from applyCohortRules →
  *     4 red (applyCohortRules, per-brand byClassification, the ING trend row
  *     reads likely_phishing 2, the card KPI reads likelyPhishing 2).
+ *   - release on operator confirmation: drop the OPERATOR_CONFIRMED check →
+ *     a tp_confirmed miss stays withheld.
  *   - release on re-judgement: drop `is_clone !== true` from isAuditWithheld →
  *     1 red (the operator-confirmed sample loses its verdict).
  *   - array tolerance: return the raw array from auditSampleOf → 1 red (`[]`,
@@ -153,6 +155,15 @@ describe("withholdAuditVerdict — which rows are withheld", () => {
     };
     expect(isAuditWithheld(r)).toBe(false);
     expect(withholdAuditVerdict(r)).toBe(r);
+  });
+
+  it("releases a sample an operator confirmed (tp_confirmed / tp_actioned), whatever is_clone says", () => {
+    for (const triage_status of ["tp_confirmed", "tp_actioned"]) {
+      const r = { ...miss(), triage_status };
+      expect(isAuditWithheld(r)).toBe(false);
+    }
+    // Any other triage state keeps it withheld.
+    expect(isAuditWithheld({ ...miss(), triage_status: "needs_investigation" })).toBe(true);
   });
 
   it("leaves an unsampled row untouched (identity, not a copy)", () => {
