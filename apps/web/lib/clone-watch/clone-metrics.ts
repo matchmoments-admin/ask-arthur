@@ -14,7 +14,10 @@
  * cohort's row shape lives next door in clone-cohort.ts; this file is what you
  * fold those rows INTO.
  */
-import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
+import {
+  countTargetingEvents,
+  type CloneAlertRow,
+} from "@/lib/clone-watch/clone-cohort";
 import { PARKED_HOST_PATTERNS } from "@/lib/clone-watch/urlscan-classify";
 import { urlscanEvidenceFromJsonb } from "@/lib/clone-watch/urlscan-evidence";
 import { readAttribution } from "@/lib/clone-watch/attribution";
@@ -238,7 +241,18 @@ export function stockStatus(input: {
 }
 
 export interface CloneBrandMetrics {
+  /** Distinct lookalike DOMAINS. Every per-domain count below is a subset of it. */
   detected: number;
+  /**
+   * `detected` with each bulk registration (one label on ≥4 TLDs, #1084)
+   * counted once — how many times the brand was TARGETED, which is what the
+   * ranking, the spotlight and the per-brand trend compare (matcher v5). Not a
+   * denominator for the per-domain counts: 9 `gonds.*` domains are 1 event and
+   * 9 declined.
+   */
+  targetingEvents: number;
+  /** The groups folded into `targetingEvents`, largest first. */
+  bulkRegistrations: Array<{ label: string; domains: number }>;
   /** Distinct clone domains we submitted to Netcraft (browser/blocklist). */
   netcraftReported: number;
   /** Netcraft actioned it (lifecycle taken_down). */
@@ -397,6 +411,8 @@ export function aggregateClonesByDomain(
     if (!m) {
       m = {
         detected: 0,
+        targetingEvents: 0,
+        bulkRegistrations: [],
         netcraftReported: 0,
         takenDown: 0,
         declined: 0,
@@ -459,6 +475,14 @@ export function aggregateClonesByDomain(
     bump(m.byRegistrar, detail.registrar);
     bump(m.byAsn, detail.asn);
     m.domains.push(detail);
+  }
+
+  // #1084: the targeting-event fold runs over the brand's FULL deduped set
+  // (`seenDomain`), never the capped detail list.
+  for (const [brandDomain, m] of out) {
+    const folded = countTargetingEvents(seenDomain.get(brandDomain) ?? []);
+    m.targetingEvents = folded.events;
+    m.bulkRegistrations = folded.bulkRegistrations;
   }
 
   // Sort + cap each brand's detail list. F2: still-live rows first (the

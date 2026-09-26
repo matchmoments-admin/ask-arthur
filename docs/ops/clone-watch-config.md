@@ -700,6 +700,102 @@ prints — LinkedIn caption and `/clone-watch/[period]` alike.
 - **Three months.** `mom.series` / claimable `series` carry the last three
   published months; an unpublished month is null and the line is omitted,
   never shown as 0.
+- **Per-brand unit = targeting events (matcher v5, #1084).** The ranking, the
+  spotlight and each brand's delta count a bulk registration (one label on
+  ≥ 4 TLDs in the month) once; the headline total stays in domains. A prior
+  month frozen without `targeting_events` (every v4 month) reads as a method
+  change for the per-brand comparison — never as 0, never back-filled.
+
+## 7b. Matcher v5 — short-brand recall + bulk registrations (#1150 / #1084, 2026-09-27)
+
+**What changed.** v4 gated the 1-edit neighbourhood of every 5-char token
+and lost nine CONFIRMED threats (appie.{bond,beer,autos,mom,beauty},
+appve.vu, bonos.buzz, bnds.cl, woles.net). v5 recovers 8 of them on two paths,
+only where v4 said no (every v4 match is a v5 match):
+
+- **homoglyph** — one visual-confusable substitution (`HOMOGLYPH_SUBSTITUTIONS`
+  in `lexical-match.ts`), every brand: appie, b0nds, c0les, sh3in.
+- **open_neighbourhood** — brands flagged `openShortNeighbourhood` in
+  `au-brand-watchlist.ts` (Apple, Bonds): any non-word 1-edit label.
+- **known miss: woles.net (Coles).** Decision 2026-09-27, accuracy before
+  any brand contact: opting Coles in took it 11 → 20 in 90 days for that
+  one threat, whose shape (first-letter swap) matches koles.fi / noles.net.
+  Homoglyphs (c0les) still match; a test pins the flag OFF.
+- **floor** — `SHORT_BRAND_NEIGHBOUR_WORDS` (generated, 172 words incl. an Australian + foreign supplement: bondi, cowes, appli, bonde, bondo, bondy, bondu …) blocks
+  both paths: bonus/bands/gonds/apply/bondi/cowes stay dead.
+
+A row ingested under v5 carries `signals[].evidence.short_brand_gate`, so v5
+additions from merge onward are selectable (rows ingested earlier carry the
+signals of the matcher that wrote them — see the re-triage note below):
+
+```sql
+SELECT candidate_domain, inferred_target_domain, s->'evidence'->>'short_brand_gate' AS gate,
+       triage_status, lifecycle_state, urlscan_classification, weaponised_at
+FROM shopfront_clone_alerts, jsonb_array_elements(signals) s
+WHERE s->'evidence' ? 'short_brand_gate'
+ORDER BY first_seen_at DESC;
+```
+
+**The matcher is stamped by PERIOD, not by code (#1262 review, D2).** The
+store's `matcher_version` and the per-brand unit come from
+`matcherVersionForPeriod` / `MATCHER_VERSION_CUTOVERS` (lexical-match.ts):
+months before 2026-10-01 are v4 with `targeting_events` NULL and per-brand
+numbers in domains, even when re-folded or re-published by v5 code; from
+October they are v5 and targeting events. **If the merge slips past October,
+move the v5 cut-over to the merge month in the same PR.** October 2026
+includes under a day of v4 ingestion (the 1 Oct 08:30 UTC run, before the
+merge).
+
+**Word-list reproducibility (D4).** The generator's inputs are NOT pinned in
+the repo: `/usr/share/dict/*` differ between macOS releases (and do not exist
+on Linux), and en_50k is fetched. The script header records the URL and the
+SHA-256 of every input used for the committed list. CI checks what it can
+without the inputs (every word is one edit from a covered token; every
+supplement word is present; `appie` is absent) — not byte equality.
+
+**Why not the #1083 word denylist alone.** Measured, it is wrong in the
+data: 326 of the 478 labels v4 dropped since June are NOT dictionary words
+(xbank, dmart, medex, doula, iioet), so rejecting only words re-admits ~114
+a month at a 2.8% threat rate (v4's kept matches: 8.9%). v5 adds 21 domains
+to the 90-day cohort (26 since June), 8 of them confirmed threats, ~10 a
+month on the raw feed.
+
+**Opening another brand.** Set `openShortNeighbourhood` only on evidence (a
+confirmed threat in the brand's gated neighbourhood), and re-run the
+harness: export 90 days of distinct `candidate_domain`s + every
+weaponised / taken_down / likely_phishing alert, download the same days of
+the whoisds free file (`computeNrdUrl` — the feed prod saw; the free file
+is the whole input), run `lexicalMatch` from `origin/main` and the branch
+over both, and diff by brand. Check every added or dropped domain against
+`weaponised_at` / `lifecycle_state` / `urlscan_classification` — the v4
+audit stamped every v4 drop `triage_status='fp'` mechanically
+(`[matcher-v4-audit]`), so `fp` on those rows is not a judgment.
+A new 5-char brand or alias makes the covered-token guard red until
+`scripts/gen-short-brand-neighbour-words.ts` is re-run.
+
+**Do NOT use §5's "wipe `source='nrd'` rows + re-fire" verification for
+v5** — it would destroy lifecycle / Netcraft / weaponisation history. The
+harness above is the verification.
+
+**Re-triage after merge (operator; read-only plan, measured 2026-09-27).**
+Matching is decided at ingest. v5 re-admits 26 existing rows first seen
+June–August (June 8, July 12, August 6): 18 carry the v4 audit's mechanical
+`fp` and are dropped by `applyCohortRules`; the other 8 are the confirmed
+threats, already counted. From 2026-09-04 v4 never inserted its gated labels,
+so ~7 September v5 hits (measured on the raw feed) do not exist as rows —
+the ingest has no dated-backfill parameter, and none is proposed.
+
+- June–August are published as v4. Do not restate them: un-fp-ing their 18
+  rows changes nothing until a re-publish, and a re-publish restates
+  editions already read (and re-stamps them `v5`) — not worth 36 rows spread
+  over three months.
+- September freezes as v4 on 1 October (merge after that — see the PR).
+- October is the first v5 month; its edition (1 November) shows no MoM
+  (method changed, #1247), November's is the first comparable one.
+- If a restatement is ever wanted: `triage_status` back to
+  `needs_investigation`, note `[matcher-v5-audit]`, `triage_by` NULL, for the
+  26 rows listed by id in PR #1262 (their signals predate v5, so the SQL
+  above cannot find them) — then re-publish with an `editorialNote`.
 
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)
 

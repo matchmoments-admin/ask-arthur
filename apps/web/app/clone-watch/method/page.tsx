@@ -77,6 +77,19 @@ export default function CloneWatchMethodPage() {
           then classified (including an AI pre-classifier and, where the domain
           resolves, urlscan evidence).
         </p>
+        <p className="mt-3">
+          For short (five-letter) brand names, a one-character change usually
+          spells an ordinary word — bonus for Bonds, mart for Kmart — so we
+          never count a near-miss that is a dictionary word, and count other
+          one-character changes only when they swap in a look-alike character
+          (l→i, o→0) or the brand&apos;s near-misses have already been used in
+          confirmed phishing.
+        </p>
+        <p className="mt-3">
+          When one name is registered across four or more web endings in the
+          same month, every domain is still tracked, but the brand&apos;s
+          ranking and month-on-month change count that bulk registration once.
+        </p>
       </Section>
 
       <Section title="Definitions">

@@ -24,7 +24,7 @@
  */
 import {
   AU_BRAND_WATCHLIST,
-  LEXICAL_MATCHER_VERSION,
+  matcherVersionForPeriod,
 } from "@askarthur/shopfront-glue";
 import {
   summariseCampaigns,
@@ -37,7 +37,10 @@ import {
   type DurationKpis,
   type RegistrarWeaponisationRow,
 } from "@/lib/clone-watch/duration-kpis";
-import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
+import {
+  periodCountsTargetingEvents,
+  type CloneAlertRow,
+} from "@/lib/clone-watch/clone-cohort";
 import {
   aggregateClonesByDomain,
   buildRegistrarRollup,
@@ -154,6 +157,14 @@ export interface CloneWatchReportCard {
   periodMonth: string;
   /** Human label, e.g. "June 2026". */
   periodLabel: string;
+  /**
+   * The unit of every PER-BRAND number on the card (topAuBrands, globalBrands,
+   * superFund.clones, spotlight.clones, brandTrends). "targeting_events" from
+   * the v5 cut-over (a bulk registration counted once, #1084); "domains"
+   * before it. `total` is always domains. Surfaces label by this, never by
+   * assumption (#1262 review, D1). Absent on cards persisted before v5 = domains.
+   */
+  perBrandUnit?: "targeting_events" | "domains";
   /** Optional editorial note, emitted verbatim by the caption immediately after
    *  the month-on-month sentence. Exists for RESTATEMENTS: when the method
    *  changes we re-run prior months so the comparison is like-for-like, which
@@ -324,6 +335,10 @@ export interface BrandTrendRow {
   brand: string;
   is_au: boolean;
   clones: number;
+  /** `clones` with each bulk registration counted once (#1084, v337). A
+   *  zero row is a measured 0 — the brand was watched and not targeted.
+   *  NULL for a period before the v5 cut-over: not measured (D2). */
+  targeting_events: number | null;
   reported_to_netcraft: number;
   likely_phishing: number;
   parked: number;
@@ -468,6 +483,9 @@ export interface FrozenMonth {
   brands: number;
   matcherVersion: string | null;
   sweptDomains: number | null;
+  /** Targeting events per brand (v337 `targeting_events`, matcher v5+).
+   *  null = the month was frozen without them (any v4 month) — NOT zero. */
+  eventsByBrand: Map<string, number> | null;
 }
 
 /** Feed-volume change above which a delta carries a "feed changed" caveat. */
@@ -484,15 +502,37 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   const priorByBrand = aggregateClonesByDomain(priorRows);
   // #1226: last month as PUBLISHED, when it was.
   const priorFrozen = input.priorStore?.get(prevWin.periodMonth) ?? null;
+  // Per-brand comparisons (ranking, spotlight, trend) are in TARGETING EVENTS
+  // since matcher v5 (#1084): a bulk registration of one label across ≥4 TLDs
+  // is one event, so `gonds.*` × 9 cannot make Bonds a riser on its own. The
+  // TOTAL stays in domains (below) — every domain is a real registration, and
+  // the headline is "lookalike domains".
+  //
+  // A frozen month written before v5 has no event counts (`eventsByBrand`
+  // null). Comparing this month's events with its domains would be two units
+  // in one delta, so such a prior is treated as a method change for the brand
+  // comparisons — never read as 0, never back-filled with `clones`.
+  //
+  // A month ingested BEFORE the v5 cut-over keeps domains as its per-brand
+  // unit even when re-folded by this code (#1262 review, D2).
+  const countsEvents = periodCountsTargetingEvents(periodMonth);
+  const unitOf = (m: CloneBrandMetrics): number =>
+    countsEvents ? m.targetingEvents : m.detected;
+  const priorEventsMeasured =
+    !countsEvents || !priorFrozen || priorFrozen.eventsByBrand !== null;
   const priorClonesOf = (brand: string): number =>
     priorFrozen
-      ? (priorFrozen.byBrand.get(brand) ?? 0)
-      : (priorByBrand.get(brand)?.detected ?? 0);
+      ? countsEvents
+        ? (priorFrozen.eventsByBrand?.get(brand) ?? 0)
+        : (priorFrozen.byBrand.get(brand) ?? 0)
+      : (priorByBrand.get(brand) ? unitOf(priorByBrand.get(brand)!) : 0);
   // The reported month's OWN matcher version: its stamped value when it is
   // already frozen (a re-compute after a later bump must not suppress an
-  // edition that was comparable), else the code in force now.
+  // edition that was comparable), else the matcher the PERIOD was ingested
+  // under — never the code in force (#1262 review, D2).
   const currentFrozen = input.priorStore?.get(periodMonth) ?? null;
-  const currentMatcher = currentFrozen?.matcherVersion ?? LEXICAL_MATCHER_VERSION;
+  const currentMatcher =
+    currentFrozen?.matcherVersion ?? matcherVersionForPeriod(periodMonth);
   const methodChanged =
     priorFrozen?.matcherVersion != null &&
     priorFrozen.matcherVersion !== currentMatcher;
@@ -557,28 +597,32 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   for (const [brand, m] of byBrand) {
     const priorClones = priorClonesOf(brand);
     const v = classifyTrend({
-      currentClones: m.detected,
+      currentClones: unitOf(m),
       priorClones,
       currentMonth: periodMonth.slice(0, 7),
       priorMonth: priorPeriod,
       coverage: coverageByBrand.get(brand),
-      methodChanged,
+      methodChanged: methodChanged || !priorEventsMeasured,
     });
     verdicts.push(v);
     verdictByBrand.set(brand, v);
     if (v.kind === "claimable") {
       claimable.push({
         brand,
-        clones: m.detected,
+        clones: unitOf(m),
         priorClones,
         delta: v.delta,
         pct: v.pct,
         // Published months only: absent = not watched / not published
         // (v325 writes a zero row for every watched brand), never 0.
         series: [
-          seriesTwoBack ? (seriesTwoBack.byBrand.get(brand) ?? null) : null,
-          priorFrozen ? priorClones : null,
-          m.detected,
+          !seriesTwoBack
+            ? null
+            : countsEvents
+              ? (seriesTwoBack.eventsByBrand?.get(brand) ?? null)
+              : (seriesTwoBack.byBrand.get(brand) ?? null),
+          priorFrozen && priorEventsMeasured ? priorClones : null,
+          unitOf(m),
         ],
       });
     }
@@ -635,7 +679,8 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   const topRegistrars = rollupRegistrars(rawRegistrars).slice(0, 6);
 
   const ranked = [...byBrand.entries()]
-    .map(([brand, m]) => ({ brand, clones: m.detected }))
+    // Ranked by targeting events (#1084) — the spotlight reads this list.
+    .map(([brand, m]) => ({ brand, clones: unitOf(m) }))
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
   // Super-fund spotlight: the highest-ranked super fund, with its rank among
@@ -677,6 +722,7 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   return {
     periodMonth,
     periodLabel: label,
+    perBrandUnit: countsEvents ? "targeting_events" : "domains",
     total,
     brands: byBrand.size,
     watchlistSize,
@@ -738,6 +784,8 @@ export function buildTrendRows(
   const { periodMonth } = input.window;
   const rows = input.rows;
   const byBrand = aggregateClonesByDomain(rows);
+  // Before the v5 cut-over the month was never measured in targeting events.
+  const countsEvents = periodCountsTargetingEvents(periodMonth);
 
   // Per-brand characterisation over the SAME already-fetched rows — no second
   // query. Keyed on inferred_target_domain, which is exactly the key `byBrand`
@@ -779,7 +827,8 @@ export function buildTrendRows(
         coverage && coverage.length > 0
           ? domainCoveredForMonth(coverage, brand, periodMonth)
           : null,
-      matcher_version: LEXICAL_MATCHER_VERSION,
+      // The PERIOD's matcher, not the code's (#1262 review, D2).
+      matcher_version: matcherVersionForPeriod(periodMonth),
       classifier_version: classifierByBrand.get(brand) ?? null,
       liveness_checked_at: stock ? stock.checkedAt : null,
     };
@@ -792,6 +841,8 @@ export function buildTrendRows(
         brand,
         is_au: isAuBrand(brand),
         clones: m.detected,
+        // NULL before the v5 cut-over: not measured in that unit (D2).
+        targeting_events: countsEvents ? m.targetingEvents : null,
         reported_to_netcraft: m.netcraftReported,
         likely_phishing: m.byClassification["likely_phishing"] ?? 0,
         parked: m.byClassification["parked_for_sale"] ?? 0,
@@ -854,6 +905,7 @@ export function buildTrendRows(
       brand,
       is_au: isAuBrand(brand),
       clones: 0,
+      targeting_events: countsEvents ? 0 : null,
       reported_to_netcraft: 0,
       likely_phishing: 0,
       parked: 0,
