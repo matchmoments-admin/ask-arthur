@@ -271,6 +271,47 @@ describe("classifyLaneHealth", () => {
     expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
   });
 
+  // v334 (#1229 part 2a): the DNS gate can legitimately urlscan nothing — every
+  // row it read was unchanged and got a DNS stamp. Go-red (2026-09-27): drop
+  // the `dns_unchanged === 0` term from the recheck silentZero → the
+  // all-unchanged pair pages as silent_zero. The second half pins that a run
+  // which read DNS but stamped nothing still pages.
+  it("an all-DNS-unchanged recheck run is NOT silent_zero; one that stamped nothing is", () => {
+    const allUnchanged = {
+      pool: 800,
+      rechecked: 0,
+      submitted: 0,
+      submit_failed: 0,
+      rate_limited: 0,
+      dns_checked: 600,
+      dns_unchanged: 600,
+      dns_changed: 0,
+      dns_unknown: 0,
+      dns_no_baseline: 0,
+      floor_due: 0,
+      deferred: 0,
+    };
+    const healthy = [
+      ...without("recheck_batch"),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 1, 0, allUnchanged),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 7, 0, allUnchanged),
+    ];
+    expect(classifyLaneHealth(healthy, { now: NOW })).toEqual([]);
+
+    const stampedNothing = { ...allUnchanged, dns_checked: 0, dns_unchanged: 0 };
+    const broken = [
+      ...without("recheck_batch"),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 1, 0, stampedNothing),
+      outcomeRow("shopfront-clone-lifecycle-recheck", 7, 0, stampedNothing),
+    ];
+    expect(classifyLaneHealth(broken, { now: NOW })).toEqual([
+      expect.objectContaining({
+        lane: "shopfront-clone-lifecycle-recheck",
+        kind: "silent_zero",
+      }),
+    ]);
+  });
+
   it("a single quiet recheck run is NOT a page (consecutive=2)", () => {
     const rows = healthyRows();
     rows[0] = outcomeRow("shopfront-clone-lifecycle-recheck", 1, 0, {

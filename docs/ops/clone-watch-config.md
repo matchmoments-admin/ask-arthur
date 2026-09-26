@@ -390,17 +390,17 @@ lane that stops logging is `absent`, never invisible. **Brake state comes
 from `feature_brakes.paused_until`**, not from the row's `braked` field — a
 cleared brake otherwise read as braked until the lane's next run.
 
-| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                         | consecutive |
-| ------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------- |
-| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed≥rechecked`              | 2           |
-| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                          | 1           |
-| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                                | 3           |
-| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape); **braked** = `feature_brakes` | 1           |
-| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                        | 1           |
-| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                     | 3           |
-| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`                                          | 1           |
-| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                                  | 1           |
-| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                           | —           |
+| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                                                                                   | consecutive |
+| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0 ∧ rate_limited=0 ∧ dns_unchanged=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed>0` (an all-DNS-unchanged run is healthy, v334) | 2           |
+| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                                                                                    | 1           |
+| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                                                                                          | 3           |
+| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape); **braked** = `feature_brakes`                                                           | 1           |
+| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                                                                                  | 1           |
+| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                                                                               | 3           |
+| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`                                                                                                    | 1           |
+| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                                                                                            | 1           |
+| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                                                                                     | —           |
 
 Absence windows: 9h for the 6h lanes, 26h for the daily ones. **Every roster
 lane writes one outcome row per run, including its quiet-day path** (`units 0`,
@@ -1268,6 +1268,66 @@ gate.
 > exempt: its designed cadence asks ~3,800 rescans/day (≈4× the daily quota),
 > so it records `due_total` (v328) instead — the fix is change-triggered
 > rescans (#1229), not a bigger cap.
+
+#### Change-triggered rechecks — the DNS gate (v334, #1229 part 2a)
+
+Each run DNS-reads up to **600** due rows before spending any urlscan quota
+(`RECHECK_DNS` in `apps/web/lib/clone-watch/recheck-dns-gate.ts`; lookups are
+`probeStockDns` in `liveness.ts` — A, AAAA only when A has none, always NS).
+The fingerprint reduces addresses to their **/24 (IPv4) and /48 (IPv6)** and
+two reads MATCH when NS is identical and the address sets overlap. That rule
+is measured, not guessed: on 400 due pool names read twice 11 minutes apart
+(2026-09-26), exact strings flagged 15 "changes" that were all pool rotation —
+Afternic anycast answering one member of its pair, Hostinger parking
+(`*.dns-parking.com`) handing out a fresh address in the same /24 and /48 on
+every query, Vercel rotating inside 216.150.1.0/24 + 216.150.16.0/24. The
+prefix-and-overlap rule gave 0 of 354.
+
+Per row (planUrlscanRechecks in the lane file):
+
+| DNS read                                                  | urlscan?                  | stamp                                            |
+| --------------------------------------------------------- | ------------------------- | ------------------------------------------------ |
+| unchanged, not floor-due                                  | **no**                    | `recheck_dns_checked_at` only (`dns_unchanged`)  |
+| changed                                                   | yes, ahead of everything  | baseline + both clocks after the attempt         |
+| unknown (SERVFAIL / timeout / refused)                    | yes — the gate fails open | as above; an unknown read keeps the old baseline |
+| no baseline (never rescanned since v334)                  | yes                       | as above                                         |
+| any read, **floor-due** (7 d if < 14 days old, else 30 d) | yes                       | as above                                         |
+| not reached by the DNS phase                              | only if floor-due         | none — it stays due                              |
+
+Up to 90 urlscan rows/run, as before (changed rows first, then risk order
+with the 20% stale-floor reserve on the URLSCAN clock). Eligible rows past the
+cap are left unstamped (`deferred`) and lead the next run.
+
+**Two clocks.** `last_rechecked_at` / `recheck_count` stay the URLSCAN recheck
+clock (the floor, the v317 weekly tier and the dead-domain cadence key on
+them). `recheck_dns_checked_at` is the DNS clock. The worklist's queue clock is
+`GREATEST` of the two (NULLs ignored — both NULL = never checked = first).
+
+**Floor evidence** (66 decline→weaponise flips): 26 within 7 days, 13 in days
+7–14, 22 in days 14–45, 5 after 45. The floor bounds only the flips that do
+NOT move DNS (content swapped on the same host); DNS-visible flips are caught
+at the DNS cadence.
+
+**Reading a run** (Outcome Row metadata): `dns_checked`, `dns_unchanged`
+(urlscan calls saved), `dns_changed`, `dns_unknown`, `dns_no_baseline`,
+`floor_due`, `deferred`, `dns_unreached`, `dns_ms` (the DNS phase's wall
+clock — raise `RECHECK_DNS.limit` from this, the cadence wants ~1,000/run).
+`due_total` is now "due for a recheck of either kind". Expect
+`dns_no_baseline` ≈ the whole slice for the first ~5–6 days after deploy
+(every row needs one rescan to set its baseline — the lane behaves as before
+meanwhile), then `dns_unchanged` to dominate.
+
+```sql
+-- DNS gate health, last 3 days
+SELECT created_at, metadata->>'dns_checked' checked, metadata->>'dns_unchanged' unchanged,
+       metadata->>'dns_changed' changed, metadata->>'dns_unknown' unknown,
+       metadata->>'dns_no_baseline' no_baseline, metadata->>'floor_due' floor_due,
+       metadata->>'submitted' submitted, metadata->>'deferred' deferred,
+       metadata->>'due_total' due, metadata->>'dns_ms' dns_ms
+FROM cost_telemetry
+WHERE feature = 'shopfront_clone_recheck' AND created_at > now() - interval '3 days'
+ORDER BY created_at DESC;
+```
 
 1. **Quota check** (pre-flip): pull the prod key and confirm **unlisted**
    headroom ≥200/day and ≥50/hour:

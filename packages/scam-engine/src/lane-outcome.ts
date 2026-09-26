@@ -193,8 +193,29 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
-    /** Rows due in total (v328 window count). null = not returned. */
+    /** Rows due in total (v328 window count). null = not returned. Since
+     *  v334 the queue clock is GREATEST(urlscan clock, DNS clock), so this is
+     *  "due for a recheck of either kind" — the DNS gate's backlog. Kept as
+     *  ONE number rather than split into due_urlscan/due_dns: urlscan demand
+     *  is decided per run AFTER the DNS read, so its backlog is `deferred`. */
     due_total?: number | null;
+    /** v334 DNS gate (#1229 part 2a, recheck-dns-gate.ts). All absent on
+     *  quiet runs and rows written before v334. */
+    /** Rows of the DNS slice actually read (unreached ones excluded). */
+    dns_checked?: number;
+    /** Fingerprint unchanged since the last rescan and not floor-due: NO
+     *  urlscan, DNS stamp only. This is real work — a run of only these is a
+     *  healthy run, not a silent zero (LANE_SHAPES). */
+    dns_unchanged?: number;
+    dns_changed?: number;
+    /** A query SERVFAILed / timed out: urlscanned (the gate fails open). */
+    dns_unknown?: number;
+    /** No baseline yet (never rescanned since v334): urlscanned. */
+    dns_no_baseline?: number;
+    /** Offered rows owed a mandatory rescan whatever DNS said (7 d / 30 d). */
+    floor_due?: number;
+    /** Eligible for urlscan but past the cap; unstamped, they lead next run. */
+    deferred?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
