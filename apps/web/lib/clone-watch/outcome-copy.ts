@@ -39,7 +39,10 @@ export interface CloneOutcomeKpis {
   escalated: number;
   /** Currently serving active phishing (lifecycle weaponised). */
   weaponised: number;
-  /** Weaponised AND previously vendor-declined — the provable flip subset. */
+  /** Weaponised AFTER the vendor declined it, from timestamps — whatever its
+   *  state is now. NOT a subset of `weaponised` since v329 (a flipped clone
+   *  that later went offline or was taken down still counts), so the copy
+   *  below never words it as "of them". */
   weaponisedAfterDecline: number;
   /** Escalated AND now taken_down — subset of takenDown. */
   reTakenDown: number;
@@ -52,6 +55,22 @@ export function hasOutcomes(kpis: CloneOutcomeKpis): boolean {
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+
+/**
+ * CONFOUNDER (v329 review, #1254). From 2026-09 the reconcile lane's DNS sweep
+ * moves weaponised lookalikes whose names stopped resolving to `dormant` —
+ * ~63 of the 142 on its first runs. The month-over-month line compares CLONES
+ * (#1247), not this figure, and nothing user-facing compares weaponised
+ * month-over-month (checked 2026-09-26: trend-copy.ts, clone-watch-caption.ts,
+ * /clone-watch/[period]) — but a reader holding August's edition would, so the
+ * transition month says why its "active phishing" count is lower.
+ */
+export const WEAPONISED_SWEEP_FIRST_MONTH = "2026-09";
+
+export function weaponisedStateCaveat(periodMonth: string | undefined): string {
+  if (!periodMonth || periodMonth.slice(0, 7) !== WEAPONISED_SWEEP_FIRST_MONTH) return "";
+  return "From this month we also check whether each of those sites still exists and stop counting the ones that have disappeared, so a lower figure than last month reflects that check, not fewer attacks.";
+}
 
 /** Per-row lifecycle badge for the stewardship watch-list. Labels follow the
  *  module's verb discipline — "actioned by Netcraft", never "removed"/"we
@@ -96,12 +115,13 @@ export function buildOutcomesLine(kpis: CloneOutcomeKpis): string {
     parts.push(`${kpis.declined} currently graded “no threat” and left live`);
   }
   if (kpis.weaponised > 0) {
-    const flip =
-      kpis.weaponisedAfterDecline > 0
-        ? ` — ${kpis.weaponisedAfterDecline} previously graded “no threat”`
-        : "";
+    parts.push(`${kpis.weaponised} confirmed serving active phishing by our scans`);
+  }
+  // Its own part, never "— N of them": since v329 it is counted from
+  // timestamps and is not a subset of the current-state figure above.
+  if (kpis.weaponisedAfterDecline > 0) {
     parts.push(
-      `${kpis.weaponised} confirmed serving active phishing by our scans${flip}`,
+      `${kpis.weaponisedAfterDecline} served phishing after being graded “no threat”`,
     );
   }
   if (kpis.escalated > 0) {
@@ -118,6 +138,7 @@ export function buildOutcomesLine(kpis: CloneOutcomeKpis): string {
  */
 export function buildOutcomesBlock(
   kpis: CloneOutcomeKpis & { reportedToNetcraft: number },
+  opts: { periodMonth?: string } = {},
 ): string {
   if (!hasOutcomes(kpis)) return "";
   const sentences: string[] = [];
@@ -144,12 +165,17 @@ export function buildOutcomesBlock(
   }
 
   if (kpis.weaponised > 0) {
-    const flip =
-      kpis.weaponisedAfterDecline > 0
-        ? ` — ${kpis.weaponisedAfterDecline} of them had earlier been graded “no threat” by the vendor, proof that “no threat” doesn’t mean safe`
-        : "";
     sentences.push(
-      `Our scans confirmed ${kpis.weaponised} ${plural(kpis.weaponised, "domain", "domains")} now serving active phishing${flip}.`,
+      `Our scans confirmed ${kpis.weaponised} ${plural(kpis.weaponised, "domain", "domains")} now serving active phishing.`,
+    );
+    const caveat = weaponisedStateCaveat(opts.periodMonth);
+    if (caveat) sentences.push(caveat);
+  }
+  // Its own sentence: counted from timestamps (v329), so it is not a subset of
+  // the current-state figure and must not read "of them".
+  if (kpis.weaponisedAfterDecline > 0) {
+    sentences.push(
+      `${kpis.weaponisedAfterDecline} ${plural(kpis.weaponisedAfterDecline, "lookalike", "lookalikes")} served phishing after the vendor had graded ${plural(kpis.weaponisedAfterDecline, "it", "them")} “no threat” — proof that “no threat” doesn’t mean safe.`,
     );
   }
 

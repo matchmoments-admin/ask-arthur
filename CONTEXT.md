@@ -166,7 +166,10 @@ our own urlscan verdict, not the vendor's. The state the whole enforcement path
 exists to detect and act on. Exits only forward: to `taken_down` (Netcraft
 classified it malicious) or, since v329, to `dormant` when our DNS sweep
 witnesses the name gone twice ≥ 12 h apart (`offline_since` dates it — never
-`taken_down`, which every reader renders as "actioned by Netcraft"). A later
+`taken_down`, which every reader renders as "actioned by Netcraft"). That
+`dormant` is the one reversible terminal state: offline clones are re-read
+weekly and one that resolves again (a lifted registrar hold) goes back to
+`weaponised` — the only edge out of a terminal state (`TERMINAL_EXITS`). A later
 benign vendor grade must NOT move it back (the no-downgrade rule in
 `apply_netcraft_reconcile`). `declined → weaponised` is the money transition —
 the vendor graded it "no threat" and it weaponised afterwards — and is the

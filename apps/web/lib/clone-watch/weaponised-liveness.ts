@@ -19,6 +19,10 @@ import { isDomainGone } from "@/lib/clone-watch/liveness";
  * `isDomainGone` (NXDOMAIN on A and NS — the only honest "gone", liveness.ts).
  * 142 names at 16 in flight read in ~10 s.
  *
+ * The same pass re-reads, weekly, every clone it moved to `dormant`: a lifted
+ * registrar hold brings the site back, and it must re-enter as weaponised
+ * (review #1254; lifecycle.ts TERMINAL_EXITS).
+ *
  * The policy over these reads — first NXDOMAIN starts the clock, a second one
  * >= 12 h later confirms and moves the alert to `dormant` — lives in ONE place,
  * record_weaponised_liveness (v329). This module only reads.
@@ -30,6 +34,9 @@ export const WEAPONISED_LIVENESS = {
   /** A row is re-read at most this often; < 24 so the 10:00/22:00 runs never
    *  skip a day on jitter. */
   cadenceHours: 20,
+  /** Clones this sweep moved to dormant are re-read this often, so a lifted
+   *  registrar hold is seen within a week (review #1254). */
+  dormantCadenceHours: 168,
   /** Second NXDOMAIN must come at least this long after the first. */
   confirmHours: 12,
   /** DNS lookups in flight. */
@@ -39,6 +46,8 @@ export const WEAPONISED_LIVENESS = {
 export interface LivenessTarget {
   id: number;
   candidate_domain: string;
+  /** weaponised, or dormant for an offline clone being re-read. */
+  lifecycle_state?: string;
 }
 
 export interface LivenessRead {

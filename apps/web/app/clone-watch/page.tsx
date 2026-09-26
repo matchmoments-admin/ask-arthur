@@ -24,9 +24,8 @@ import {
   MEDIAN_FLOOR,
 } from "@/lib/clone-watch/duration-kpis";
 import {
-  formatDurationMinutes,
+  blocklistTile,
   parseTakedownStats,
-  publishableMedian,
   type TakedownStats,
 } from "@/lib/clone-watch/takedown-stats";
 import FeatureCard from "@/components/FeatureCard";
@@ -277,15 +276,9 @@ function PublicImpactPanel({
   // Netcraft's own classification time. Hour-scale, so the clocks' seconds of
   // skew cannot flip its sign; a site Netcraft had blocked before we saw it is
   // counted apart in SQL, never averaged in. Only with a sample worth a median.
-  const blocklistMedian = publishableMedian(takedown?.detectToBlock ?? null, MEDIAN_FLOOR);
-  const blocklistTile =
-    blocklistMedian !== null && takedown?.detectToBlock
-      ? {
-          value: formatDurationMinutes(blocklistMedian),
-          label: "Median time to blocklisting",
-          sub: `phishing detected → Netcraft blocklist (n=${takedown.detectToBlock.n})`,
-        }
-      : null;
+  // The wording (sample label + "most of this is our cadence") lives in ONE
+  // place: takedown-stats.ts blocklistTile.
+  const blocklist = blocklistTile(takedown, MEDIAN_FLOOR);
   const perDay = Math.round(impact.candidates_total / (impact.window_days || 30));
   const pct =
     impact.candidates_total > 0
@@ -308,7 +301,7 @@ function PublicImpactPanel({
       label: "Reported to Netcraft",
       sub: "forwarded to blocklists",
     },
-    blocklistTile ?? {
+    blocklist ?? {
       value: impact.brand_notifications_total.toLocaleString(),
       label: "Brand teams notified",
       sub: "aggregate-only policy",
@@ -376,6 +369,9 @@ function PublicImpactPanel({
           suspect domains get browser-blocked globally) and to the affected
           brand&apos;s security team.
         </p>
+        {blocklist && (
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">{blocklist.note}</p>
+        )}
       </div>
 
       {vendorGap && <VendorGapStrip vendorGap={vendorGap} />}

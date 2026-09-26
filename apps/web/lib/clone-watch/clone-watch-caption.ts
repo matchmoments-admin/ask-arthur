@@ -212,7 +212,7 @@ export function generateCloneWatchCaption(
 
   // ── Vendor outcomes (F5) — only once the month's cohort has witnessed
   // gradings; all-zero months keep the pre-F5 caption shape exactly.
-  const outcomesBlock = buildOutcomesBlock(card.kpis);
+  const outcomesBlock = buildOutcomesBlock(card.kpis, { periodMonth: card.periodMonth });
 
   // ── Targeting characterisation (#1075) ────────────────────────────────────
   // Ordered by how defensible each line is, because the 2,900-char cap is

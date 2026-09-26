@@ -21,6 +21,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
  *     fails.
  *   - the `issue_reported_at >= submitted_at` term removed from
  *     netcraft_vendor_gap_basis → "an issue on an EARLIER submission" fails.
+ *
+ * Review round (#1254), each also verified red then restored:
+ *   - dormant rows always 'dormant_still_gone' (no re_emerged branch) →
+ *     "resolves again goes back to weaponised / open" fails.
+ *   - offline_cause always 'nxdomain' → "records a registrar hold" fails.
+ *   - the dormant disjunct of list_weaponised_for_liveness disabled →
+ *     "re-probes a dormant offline clone weekly" fails.
+ *   - the recorder admitting ANY dormant row → "never revives a v285
+ *     never-scanned dormant row" fails.
+ *   - the resubmit worklist's `IS DISTINCT FROM 'rejected'` predicate removed
+ *     → "excludes a URL Netcraft answered 'Already reported and rejected.'"
+ *     fails.
+ *   - liveness_last_verdict not written for an inconclusive read → "records
+ *     what the last read saw" fails.
  */
 
 const migration = (name: string) =>
@@ -42,6 +56,9 @@ beforeAll(async () => {
       weaponised_at timestamptz,
       target_brand_normalized text,
       inferred_target_domain text,
+      candidate_url text,
+      urlscan_uuid text,
+      attribution jsonb,
       updated_at timestamptz DEFAULT now(),
       -- v288, verbatim: the sweep must satisfy it or the write fails.
       CONSTRAINT clone_alert_terminal_state_sync CHECK (
@@ -68,13 +85,14 @@ async function insert(row: {
   offlineSince?: Date | null;
   livenessCheckedAt?: Date | null;
   triage?: string;
+  attribution?: unknown;
 }) {
   await db.query(
     `INSERT INTO shopfront_clone_alerts
        (id, candidate_domain, lifecycle_state, alert_state, weaponised_at,
         submitted_to, offline_since, liveness_checked_at, triage_status,
-        target_brand_normalized)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, 'Brand')`,
+        target_brand_normalized, candidate_url, attribution)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, 'Brand', 'https://' || $2 || '/', $10::jsonb)`,
     [
       row.id,
       `d${row.id}.example`,
@@ -86,6 +104,7 @@ async function insert(row: {
       row.offlineSince ? iso(row.offlineSince) : null,
       row.livenessCheckedAt ? iso(row.livenessCheckedAt) : null,
       row.triage ?? "pending",
+      row.attribution === undefined ? null : JSON.stringify(row.attribution),
     ],
   );
 }
@@ -482,5 +501,145 @@ describe("no-threat-on-phishing escalation", () => {
       escalated_to: "operator",
       netcraft_uuid: "u9",
     });
+  });
+});
+
+describe("offline clones come back (review #1254)", () => {
+  const record = async (results: unknown[]) =>
+    one<Record<string, number>>(
+      "SELECT * FROM record_weaponised_liveness($1::jsonb, 12)",
+      [JSON.stringify(results)],
+    );
+  const row = async (id: number) =>
+    one<{
+      lifecycle_state: string;
+      alert_state: string;
+      offline_since: string | null;
+      offline_cause: string | null;
+      liveness_last_verdict: string | null;
+    }>(
+      `SELECT lifecycle_state, alert_state, offline_since, offline_cause, liveness_last_verdict
+         FROM shopfront_clone_alerts WHERE id=$1`,
+      [id],
+    );
+
+  it("records a registrar hold as the offline cause when RDAP already showed one", async () => {
+    // The prod shape: statuses carry RDAP's spaced form ("client hold").
+    await insert({
+      id: 1,
+      weaponisedAt: ago(3 * 24 * 60),
+      offlineSince: ago(13 * 60),
+      attribution: { whois: { statuses: ["client transfer prohibited", "server hold"] } },
+    });
+    await insert({ id: 2, weaponisedAt: ago(3 * 24 * 60), offlineSince: ago(13 * 60) });
+    await record([
+      { id: 1, gone: true },
+      { id: 2, gone: true },
+    ]);
+    expect(await row(1)).toMatchObject({ lifecycle_state: "dormant", offline_cause: "registrar_hold" });
+    expect(await row(2)).toMatchObject({ lifecycle_state: "dormant", offline_cause: "nxdomain" });
+  });
+
+  it("re-probes a dormant offline clone weekly, never a v285 never-scanned one", async () => {
+    const w = ago(30 * 24 * 60);
+    await insert({ id: 1, lifecycle: "dormant", alertState: "expired", weaponisedAt: w, offlineSince: ago(9 * 24 * 60), livenessCheckedAt: ago(8 * 24 * 60) });
+    await insert({ id: 2, lifecycle: "dormant", alertState: "expired", weaponisedAt: w, offlineSince: ago(9 * 24 * 60), livenessCheckedAt: ago(2 * 24 * 60) }); // read 2 d ago → not due
+    await insert({ id: 3, lifecycle: "dormant", alertState: "expired" }); // v285 stale sweep
+    await insert({ id: 4 }); // weaponised, never read — listed first
+    const ids = (
+      await db.query<{ id: number }>("SELECT id FROM list_weaponised_for_liveness(50, 20, 168)")
+    ).rows.map((r) => Number(r.id));
+    expect(ids).toEqual([4, 1]);
+  });
+
+  it("a dormant offline clone that resolves again goes back to weaponised / open", async () => {
+    await insert({
+      id: 1,
+      lifecycle: "dormant",
+      alertState: "expired",
+      weaponisedAt: ago(30 * 24 * 60),
+      offlineSince: ago(9 * 24 * 60),
+    });
+    const r = await record([{ id: 1, gone: false }]);
+    expect(r.re_emerged).toBe(1);
+    expect(await row(1)).toMatchObject({
+      lifecycle_state: "weaponised",
+      alert_state: "open",
+      offline_since: null,
+      offline_cause: null,
+      liveness_last_verdict: "present",
+    });
+  });
+
+  it("a dormant clone still gone, or read inconclusively, stays dormant", async () => {
+    for (const id of [1, 2]) {
+      await insert({ id, lifecycle: "dormant", alertState: "expired", weaponisedAt: ago(3000), offlineSince: ago(9 * 24 * 60) });
+    }
+    const r = await record([
+      { id: 1, gone: true },
+      { id: 2, gone: null },
+    ]);
+    expect(r).toMatchObject({ checked: 2, re_emerged: 0 });
+    expect((await row(1)).lifecycle_state).toBe("dormant");
+    expect((await row(2)).lifecycle_state).toBe("dormant");
+  });
+
+  it("never revives a v285 never-scanned dormant row", async () => {
+    await insert({ id: 1, lifecycle: "dormant", alertState: "expired" });
+    const r = await record([{ id: 1, gone: false }]);
+    expect(r.checked).toBe(0);
+    expect((await row(1)).lifecycle_state).toBe("dormant");
+  });
+
+  it("records what the last read saw, for the operator page", async () => {
+    await insert({ id: 1 });
+    await insert({ id: 2 });
+    await record([
+      { id: 1, gone: null },
+      { id: 2, gone: false },
+    ]);
+    expect((await row(1)).liveness_last_verdict).toBe("inconclusive");
+    expect((await row(2)).liveness_last_verdict).toBe("present");
+    await db.exec(
+      `UPDATE shopfront_clone_alerts SET submitted_to =
+         '{"netcraft":{"url_state":"no threats","url_state_reason":"Already reported and rejected."}}'::jsonb`,
+    );
+    const dns = (
+      await db.query<{ id: number; dns_last: string | null }>(
+        "SELECT id, dns_last FROM list_netcraft_vendor_gap(72, 50) ORDER BY id",
+      )
+    ).rows.map((r) => [Number(r.id), r.dns_last]);
+    expect(dns).toEqual([
+      [1, "inconclusive"],
+      [2, "present"],
+    ]);
+  });
+});
+
+describe("resubmit lane stops re-filing explicit rejections (lead's decision d)", () => {
+  const due = async () =>
+    (
+      await db.query<{ id: number }>(
+        "SELECT id FROM list_clone_alerts_pending_netcraft_resubmit(10, 30, 14, 3, 30)",
+      )
+    ).rows.map((r) => Number(r.id));
+  const old = iso(ago(40 * 24 * 60));
+
+  it("excludes a URL Netcraft answered 'Already reported and rejected.', and counts it", async () => {
+    await insert({
+      id: 1,
+      weaponisedAt: ago(100),
+      submittedTo: {
+        netcraft: { submitted_at: old, url_state: "no threats", url_state_reason: "Already reported and rejected." },
+      },
+    });
+    await insert({
+      id: 2,
+      weaponisedAt: ago(200),
+      submittedTo: { netcraft: { submitted_at: old, url_state: "no threats" } },
+    });
+    expect(await due()).toEqual([2]);
+    const n = await one<{ n: number }>("SELECT count_netcraft_resubmit_rejected() AS n");
+    expect(n.n).toBe(1);
   });
 });

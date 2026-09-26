@@ -360,8 +360,11 @@ export function buildTelegramMessage({
   // #1234: detection → blocklist (weaponised_at → Netcraft's own classification
   // time) and Netcraft's triage latency on its OWN clock. The old line
   // subtracted our submitted_at from Netcraft's time and read "median 0 min".
-  const takedownLine =
-    takedown && takedown.blocklisted > 0
+  // A null is a FAILED read (RPC error / no row), never "0 this week" — the
+  // review found the old line printed a confident zero for an outage.
+  const takedownLine = !takedown
+    ? html`Netcraft blocklistings: <i>unavailable (stats read failed)</i>`
+    : takedown.blocklisted > 0
       ? html`Netcraft blocklistings: <b>${takedown.blocklisted}</b> · detection→blocklist median <b>${formatDurationMinutes(takedown.detectToBlock?.median ?? null)}</b> (n=${takedown.detectToBlock?.n ?? 0}) · Netcraft triage ${formatDurationMinutes(takedown.triageMinutes?.median ?? null)} (n=${takedown.triageMinutes?.n ?? 0})`
       : html`Netcraft blocklistings: 0 this week`;
 

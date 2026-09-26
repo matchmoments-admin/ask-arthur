@@ -232,10 +232,13 @@ describe("generateCloneWatchCaption", () => {
     expect(c.body).toContain(
       "Of the 120 we reported to a takedown vendor: 3 have been actioned (including 1 only after we escalated) and 40 are currently graded “no threat” and left live.",
     );
-    // The flip claim attaches ONLY to the provable weaponisedAfterDecline subset.
+    // The flip claim attaches ONLY to weaponisedAfterDecline — its own
+    // sentence since v329 (from timestamps, not a subset of `weaponised`).
+    expect(c.body).toContain("Our scans confirmed 8 domains now serving active phishing.");
     expect(c.body).toContain(
-      "Our scans confirmed 8 domains now serving active phishing — 1 of them had earlier been graded “no threat” by the vendor, proof that “no threat” doesn’t mean safe.",
+      "1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
     );
+    expect(c.body).not.toContain("of them");
     // Escalation claimed only via the real count.
     expect(c.body).toContain(
       "We have escalated 2 back to the vendor with the scan evidence.",
@@ -299,7 +302,7 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
   it("self-contained weaponised sentence even with no lead (declined=0, takenDown=0)", () => {
     const block = buildOutcomesBlock({ ...ZERO, weaponised: 2, weaponisedAfterDecline: 1 });
     expect(block).toBe(
-      "Our scans confirmed 2 domains now serving active phishing — 1 of them had earlier been graded “no threat” by the vendor, proof that “no threat” doesn’t mean safe.",
+      "Our scans confirmed 2 domains now serving active phishing. 1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
     );
     expect(block).not.toContain("of those");
   });
@@ -356,7 +359,7 @@ describe("buildOutcomesLine (slide 06)", () => {
       reTakenDown: 1,
     });
     expect(line).toBe(
-      "3 actioned by Netcraft (incl. 1 after our escalation) · 40 currently graded “no threat” and left live · 8 confirmed serving active phishing by our scans — 1 previously graded “no threat” · 2 escalated back with scan evidence",
+      "3 actioned by Netcraft (incl. 1 after our escalation) · 40 currently graded “no threat” and left live · 8 confirmed serving active phishing by our scans · 1 served phishing after being graded “no threat” · 2 escalated back with scan evidence",
     );
   });
 

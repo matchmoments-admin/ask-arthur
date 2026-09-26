@@ -273,6 +273,10 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
+    /** v329 — weaponised rows the worklist now EXCLUDES because Netcraft
+     *  answered "Already reported and rejected." (routed to the operator
+     *  instead). null = the count failed; absent before v329. */
+    rejected_excluded?: number | null;
   };
   "shopfront-clone-netcraft-reconcile": {
     reason?: "nothing_pending";
@@ -281,16 +285,38 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
-    /** v329 (#1234) weaponised DNS sweep. null = the sweep's RPC failed
-     *  (liveness_error carries why); absent on rows before 2026-09-26. */
+    // ── v329 (#1234) weaponised outcome observation. Every key the lane writes
+    // is typed here, so laneHealth's silent-zero predicate can only read keys
+    // that exist. All absent on rows before 2026-09-26.
+    /** Rows read by the DNS sweep. null = the sweep's RPC failed (see
+     *  liveness_error). */
     liveness_checked?: number | null;
-    /** Weaponised rows due a read (counted before the per-run LIMIT). */
+    /** Why the sweep did nothing ("list: …" / "record: …"). */
+    liveness_error?: string;
+    /** Rows due a read (weaponised daily + offline dormant weekly), counted
+     *  before the per-run LIMIT. */
     liveness_due?: number;
+    /** The name exists. */
+    liveness_present?: number;
+    /** NXDOMAIN, not yet confirmed (first read, or a second inside 12 h). */
+    liveness_gone_unconfirmed?: number;
+    /** The resolver proved nothing. */
+    liveness_inconclusive?: number;
+    /** Due rows the in-step budget did not reach; they lead the next run. */
+    liveness_unreached?: number;
     /** Second NXDOMAIN >= 12 h after the first: weaponised → dormant. */
     offline_confirmed?: number;
+    /** An offline (dormant) clone resolved again: dormant → weaponised. */
+    re_emerged?: number;
     /** No-threat-on-phishing alerts paged to the operator and stamped
      *  submitted_to.vendor_gap this run. null = list or mark failed. */
     vendor_gap_escalated?: number | null;
+    /** The operator page was delivered this run. */
+    vendor_gap_paged?: boolean;
+    /** Listed but not paged (send failed / no Telegram config); they re-list. */
+    vendor_gap_unpaged?: number;
+    /** Why the escalation did not complete ("list: …" / "page: …" / "mark: …"). */
+    vendor_gap_error?: string;
   };
   "shopfront-nrd-daily-ingest": {
     domains_scanned: number;

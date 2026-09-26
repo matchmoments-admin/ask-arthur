@@ -22,7 +22,7 @@ import {
   type LivenessTarget,
 } from "@/lib/clone-watch/weaponised-liveness";
 import {
-  buildVendorGapPage,
+  escalateVendorGap,
   VENDOR_GAP_ESCALATION,
   type VendorGapRow,
 } from "@/lib/clone-watch/vendor-gap-escalation";
@@ -146,18 +146,23 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
 
       // v329 — weaponised outcome observation (#1234). Runs on BOTH paths
       // below: a quiet Netcraft worklist says nothing about the weaponised
-      // set. Both steps soft-fail — an RPC error (e.g. this code deployed
-      // before v329 is applied) becomes a null count plus the message in the
-      // Outcome Row, never a throw, so the Netcraft half still writes its row.
+      // set. Neither step throws — an RPC error (e.g. this code deployed
+      // before v329 is applied) or a failed Telegram send becomes a null
+      // count plus the message in the Outcome Row, which the digest's
+      // silent-zero shape for this lane reads (laneHealth.ts). The Netcraft
+      // half is already applied by then and must still write its row.
       const observeWeaponisedOutcomes = async () => {
         const liveness = await budgetedStep(
           step,
           "liveness-sweep",
           LIVENESS_WALL_CLOCK_MS,
           async (budget) => {
+            // Weaponised rows daily, plus clones this sweep moved to dormant
+            // weekly — a lifted registrar hold must be seen (review #1254).
             const { data, error } = await sb.rpc("list_weaponised_for_liveness", {
               p_limit: WEAPONISED_LIVENESS.limit,
               p_cadence_hours: WEAPONISED_LIVENESS.cadenceHours,
+              p_dormant_cadence_hours: WEAPONISED_LIVENESS.dormantCadenceHours,
             });
             if (error) return { error: `list: ${error.message}` };
             const rows =
@@ -166,7 +171,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
             // reports what it left behind, not a clean zero.
             const due = rows.length ? Number(rows[0]!.due_total) : 0;
             const sweep = await readWeaponisedLiveness(rows, budget);
-            const zero = { checked: 0, present: 0, gone_unconfirmed: 0, offline_confirmed: 0, inconclusive: 0 };
+            const zero = {
+              checked: 0,
+              present: 0,
+              gone_unconfirmed: 0,
+              offline_confirmed: 0,
+              inconclusive: 0,
+              re_emerged: 0,
+            };
             if (sweep.reads.length === 0) return { due, unreached: sweep.unreached, ...zero };
             const rec = await sb.rpc("record_weaponised_liveness", {
               p_results: sweep.reads,
@@ -184,52 +196,48 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
               gone_unconfirmed: Number(r?.gone_unconfirmed ?? 0),
               offline_confirmed: Number(r?.offline_confirmed ?? 0),
               inconclusive: Number(r?.inconclusive ?? 0),
+              re_emerged: Number(r?.re_emerged ?? 0),
             };
           },
         );
 
-        // List → page → mark, in ONE step. A failed page throws before
-        // anything is stamped, so the step retry re-lists the same rows
-        // (at-least-once); a memoised success never re-pages. Stamping first
-        // would make a lost Telegram message a lost escalation.
-        const vendorGap = await step.run("escalate-vendor-gap", async () => {
-          const { data, error } = await sb.rpc("list_netcraft_vendor_gap", {
-            p_min_issue_age_hours: VENDOR_GAP_ESCALATION.minIssueAgeHours,
-            p_limit: VENDOR_GAP_ESCALATION.limit,
-          });
-          if (error) {
-            return { escalated: null, paged: false, error: `list: ${error.message}` };
-          }
-          const rows = (data as VendorGapRow[] | null) ?? [];
-          const message = buildVendorGapPage(rows);
-          if (!message) return { escalated: 0, paged: false };
-          const sent = await sendAdminTelegramMessage(message);
-          // No Telegram config: the escalation cannot reach anyone, so nothing
-          // is stamped and the rows stay listed until it can.
-          if (!sent.ok && sent.reason === "no_config") {
-            return { escalated: 0, paged: false, unpaged: rows.length };
-          }
-          if (!sent.ok) {
-            throw new Error(`vendor-gap page failed: ${sent.error ?? sent.reason}`);
-          }
-          const mark = await sb.rpc("mark_netcraft_vendor_gap_escalated", {
-            p_alert_ids: rows.map((r) => r.id),
-            p_min_issue_age_hours: VENDOR_GAP_ESCALATION.minIssueAgeHours,
-          });
-          // Paged but not stamped: the next run re-pages the same rows —
-          // louder than silence — and the error travels in the Outcome Row.
-          if (mark.error) {
-            return { escalated: null, paged: true, error: `mark: ${mark.error.message}` };
-          }
-          logEnforcementEvent("declined", {
-            alertId: rows[0]!.id,
-            domain: "netcraft-vendor-gap",
-            channel: "netcraft",
-            runId,
-            extra: { reason: "vendor_gap_escalated", count: rows.length },
-          });
-          return { escalated: Number(mark.data ?? 0), paged: true };
-        });
+        // list → page → mark in ONE step (vendor-gap-escalation.ts owns the
+        // order and never throws): a failed page stamps nothing, so the rows
+        // re-list next run; a memoised success never re-pages.
+        const vendorGap = await step.run("escalate-vendor-gap", () =>
+          escalateVendorGap({
+            list: async () => {
+              const { data, error } = await sb.rpc("list_netcraft_vendor_gap", {
+                p_min_issue_age_hours: VENDOR_GAP_ESCALATION.minIssueAgeHours,
+                p_limit: VENDOR_GAP_ESCALATION.limit,
+              });
+              return error
+                ? { error: error.message }
+                : { rows: (data as VendorGapRow[] | null) ?? [] };
+            },
+            send: (message) => sendAdminTelegramMessage(message),
+            mark: async (ids) => {
+              const { data, error } = await sb.rpc("mark_netcraft_vendor_gap_escalated", {
+                p_alert_ids: ids,
+                p_min_issue_age_hours: VENDOR_GAP_ESCALATION.minIssueAgeHours,
+              });
+              return error ? { error: error.message } : { marked: Number(data ?? 0) };
+            },
+            // One audit event per alert, with its real domain.
+            audit: (row) =>
+              logEnforcementEvent("declined", {
+                alertId: row.id,
+                domain: row.candidate_domain,
+                channel: "netcraft",
+                runId,
+                extra: {
+                  reason: "vendor_gap_escalated",
+                  basis: row.basis,
+                  url_state: row.url_state,
+                },
+              }),
+          }),
+        );
 
         return {
           ...("error" in liveness
@@ -242,11 +250,12 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
                 offline_confirmed: liveness.offline_confirmed,
                 liveness_inconclusive: liveness.inconclusive,
                 liveness_unreached: liveness.unreached,
+                re_emerged: liveness.re_emerged,
               }),
           vendor_gap_escalated: vendorGap.escalated,
           vendor_gap_paged: vendorGap.paged,
-          ...("unpaged" in vendorGap ? { vendor_gap_unpaged: vendorGap.unpaged } : {}),
-          ...("error" in vendorGap ? { vendor_gap_error: vendorGap.error } : {}),
+          ...(vendorGap.unpaged !== undefined ? { vendor_gap_unpaged: vendorGap.unpaged } : {}),
+          ...(vendorGap.error !== undefined ? { vendor_gap_error: vendorGap.error } : {}),
         };
       };
 

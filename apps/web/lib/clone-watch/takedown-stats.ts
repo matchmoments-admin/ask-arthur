@@ -125,3 +125,37 @@ export function formatDurationMinutes(minutes: number | null): string {
   if (minutes < 48 * 60) return `${(minutes / 60).toFixed(1)}h`;
   return `${(minutes / 1440).toFixed(1)}d`;
 }
+
+/** The ~13:00 UTC daily Netcraft submit (laneHealth NETCRAFT_AUTO_CRONS). */
+export const NETCRAFT_SUBMIT_CADENCE = "13:00 UTC";
+
+export interface BlocklistTile {
+  value: string;
+  label: string;
+  /** The sample, labelled against the weaponised cohort it comes from. */
+  sub: string;
+  /** Why the number is mostly OUR time, not Netcraft's. */
+  note: string;
+}
+
+/**
+ * The ONE wording of the public "time to blocklisting" figure (lead's decision,
+ * #1254): detection → blocklist, labelled "n=7 of 41 weaponised in window",
+ * with the explanation that most of that time is our own submit cadence. Null
+ * below the publish floor or when unmeasured — the caller shows its fallback.
+ */
+export function blocklistTile(
+  stats: TakedownStats | null,
+  floor: number,
+): BlocklistTile | null {
+  const d = stats?.detectToBlock ?? null;
+  const median = publishableMedian(d, floor);
+  if (median === null || !d) return null;
+  const of = stats?.cohort ? ` of ${stats.cohort.weaponised} weaponised in window` : "";
+  return {
+    value: formatDurationMinutes(median),
+    label: "Median time to blocklisting",
+    sub: `phishing detected → Netcraft blocklist · n=${d.n}${of}`,
+    note: `Most of this is our own cadence — we submit to Netcraft once a day at ~${NETCRAFT_SUBMIT_CADENCE} — not Netcraft, which classifies within minutes of receiving a report.`,
+  };
+}

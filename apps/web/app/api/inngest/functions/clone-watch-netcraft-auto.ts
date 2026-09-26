@@ -380,7 +380,15 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           };
         }
 
-        const pending = await step.run("resubmit-load-candidates", async () => {
+        const loaded = await step.run("resubmit-load-candidates", async () => {
+          // v329: the worklist now EXCLUDES clones Netcraft answered "Already
+          // reported and rejected." (they go to the operator instead). Counted
+          // in the same step so the exclusion is visible in every Outcome Row
+          // below — worklist-starvation rule: never exclude silently. A failed
+          // count reads null, never 0.
+          const rejected = await sb.rpc("count_netcraft_resubmit_rejected");
+          const rejectedExcluded =
+            !rejected.error && typeof rejected.data === "number" ? rejected.data : null;
           const { data, error } = await sb.rpc(
             "list_clone_alerts_pending_netcraft_resubmit",
             {
@@ -404,10 +412,16 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // denylist is applied here exactly as the issue reporter does it —
           // reporting a generic-dictionary-word "brand" match would flag
           // legitimate sites and burn the standing this lane depends on.
-          return ((data as NetcraftResubmitCandidate[] | null) ?? []).filter(
-            (c) => !isFpBrand(c.inferred_target_domain ?? ""),
-          );
+          return {
+            rows: ((data as NetcraftResubmitCandidate[] | null) ?? []).filter(
+              (c) => !isFpBrand(c.inferred_target_domain ?? ""),
+            ),
+            rejectedExcluded,
+          };
         });
+        // A run memoised before v329 replays the bare array.
+        const pending = Array.isArray(loaded) ? loaded : loaded.rows;
+        const rejectedExcluded = Array.isArray(loaded) ? null : loaded.rejectedExcluded;
 
         if (pending.length === 0) {
           // Test fires never write telemetry (the success row is skipped under
@@ -415,6 +429,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           if (!isTest) {
             await step.run("resubmit-log-quiet", () =>
               recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
+                rejected_excluded: rejectedExcluded,
                 reason: "none_pending_or_cap",
                 candidates: 0,
                 marked: 0,
@@ -500,6 +515,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // the dead-row deferral itself failed — which IS the v252 starvation.
           await step.run("resubmit-log-quiet", () =>
             recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
+              rejected_excluded: rejectedExcluded,
               reason: "all_dead",
               candidates: pending.length,
               marked: 0,
@@ -574,6 +590,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           // non-2xx is one digest line, not a "lane not running" label.
           await step.run("resubmit-log-quiet", () =>
             recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
+              rejected_excluded: rejectedExcluded,
               reason: "bulk_submit_failed",
               candidates: pending.length,
               marked: 0,
@@ -626,6 +643,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
 
         await step.run("resubmit-log-cost", () =>
           recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", marked, {
+            rejected_excluded: rejectedExcluded,
             candidates: pending.length,
             live: live.length,
             dead,

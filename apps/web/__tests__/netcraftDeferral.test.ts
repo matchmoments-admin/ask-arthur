@@ -30,7 +30,7 @@ function fakeSb(result: { data?: unknown; error?: { message: string } | null }) 
 beforeEach(() => m.warn.mockReset());
 
 describe("lane policies", () => {
-  it("pins the issue lane: v248 RPC, 5 rounds, 72h dead / 24h unavailable+transient, throws", () => {
+  it("pins the issue lane: v248 RPC, 5 rounds, 72h dead / 24h unavailable+transient+processing, throws", () => {
     expect(NETCRAFT_DEFERRAL.issue).toEqual({
       rpc: "defer_clone_alert_netcraft_issue",
       maxRounds: 5,
@@ -38,6 +38,8 @@ describe("lane policies", () => {
       deadRecheckMs: 72 * H,
       unavailableRecheckMs: 24 * H,
       transientRecheckMs: 24 * H,
+      // #1148 (v329 review): its own reason, so it never spends transient rounds.
+      processingRecheckMs: 24 * H,
     });
   });
 

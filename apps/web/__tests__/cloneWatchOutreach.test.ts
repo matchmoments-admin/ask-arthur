@@ -325,6 +325,37 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
   });
 
   describe("buildTelegramMessage", () => {
+    // #1254 review: a failed stats read printed "0 this week". Go-red: restore
+    // the `takedown && takedown.blocklisted > 0 ? … : "0 this week"` ternary →
+    // the first expectation fails.
+    it("says 'unavailable' for a failed takedown-stats read, never a zero", () => {
+      const args = {
+        period: "20 May – 26 May",
+        metrics: baseMetrics,
+        tpRate: 30,
+        fpRate: 53,
+        brandBreakdown: baseBrands,
+        reportedBrands: [],
+        linkedinDraft: "d",
+      };
+      expect(buildTelegramMessage({ ...args, takedown: null })).toContain(
+        "Netcraft blocklistings: <i>unavailable (stats read failed)</i>",
+      );
+      const zero = buildTelegramMessage({
+        ...args,
+        takedown: {
+          windowDays: 7,
+          blocklisted: 0,
+          triageMinutes: null,
+          detectToBlock: null,
+          blockedBeforeDetection: null,
+          alreadyBlocklistedAtSubmit: null,
+          cohort: null,
+        },
+      });
+      expect(zero).toContain("Netcraft blocklistings: 0 this week");
+    });
+
     it("includes the LinkedIn draft inside a <pre> block for copy-paste", () => {
       const linkedinDraft = "Test draft body";
       const message = buildTelegramMessage({

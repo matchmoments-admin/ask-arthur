@@ -249,10 +249,13 @@ export interface CloneBrandMetrics {
   escalated: number;
   /** Flipped to active phishing (lifecycle weaponised) — "declined ≠ safe". */
   weaponised: number;
-  /** Weaponised AND previously Netcraft-declined (netcraft_declined_at set) —
-   *  the only subset for which the "graded no-threat, later flipped" story is
-   *  provable. Most weaponised clones were phishing at FIRST scan (32/33 in
-   *  prod, 2026-07-11) and were never graded by the vendor at all. */
+  /** Weaponised AFTER Netcraft declined it (`weaponised_at > netcraft_declined_at`),
+   *  whatever its state is now — the only subset for which the "graded
+   *  no-threat, later flipped" story is provable. Most weaponised clones were
+   *  phishing at FIRST scan (32/33 in prod, 2026-07-11) and were never graded
+   *  by the vendor at all. NOT a subset of `weaponised` (current state) since
+   *  v329: a flipped clone that later went offline or was taken down still
+   *  counts here. */
   weaponisedAfterDecline: number;
   /** Escalated AND now taken_down — the "we forced it through" win. */
   reTakenDown: number;
@@ -278,6 +281,20 @@ function bump(map: Record<string, number>, value: unknown): void {
   const s = value == null ? "" : String(value).trim();
   const key = s || "Unknown";
   map[key] = (map[key] ?? 0) + 1;
+}
+
+/**
+ * "Netcraft graded it no-threat, then it served phishing" — from the two
+ * timestamps, never from lifecycle_state (which moves on when the site dies or
+ * is taken down). Membership is monotone: once true for a row, always true.
+ */
+export function weaponisedAfterDecline(
+  row: Pick<CloneAlertRow, "weaponised_at" | "netcraft_declined_at">,
+): boolean {
+  if (!row.weaponised_at || !row.netcraft_declined_at) return false;
+  const w = Date.parse(row.weaponised_at);
+  const d = Date.parse(row.netcraft_declined_at);
+  return Number.isFinite(w) && Number.isFinite(d) && w > d;
 }
 
 export function toCloneDetail(
@@ -427,8 +444,13 @@ export function aggregateClonesByDomain(
       m.declined += 1;
     } else if (row.lifecycle_state === "weaponised") {
       m.weaponised += 1;
-      if (row.netcraft_declined_at) m.weaponisedAfterDecline += 1;
     }
+    // From TIMESTAMPS, not the current state (v329 review, #1254): the
+    // liveness sweep moves offline clones weaponised → dormant (~63 on its
+    // first runs), and a Netcraft takedown moves them to taken_down — neither
+    // un-happens "Netcraft graded it no-threat, then it served phishing".
+    // Reading lifecycle_state here made the proof-point erode as sites died.
+    if (weaponisedAfterDecline(row)) m.weaponisedAfterDecline += 1;
     m.alertIds.push(row.id);
     const cls = row.urlscan_classification ?? "unclassified";
     m.byClassification[cls] = (m.byClassification[cls] ?? 0) + 1;
