@@ -1,8 +1,7 @@
 // Site audit scanner orchestrator — runs all checks via Promise.allSettled
 
 import { isPrivateURL } from "@askarthur/scam-engine/safebrowsing";
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
-import { readTextCapped } from "@askarthur/utils/read-body-capped";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 
 /** Enough for every header/meta/script check; larger pages are truncated. */
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
@@ -76,42 +75,36 @@ function classifyFetchError(err: unknown, statusCode?: number): FetchError {
   return { type: "network_error", message: String(err) };
 }
 
-/** Attempt a page fetch with the given UA, returning null on blocked status codes */
+/** Attempt a page fetch with the given UA. 403/429/503 are reported as
+ *  blocked (the caller retries once with a browser UA); every other status is
+ *  audited. Goes through safeFetch: guard + SSRF-safe dispatcher + per-hop
+ *  redirect checks + a truncating 2 MB body read, all inside `timeoutMs`. */
 async function attemptFetch(
   url: string,
   userAgent: string,
   timeoutMs: number
 ): Promise<{ ok: true; headers: Headers; html: string; finalUrl: string } | { ok: false; error: unknown; statusCode?: number }> {
-  try {
-    const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": userAgent },
-      signal: controller.signal,
-      // SSRF: validate the resolved IP of every connection (incl. each
-      // redirect hop), closing the rebinding window isPrivateURL can't catch.
-      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-    });
-
-    // Treat 403/429/503 as blocked
-    if (res.status === 403 || res.status === 429 || res.status === 503) {
-      clearTimeout(fetchTimeout);
-      await res.body?.cancel().catch(() => undefined);
-      return { ok: false, error: new Error(`HTTP ${res.status}`), statusCode: res.status };
-    }
-
-    // Bounded read, still inside the timeout: the audit only needs the head of
-    // the document, so an oversized page is truncated rather than failed.
-    const html =
-      (await readTextCapped(res, MAX_HTML_BYTES, { truncate: true })) ?? "";
-    clearTimeout(fetchTimeout);
-    return { ok: true, headers: res.headers, html, finalUrl: res.url };
-  } catch (err) {
-    return { ok: false, error: err };
+  const r = await safeFetch(url, {
+    method: "GET",
+    headers: { "User-Agent": userAgent },
+    timeoutMs,
+    maxBytes: MAX_HTML_BYTES,
+    // The audit only needs the head of the document.
+    truncate: true,
+    redirect: "follow-checked",
+    // Was a plain redirect: "follow" — keep fetch's hop limit.
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
+    okStatus: (s) => s !== 403 && s !== 429 && s !== 503,
+    as: "text",
+  });
+  if (r.ok) return { ok: true, headers: r.headers, html: r.body, finalUrl: r.finalUrl };
+  if (r.reason === "http" && r.status !== null) {
+    return { ok: false, error: new Error(`HTTP ${r.status}`), statusCode: r.status };
   }
+  // Shape the failure for classifyFetchError (it keys on name/message).
+  const error = new Error(r.reason === "timeout" ? "timeout" : r.detail);
+  if (r.reason === "timeout") error.name = "AbortError";
+  return { ok: false, error };
 }
 
 /** Run a full site audit on the given URL */

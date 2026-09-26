@@ -1,7 +1,7 @@
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
-import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { logger } from "@askarthur/utils/logger";
 
 // Slack's slash-command webhook hands us a `response_url` we POST the
@@ -11,7 +11,7 @@ import { logger } from "@askarthur/utils/logger";
 // infra and our server would oblige. Slack always uses hooks.slack.com
 // for response_urls (separate from incoming webhooks at
 // hooks.slack.com/services/...), so the allowlist is a single host.
-const SLACK_RESPONSE_HOST = "hooks.slack.com";
+const SLACK_RESPONSE_HOSTS: ReadonlySet<string> = new Set(["hooks.slack.com"]);
 
 interface SlackSlashPayload {
   command: string;
@@ -81,45 +81,31 @@ export async function handleSlashCommand(payload: SlackSlashPayload): Promise<vo
   }
 }
 
-async function postToResponseUrl(url: string, body: unknown): Promise<void> {
-  // Two-layer SSRF defence:
-  //   1. Hostname allowlist — Slack response_urls are always hooks.slack.com.
-  //   2. assertSafeURL — belt-and-braces against numeric IP / metadata host
-  //      attempts that happen to spoof the hostname check (e.g. a `hooks.slack.com`
-  //      DNS entry pointing at 169.254.169.254).
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    logger.warn("Slack response_url rejected — unparseable", { url });
-    return;
-  }
-  if (parsed.hostname.toLowerCase() !== SLACK_RESPONSE_HOST) {
-    logger.warn("Slack response_url rejected — unexpected hostname", {
-      hostname: parsed.hostname,
-    });
-    return;
-  }
-  try {
-    assertSafeURL(url);
-  } catch (err) {
-    logger.warn("Slack response_url rejected by assertSafeURL", {
-      error: String(err),
-    });
-    return;
-  }
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      logger.error("Slack response_url POST failed", { status: response.status });
-    }
-  } catch (err) {
-    logger.error("Slack response_url POST error", { error: String(err) });
+/**
+ * POST to a Slack `response_url`. Shared by the slash-command handler and the
+ * message-shortcut route. safeFetch enforces the host allowlist (Slack
+ * response_urls are always hooks.slack.com), the private-host guard, the
+ * SSRF-safe dispatcher at connect, per-hop redirect checks (every hop must
+ * stay on the allowlist), and a timeout.
+ */
+export async function postToResponseUrl(url: string, body: unknown): Promise<void> {
+  const res = await safeFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    // Every hop must stay on hooks.slack.com; fetch's default hop limit.
+    allowHosts: SLACK_RESPONSE_HOSTS,
+    redirect: "follow-checked",
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
+    as: "none",
+    timeoutMs: 10_000,
+  });
+  if (res.ok) return;
+  if (res.reason === "blocked") {
+    logger.warn("Slack response_url rejected", { detail: res.detail });
+  } else if (res.reason === "http") {
+    logger.error("Slack response_url POST failed", { status: res.status });
+  } else {
+    logger.error("Slack response_url POST error", { error: res.detail });
   }
 }

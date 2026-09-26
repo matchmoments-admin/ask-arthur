@@ -20,7 +20,7 @@ describe("checkExposedAdminPaths", () => {
   it("warns when admin path is accessible", async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes("/admin")) {
-        return { ok: true, status: 200 };
+        return new Response(null, { status: 200 });
       }
       throw new Error("Not found");
     });
@@ -32,7 +32,7 @@ describe("checkExposedAdminPaths", () => {
   it("fails when .env is accessible", async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes("/.env")) {
-        return { ok: true, status: 200 };
+        return new Response(null, { status: 200 });
       }
       throw new Error("Not found");
     });
@@ -44,7 +44,7 @@ describe("checkExposedAdminPaths", () => {
   it("fails when .git/config is accessible", async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes("/.git/config")) {
-        return { ok: true, status: 200 };
+        return new Response(null, { status: 200 });
       }
       throw new Error("Not found");
     });
@@ -55,7 +55,7 @@ describe("checkExposedAdminPaths", () => {
   it("ignores allowed paths like robots.txt", async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes("/robots.txt")) {
-        return { ok: true, status: 200 };
+        return new Response(null, { status: 200 });
       }
       throw new Error("Not found");
     });

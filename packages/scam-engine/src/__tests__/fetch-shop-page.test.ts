@@ -160,8 +160,9 @@ describe("fetchShopPage", () => {
   });
 
   it("gives up after too many redirects", async () => {
+    let n = 0;
     const fetchSpy = vi.fn(async () =>
-      redirectResponse("https://shop.example.com/loop"),
+      redirectResponse(`https://shop.example.com/hop-${++n}`),
     );
     vi.stubGlobal("fetch", fetchSpy);
     const res = await fetchShopPage("https://shop.example.com/");
@@ -169,6 +170,17 @@ describe("fetchShopPage", () => {
     expect(res.html).toBeNull();
     // Initial fetch + MAX_REDIRECTS (5) followed hops = 6.
     expect(fetchSpy).toHaveBeenCalledTimes(6);
+  });
+
+  it("stops a redirect loop at the first repeat instead of spending the hop budget", async () => {
+    const fetchSpy = vi.fn(async () =>
+      redirectResponse("https://shop.example.com/loop"),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const res = await fetchShopPage("https://shop.example.com/");
+    expect(res.error).toBe("too-many-redirects");
+    expect(res.html).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("errors when a redirect carries no Location header", async () => {

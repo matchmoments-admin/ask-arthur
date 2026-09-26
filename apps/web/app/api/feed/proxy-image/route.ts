@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 
 const ALLOWED_DOMAINS = new Set([
   "preview.redd.it",
@@ -8,41 +9,10 @@ const ALLOWED_DOMAINS = new Set([
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
-/**
- * Stream an upstream image response to the client, enforcing the MAX_SIZE cap
- * via both the Content-Length header (if present) and a byte-counting
- * TransformStream (for chunked responses without a length). Used by BOTH the
- * direct and the redirect-followed paths — the redirect branch previously
- * streamed the body uncapped, letting an allowed host 30x-redirect to a
- * chunked multi-GB body and bypass the 5 MB limit (bandwidth-amplification DoS).
- */
-function cappedImageResponse(res: Response, contentType: string): NextResponse {
-  const contentLength = res.headers.get("content-length");
-  if (contentLength && parseInt(contentLength, 10) > MAX_SIZE) {
-    return NextResponse.json({ error: "Image too large" }, { status: 413 });
-  }
-  const body = res.body;
-  if (!body) {
-    return NextResponse.json({ error: "Empty response" }, { status: 502 });
-  }
-  let bytesRead = 0;
-  const sizeLimit = new TransformStream({
-    transform(chunk, controller) {
-      bytesRead += chunk.byteLength;
-      if (bytesRead > MAX_SIZE) {
-        controller.error(new Error("Image too large"));
-        return;
-      }
-      controller.enqueue(chunk);
-    },
-  });
-  return new NextResponse(body.pipeThrough(sizeLimit), {
-    headers: {
-      "Content-Type": contentType,
-      "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=1800",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
+/** A missing Content-Type is served as image/jpeg (as before); anything
+ *  else must be image/*. */
+function isImageType(headers: Headers): boolean {
+  return (headers.get("content-type") || "image/jpeg").startsWith("image/");
 }
 
 export async function GET(req: NextRequest) {
@@ -67,58 +37,51 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Domain not allowed" }, { status: 403 });
   }
 
-  try {
-    const upstream = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "AskArthur-ImageProxy/1.0",
-      },
-      signal: AbortSignal.timeout(10000),
-      redirect: "manual",
-    });
-
-    // Handle redirects — re-validate the target domain
-    if (upstream.status >= 300 && upstream.status < 400) {
-      const location = upstream.headers.get("location");
-      if (!location) {
-        return NextResponse.json({ error: "Redirect with no location" }, { status: 502 });
-      }
-      try {
-        const redirectParsed = new URL(location, imageUrl);
-        if (!ALLOWED_DOMAINS.has(redirectParsed.hostname)) {
-          return NextResponse.json({ error: "Redirect to disallowed domain" }, { status: 403 });
-        }
-        // Follow the redirect to the allowed domain
-        const redirected = await fetch(redirectParsed.toString(), {
-          headers: { "User-Agent": "AskArthur-ImageProxy/1.0" },
-          signal: AbortSignal.timeout(10000),
-          redirect: "error",
-        });
-        if (!redirected.ok) {
-          return NextResponse.json({ error: "Upstream fetch failed" }, { status: redirected.status });
-        }
-        const rContentType = redirected.headers.get("content-type") || "image/jpeg";
-        if (!rContentType.startsWith("image/")) {
-          return NextResponse.json({ error: "Not an image" }, { status: 400 });
-        }
-        return cappedImageResponse(redirected, rContentType);
-      } catch {
-        return NextResponse.json({ error: "Invalid redirect URL" }, { status: 502 });
-      }
+  // safeFetch owns the rest: the host allowlist on the initial URL AND on the
+  // one redirect we follow, the SSRF-safe dispatcher, the 5 MB streamed cap
+  // (a chunked multi-GB body can no longer bypass it) and the timeout.
+  const r = await safeFetch(imageUrl, {
+    headers: { "User-Agent": "AskArthur-ImageProxy/1.0" },
+    timeoutMs: 10_000,
+    maxBytes: MAX_SIZE,
+    redirect: "follow-checked",
+    maxRedirects: 1,
+    allowHosts: ALLOWED_DOMAINS,
+    // Refuse a non-image from its headers, before any body byte is buffered.
+    beforeBody: (_status, headers) => (isImageType(headers) ? undefined : "not-an-image"),
+    as: "bytes",
+  });
+  if (!r.ok) {
+    if (r.reason === "too_large") {
+      return NextResponse.json({ error: "Image too large" }, { status: 413 });
     }
-
-    if (!upstream.ok) {
-      return NextResponse.json(
-        { error: "Upstream fetch failed" },
-        { status: upstream.status }
-      );
+    if (r.reason === "blocked") {
+      return NextResponse.json({ error: "Redirect to disallowed domain" }, { status: 403 });
     }
-
-    const contentType = upstream.headers.get("content-type") || "image/jpeg";
-    if (!contentType.startsWith("image/")) {
+    if (r.reason === "rejected") {
       return NextResponse.json({ error: "Not an image" }, { status: 400 });
     }
-    return cappedImageResponse(upstream, contentType);
-  } catch {
+    // A 3xx that was not followed (no Location, or 300/304/305) is never
+    // passed through: a JSON body under a 304 is not a valid response.
+    if (r.reason === "http" && r.status !== null && r.status >= 400 && r.status < 600) {
+      return NextResponse.json({ error: "Upstream fetch failed" }, { status: r.status });
+    }
+    if (r.reason === "http" && r.status !== null && r.status >= 300 && r.status < 400) {
+      const error = r.headers?.get("location") ? "Upstream redirect not followed" : "Redirect with no location";
+      return NextResponse.json({ error }, { status: 502 });
+    }
     return NextResponse.json({ error: "Proxy fetch failed" }, { status: 502 });
   }
+  if (r.body.byteLength === 0) {
+    return NextResponse.json({ error: "Empty response" }, { status: 502 });
+  }
+
+  const contentType = r.headers.get("content-type") || "image/jpeg";
+  return new NextResponse(r.body as BodyInit, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=1800",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }

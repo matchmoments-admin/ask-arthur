@@ -1,6 +1,6 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
-import { assertSafeURL } from "@askarthur/scam-engine";
+import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
 import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -68,20 +68,20 @@ export function parseSecurityTxtContacts(body: string): {
 }
 
 async function fetchSecurityTxt(domain: string): Promise<string | null> {
-  const url = `https://${domain}/.well-known/security.txt`;
-  try {
-    assertSafeURL(url); // SSRF hygiene (domains are trusted, but cheap)
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: "follow",
-      headers: { "user-agent": "AskArthur security-contact discovery (askarthur.au)" },
-    });
-    if (!res.ok) return null;
-    const body = await res.text();
-    return /contact:/i.test(body) ? body.slice(0, 20_000) : null;
-  } catch {
-    return null;
-  }
+  // safeFetch: guard + SSRF-safe dispatcher, and every redirect hop checked
+  // before it is followed (a plain redirect:"follow" skipped the per-hop check).
+  const res = await safeFetch(`https://${domain}/.well-known/security.txt`, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: 64 * 1024,
+    truncate: true,
+    redirect: "follow-checked",
+    // Was a plain redirect: "follow" — keep fetch's hop limit.
+    maxRedirects: FETCH_DEFAULT_MAX_REDIRECTS,
+    headers: { "user-agent": "AskArthur security-contact discovery (askarthur.au)" },
+    as: "text",
+  });
+  if (!res.ok) return null;
+  return /contact:/i.test(res.body) ? res.body.slice(0, 20_000) : null;
 }
 
 // inngest-finish-budget: 17 boundaries — 2 static + 1 per-candidate probe step

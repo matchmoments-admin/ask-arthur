@@ -16,6 +16,7 @@ import { createHmac } from "node:crypto";
 import { Resend } from "resend";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { safeFetch, sameOriginOrUpgrade } from "@askarthur/scam-engine/safe-fetch";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import type {
   Footprint,
@@ -266,7 +267,11 @@ async function sendAlertWebhook(args: {
     .digest("hex");
   const signatureHeader = `t=${epoch},v1=${sig}`;
 
-  const res = await fetch(org.fleet_webhook_url, {
+  // The webhook URL is org-configured, so it gets the full outbound guard:
+  // private-host check on every hop, SSRF-safe dispatcher at connect. A
+  // redirect is followed only within the same origin or as an http→https
+  // upgrade of the same host — the signed payload never goes elsewhere.
+  const res = await safeFetch(org.fleet_webhook_url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -274,12 +279,19 @@ async function sendAlertWebhook(args: {
       "x-askarthur-event": "phone-footprint.alert.v1",
     },
     body: payload,
-    signal: AbortSignal.timeout(5000),
+    redirect: "follow-checked",
+    allowRedirect: sameOriginOrUpgrade,
+    // Belt and braces: allowRedirect already refuses other origins, but the
+    // signature must never ride a hop that leaves this one.
+    sensitiveHeaders: ["x-askarthur-signature"],
+    as: "none",
+    timeoutMs: 5000,
   });
 
   if (!res.ok) {
-    logger.warn("alert webhook non-2xx", {
+    logger.warn("alert webhook delivery failed", {
       orgId: args.monitor.org_id,
+      reason: res.reason,
       status: res.status,
       alertId: args.alertId,
     });

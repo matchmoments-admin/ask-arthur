@@ -3,6 +3,8 @@ import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
+// The one response_url sender (host allowlist + SSRF guard + timeout).
+import { postToResponseUrl } from "@/lib/bots/slack/handler";
 
 // node:crypto (via bot-core verifier) is unavailable on Edge; pin Node + dynamic
 // (same as the other 4 webhook routes — this is the 5th node:crypto consumer).
@@ -102,20 +104,4 @@ async function processShortcut(
 
 async function postEphemeral(url: string, text: string): Promise<void> {
   await postToResponseUrl(url, { response_type: "ephemeral", text });
-}
-
-async function postToResponseUrl(url: string, body: unknown): Promise<void> {
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      logger.error("Slack response_url POST failed", { status: response.status });
-    }
-  } catch (err) {
-    logger.error("Slack response_url POST error", { error: String(err) });
-  }
 }
