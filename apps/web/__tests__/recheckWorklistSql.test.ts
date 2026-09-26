@@ -26,6 +26,9 @@ beforeAll(async () => {
     CREATE TABLE known_brands (brand_domain text, brand_category text);
   `);
   await db.exec(migration("migration-v326-recheck-dead-dormancy-and-age-taper.sql"));
+  // v328 re-creates the worklist with due_total — the body every case below
+  // now runs against (v326's predicates, unchanged).
+  await db.exec(migration("migration-v328-recheck-due-total.sql"));
 }, 30_000);
 afterAll(async () => db?.close());
 beforeEach(async () => db.exec("DELETE FROM shopfront_clone_alerts"));
@@ -100,5 +103,17 @@ describe("v326 recheck worklist", () => {
     await insert({ id: 6 });
     expect(await due()).toEqual([6]);
     expect(await dormant()).toBe(5);
+  });
+});
+
+describe("v328 due_total", () => {
+  it("reports every due row, not just the LIMITed page", async () => {
+    for (let i = 1; i <= 7; i++) await insert({ id: i });
+    await insert({ id: 8, uuid: null, streak: 9, status: "400" }); // dead-dormant: not due
+    const r = await db.query<{ id: number; due_total: number }>(
+      "SELECT id, due_total FROM list_clone_alerts_for_recheck(3, 6, 168)",
+    );
+    expect(r.rows).toHaveLength(3);
+    expect(r.rows.every((x) => Number(x.due_total) === 7)).toBe(true);
   });
 });

@@ -34,6 +34,8 @@ import {
  *     incident as healthy (units reads 0 → predicate false).
  *   - "Sep 9–16 recheck rows": drop the `submit_failed >= rechecked` arm →
  *     the `rechecked 50 / submitted 0 / submit_failed 50` variant is healthy.
+ *   - "cap_bound": drop the `capBound` entry on retrieve → the five-run bind
+ *     is silent; drop the backlog comparison → a draining enricher pages.
  *   - "absent by roster": remove the `!latest` branch → a lane that logged
  *     nothing at all is silently skipped (the feed-health failure class).
  *   - "quiet-day row": loosen the resubmit `deferred === 0` arm → the
@@ -307,6 +309,80 @@ describe("classifyLaneHealth", () => {
     expect(liveness(Date.parse("2026-10-02T00:00:00Z"))).toEqual([
       expect.objectContaining({ kind: "absent" }),
     ]);
+  });
+
+  describe("cap_bound (#1231)", () => {
+    const retrieveRow = (h: number, reached: boolean) =>
+      outcomeRow("shopfront-clone-urlscan-retrieve", h, 100, {
+        classified: 90,
+        still_pending: 10,
+        unnotified_weaponised: 0,
+        cap: 100,
+        cap_reached: reached,
+      });
+    const withRetrieve = (rows: LaneCostRow[]) => [
+      ...healthyRows().filter((r) => r.operation !== LANES["shopfront-clone-urlscan-retrieve"].operation),
+      ...rows,
+    ];
+    const kinds = (rows: LaneCostRow[]) =>
+      classifyLaneHealth(rows, { now: NOW }).map((p) => `${p.lane}:${p.kind}`);
+
+    it("pages when the cap bound every one of the last N runs", () => {
+      const rows = withRetrieve([1, 4, 7, 10, 13].map((h) => retrieveRow(h, true)));
+      expect(kinds(rows)).toEqual(["shopfront-clone-urlscan-retrieve:cap_bound"]);
+    });
+
+    it("stays quiet when one of the last N runs had slack", () => {
+      const rows = withRetrieve([1, 4, 7, 10, 13].map((h, i) => retrieveRow(h, i !== 2)));
+      expect(kinds(rows)).toEqual([]);
+    });
+
+    const enrichRow = (h: number, backlog: number | null) =>
+      outcomeRow("clone-watch-enrich-attribution", h, 60, {
+        pending: 60,
+        enriched: 60,
+        cap: 60,
+        cap_reached: true,
+        backlog,
+      });
+    const withEnrich = (rows: LaneCostRow[]) => [
+      ...healthyRows().filter((r) => r.operation !== LANES["clone-watch-enrich-attribution"].operation),
+      ...rows,
+    ];
+
+    it("stays quiet while the backlog drains at the cap (the cap working)", () => {
+      const rows = withEnrich([enrichRow(1, 40), enrichRow(25, 90), enrichRow(49, 150)]);
+      expect(kinds(rows)).toEqual([]);
+    });
+
+    it("pages when the backlog holds or grows at the cap", () => {
+      const rows = withEnrich([enrichRow(1, 160), enrichRow(25, 150), enrichRow(49, 150)]);
+      expect(kinds(rows)).toEqual(["clone-watch-enrich-attribution:cap_bound"]);
+    });
+
+    it("silent_zero outranks cap_bound (a capped retrieve holding an unnotified weaponised alert)", () => {
+      const rows = withRetrieve(
+        [1, 4, 7, 10, 13].map((h) =>
+          outcomeRow("shopfront-clone-urlscan-retrieve", h, 100, {
+            classified: 90,
+            still_pending: 10,
+            unnotified_weaponised: 2,
+            cap: 100,
+            cap_reached: true,
+          }),
+        ),
+      );
+      expect(kinds(rows)).toEqual(["shopfront-clone-urlscan-retrieve:silent_zero"]);
+    });
+
+    it("never pages lifecycle-recheck for its cap — its demand is structurally over quota", () => {
+      const rows = healthyRows().map((r) =>
+        r.operation === LANES["shopfront-clone-lifecycle-recheck"].operation
+          ? { ...r, metadata: { ...r.metadata, cap: 90, cap_reached: true, due_total: 1400 } }
+          : r,
+      );
+      expect(kinds(rows)).toEqual([]);
+    });
   });
 
   it("reports a lane whose last row is older than its cadence", () => {

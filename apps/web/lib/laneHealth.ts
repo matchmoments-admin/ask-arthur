@@ -61,7 +61,10 @@ export type LaneProblemKind =
   /** `feature_brakes` could not be read, so no lane's brake could be judged. */
   | "brake_unknown"
   /** Every recent run was stopped by the vendor's quota (e.g. urlscan 429s). */
-  | "quota_exhausted";
+  | "quota_exhausted"
+  /** Every recent run was held by the Lane's OWN per-run cap, and the backlog
+   *  it leaves is not draining — demand has outgrown the cap (#1231). */
+  | "cap_bound";
 
 export interface LaneProblem {
   lane: string;
@@ -148,6 +151,23 @@ interface Shape<L extends LaneId> {
    * `consecutive`, so one bad quota day stays quiet.
    */
   quotaExhausted?: { consecutive: number; test: (o: Seen<L>) => boolean };
+  /**
+   * A per-run cap that binds PERSISTENTLY (#1231). Every capped clone-watch
+   * Lane used to hit its cap silently — retrieve at 40/40 on 10 of 12 runs,
+   * the enricher at 60/60 while its backlog aged out of the window — because
+   * a full batch reads as success. Fires when the latest `consecutive` rows
+   * all hit the cap AND, where the Lane reports a backlog, it is not
+   * shrinking across them (a backlog draining at the cap is the cap working).
+   * Not declared for lifecycle-recheck (its demand is structurally above the
+   * urlscan quota, so it would page forever; its gap is `due_total`, #1229)
+   * nor netcraft resubmit (a precision cap). Evaluated AFTER silent_zero, so
+   * it can never mask a lane that is doing nothing.
+   */
+  capBound?: {
+    consecutive: number;
+    test: (o: Seen<L>) => boolean;
+    backlog?: (o: Seen<L>) => number | null;
+  };
 }
 
 const H = 3_600_000;
@@ -197,6 +217,10 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     crons: ["0 9 * * *"],
     flags: ["shopfrontCloneUrlscan"],
     consecutive: 1,
+    capBound: {
+      consecutive: 3,
+      test: (o) => o.cap_reached === true,
+    },
     shape: "units>0 ∧ submitted=0 ∧ (rate_limited=0 ∨ submit_failed>0)",
     // Same rule as recheck: nothing submitted while genuine submits failed
     // pages regardless of 429s; nothing submitted AND nothing refused on quota
@@ -223,6 +247,10 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     crons: ["10 3,9,12,15,21 * * *"],
     flags: ["shopfrontCloneUrlscan"],
     consecutive: 3,
+    capBound: {
+      consecutive: 5,
+      test: (o) => o.cap_reached === true,
+    },
     shape: "classified=0 while still_pending>0, or unnotified_weaponised>0",
     silentZero: (o) =>
       (n(o, "classified") === 0 && n(o, "still_pending") > 0) ||
@@ -240,6 +268,9 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     crons: NETCRAFT_AUTO_CRONS,
     flags: ["cloneNetcraftResubmit", "shopfrontCloneSubmitNetcraft", "shopfrontCloneOutreach"],
     consecutive: 1,
+    // No capBound: a PRECISION cap (each report goes out in Ask Arthur's
+    // name), not capacity — hitting it is the cap doing its job. The row still
+    // carries cap / cap_reached for the record.
     shape: "candidates>0 ∧ marked=0 ∧ deferred=0",
     silentZero: (o) =>
       n(o, "candidates") > 0 && n(o, "marked") === 0 && n(o, "deferred") === 0,
@@ -248,6 +279,10 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     crons: ["0 10 * * *", "0 22 * * *"],
     flags: ["shopfrontCloneOutreach", "cloneLifecycleReconcile"],
     consecutive: 1,
+    capBound: {
+      consecutive: 4,
+      test: (o) => o.cap_reached === true,
+    },
     // Absence only (2026-09-24). "uuids=0 three runs running" was written when
     // every submission was re-read daily; since v316's unchanged-verdict
     // backoff (72 h) and v284's ~1 submission/day, an empty worklist is the
@@ -295,6 +330,11 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // (2026-09-11..16, found by the 09-22 audit) must.
     flags: ["cloneWatchAttribution"],
     consecutive: 2,
+    capBound: {
+      consecutive: 3,
+      test: (o) => o.cap_reached === true,
+      backlog: (o) => (typeof o.backlog === "number" ? o.backlog : null),
+    },
     shape: "pending>0 ∧ enriched=0",
     silentZero: (o) => n(o, "pending") > 0 && n(o, "enriched") === 0,
   },
@@ -521,6 +561,25 @@ function quotaExhaustedRuns<L extends LaneId>(
   return recent.every((r) => q.test(seenOf<L>(r))) ? recent.length : null;
 }
 
+/** Depth of a persistent cap bind (see `Shape.capBound`), else null. */
+function capBoundRuns<L extends LaneId>(
+  lane: L,
+  mine: LaneCostRow[],
+): number | null {
+  const c = (LANE_SHAPES[lane] as Shape<L>).capBound;
+  if (!c) return null;
+  const recent = mine.slice(0, c.consecutive);
+  if (recent.length < c.consecutive) return null;
+  const seen = recent.map((r) => seenOf<L>(r));
+  if (!seen.every((o) => c.test(o))) return null;
+  if (c.backlog) {
+    const newest = c.backlog(seen[0]!);
+    const oldest = c.backlog(seen[seen.length - 1]!);
+    if (newest !== null && oldest !== null && newest < oldest) return null;
+  }
+  return recent.length;
+}
+
 function rowsFor(
   rows: LaneCostRow[],
   feature: string,
@@ -636,6 +695,21 @@ export function classifyLaneHealth(
         lane,
         kind: "silent_zero",
         detail: `${recent.length} consecutive run${recent.length === 1 ? "" : "s"}: ${shape.shape}`,
+      });
+      // silent_zero outranks cap_bound: a lane doing nothing (or holding an
+      // unnotified weaponised alert) is the page; its cap is secondary.
+      continue;
+    }
+
+    // Last: a capacity advisory, never allowed to mask a failure above.
+    const capped = capBoundRuns(lane, mine);
+    if (capped !== null) {
+      problems.push({
+        lane,
+        kind: "cap_bound",
+        detail: shape.capBound?.backlog
+          ? `per-run cap hit ${capped} consecutive runs and the backlog is not draining — size the cap from demand`
+          : `per-run cap hit ${capped} consecutive runs — rows are being left for the next run; size the cap from demand`,
       });
     }
   }

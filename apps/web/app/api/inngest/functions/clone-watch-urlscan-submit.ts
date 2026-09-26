@@ -232,6 +232,9 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             reputation_hits: reputationHits,
             dormant_retired: dormant,
             unreached,
+            // #1231: a full worklist means gated rows were left for tomorrow.
+            cap: SUBMIT_BATCH_LIMIT,
+            cap_reached: candidates.length >= SUBMIT_BATCH_LIMIT,
           },
         );
       });

@@ -952,7 +952,7 @@ urlscan evidence.
 | Key                                      | Kind        | Default | Notes                                                                                                                                                                                        |
 | ---------------------------------------- | ----------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FF_CLONE_NETCRAFT_RESUBMIT`             | server flag | `false` | Gates the lane. Independent of `FF_CLONE_NETCRAFT_ISSUE` so the outbound path can be killed on its own. Still requires `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT` + `FF_SHOPFRONT_CLONE_OUTREACH`. |
-| `NETCRAFT_RESUBMIT_DAILY_CAP`            | server env  | `10`    | Bare number — `parseInt("$10")` is `NaN` and falls back to the default.                                                                                                                      |
+| `NETCRAFT_RESUBMIT_DAILY_CAP`            | server env  | `15`    | Bare number — `parseInt("$10")` is `NaN` and falls back to the default.                                                                                                                      |
 | `feature_brakes.clone_netcraft_resubmit` | DB row      | absent  | Operator kill-switch, separate from `clone_netcraft_issue`.                                                                                                                                  |
 
 Reporter standing is the risk this lane carries, so the bounds are layered:
@@ -1097,8 +1097,26 @@ only, leaving the issue reporter and the auto lane untouched.
 ### Enabling `FF_SHOPFRONT_CLONE_RECHECK` (runbook)
 
 The recheck loop (`shopfront-clone-lifecycle-recheck`, cron `30 */6 * * *`,
-batch 50/run → ≤200 unlisted urlscan submits/day) is the declined→weaponised
-detector — the enabler for F1 and the F4 evidence gate.
+batch 90/run → ≤360 unlisted urlscan submits/day since #1231; 50/run before)
+is the declined→weaponised detector — the enabler for F1 and the F4 evidence
+gate.
+
+> **Throughput caps (#1231, 2026-09-26).** urlscan's real limits (read from
+> `/user/quotas`): unlisted **60/min, 100/hour, 1,000/day**; retrieve 120/min,
+> 5,000/h, 10,000/day. Two unlisted caps bind: **per minute** (a submit is
+> ~1.5–2.2 s, so width 3 unpaced would push ~80/min — recheck paces one start
+> per 1.1 s, ~55/min) and **per hour** (a batch stays ≤90; the manual-trigger
+> cooldown is 65 min so two batches never share an hour, and
+> `pipeline-urlscan-enrichment` moved to 03/15/21:00, off the recheck's :30
+> hours). Sizes now: recheck 90/run at width 3 paced, retrieve 100/run × 5 at width 3 (the first 429 stops every
+> worker), submit 75/day (unchanged), reconcile 40 uuids/run, resubmit 15/day,
+> enricher 60/day **oldest-first** (newest-first let its tail age out of the
+> 35-day window). Every capped lane writes `cap` + `cap_reached` in its
+> Outcome Row (enricher also `backlog`); the health digest pages `cap_bound`
+> when a cap binds N runs running and the backlog is not draining. Recheck is
+> exempt: its designed cadence asks ~3,800 rescans/day (≈4× the daily quota),
+> so it records `due_total` (v328) instead — the fix is change-triggered
+> rescans (#1229), not a bigger cap.
 
 1. **Quota check** (pre-flip): pull the prod key and confirm **unlisted**
    headroom ≥200/day and ≥50/hour:

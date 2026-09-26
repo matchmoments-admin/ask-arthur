@@ -40,9 +40,29 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * submission) + a feature_brakes.shopfront_clone_recheck operator kill-switch.
  */
 
-const RECHECK_BATCH_LIMIT = 50; // × 4 runs/day = ≤200 rescans/day, bounded
+// × 4 runs/day = ≤360 rescans/day. Bounded by urlscan's UNLISTED quota —
+// 100/hour, 1,000/day (/user/quotas, read 2026-09-26): one batch lands inside
+// one hour, so 90 leaves 10 of the hour for any other unlisted caller. Was 50
+// (#1231): 50/50 on every run since 2026-09-17 with 1,420 rows due.
+//
+// This does NOT meet the designed cadence and cannot: at 6h/24h/168h the pool
+// asks for ~3,800 rescans/day, ~4x the whole daily quota. `due_total` in the
+// Outcome Row makes the gap visible; the fix is change-triggered rescans (a
+// free DNS fingerprint gates the urlscan call — #1229), not a bigger cap.
+export const RECHECK_BATCH_LIMIT = 90;
+// Submits in flight inside the batch step, PACED: urlscan's unlisted cap is
+// 60/min and a sequential submit is ~1.5–2.2 s (measured), so width alone
+// would push ~80/min. One start per 1.1 s holds it near 55/min; width 3 hides
+// each row's latency so the pacing, not the latency, sets the rate. 90 rows
+// ≈ 100 s, inside RECHECK_SUBMIT_WALL_CLOCK_MS.
+const RECHECK_SUBMIT_CONCURRENCY = 3;
+const RECHECK_SUBMIT_MIN_INTERVAL_MS = 1_100;
+// Same-window cooldown for a manual fire. 65 min, not 50: the unlisted quota
+// is 100/HOUR, and two batches of 90 inside one hour is 180 (at 50/batch a
+// 51-minute stack was 100 and just fit).
+const RECHECK_COOLDOWN_MS = 65 * 60 * 1000;
 // F3: over-fetch the staleness-ordered pool, rank by weaponisation risk in TS
-// (ONE scorer — weaponisation-risk.ts), rescan the top 50. Unselected rows keep
+// (ONE scorer — weaponisation-risk.ts), rescan the top RECHECK_BATCH_LIMIT. Unselected rows keep
 // their stale last_rechecked_at and rotate through on later runs.
 //
 // That rotation does NOT happen on its own. This comment used to claim
@@ -54,7 +74,7 @@ const RECHECK_BATCH_LIMIT = 50; // × 4 runs/day = ≤200 rescans/day, bounded
 // for the stalest rows, which is what actually bounds the rotation.
 const RECHECK_FETCH_LIMIT = 200;
 // Share of each batch reserved for the stalest rows regardless of risk score.
-// 20% of 50 = 10 slots/run x 4 runs/day = 40 guaranteed rotations/day.
+// 20% of 90 = 18 slots/run x 4 runs/day = 72 guaranteed rotations/day.
 const STALE_FLOOR_SHARE = 0.2;
 const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
 // Break the submit loop before the ROUTE's maxDuration — the loop runs inside
@@ -69,6 +89,8 @@ const BRAKE = LANES["shopfront-clone-lifecycle-recheck"].brake;
 
 interface RecheckRow {
   id: number;
+  /** v328: rows due in total (window count before the LIMIT). */
+  due_total?: number | string | null;
   candidate_domain: string;
   candidate_url: string;
   lifecycle_state: string;
@@ -171,12 +193,13 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     name: "Clone-Watch: lifecycle re-check loop",
     retries: 1,
     concurrency: { limit: 1 },
-    // Structural daily ceiling on inline urlscan submits (4 crons × 50 = 200
-    // < 210), so a worklist regression / manual-trigger storm can't recreate
-    // the May-27 urlscan burst (v224).
+    // Inngest throttle counts RUNS, not submits: this caps runs/day. The
+    // submit ceiling is RECHECK_BATCH_LIMIT per run × the 65-min cooldown,
+    // which keeps a manual-trigger storm from recreating the May-27 urlscan
+    // burst (v224).
     throttle: { limit: 210, period: "1d" },
     // 15m, not 8m (#1069): the inline rescan step legitimately runs minutes
-    // (50 rechecks incl. urlscan submits), and step boundaries now queue for
+    // (a batch of rechecks incl. urlscan submits), and step boundaries now queue for
     // account-concurrency slots (~30–60s each under contention). Finite per
     // ADR-0019; guarded by inngestFinishBudgets.test.ts.
     // NOTE: this budget now exceeds the 10m pg-stuck-query-watchdog window.
@@ -227,7 +250,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           .maybeSingle();
         if (!data?.created_at) return false;
         return (
-          Date.now() - new Date(data.created_at).getTime() < 50 * 60 * 1000
+          Date.now() - new Date(data.created_at).getTime() < RECHECK_COOLDOWN_MS
         );
       });
       if (recentRun) {
@@ -260,11 +283,16 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       });
       // A run memoised before this step returned an object replays the array.
       const pool: RecheckRow[] = Array.isArray(loaded) ? loaded : loaded.rows;
+      // v328: every worklist row carries the full due count (count(*) OVER ()
+      // before the LIMIT), so the backlog the cap leaves is on record.
+      const dueRaw = pool[0]?.due_total;
+      const dueTotal: number | null =
+        dueRaw == null || !Number.isFinite(Number(dueRaw)) ? null : Number(dueRaw);
       const dormantDead: number | null = Array.isArray(loaded) ? null : loaded.dormantDead;
 
       if (pool.length === 0) {
         // Quiet-run Outcome Row (#1145/#1166): "nothing due" used to write
-        // nothing and read as "not running". The 50-min cooldown above reads
+        // nothing and read as "not running". The 65-min cooldown above reads
         // this feature's latest row, so a quiet run also holds off a stacked
         // manual fire — intended.
         await step.run("log-cost-quiet", () =>
@@ -322,6 +350,8 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         // place, shared with the daily submit lane.
         async (budget) =>
           submitCandidateBatch(candidates, budget, {
+            concurrency: RECHECK_SUBMIT_CONCURRENCY,
+            minStartIntervalMs: RECHECK_SUBMIT_MIN_INTERVAL_MS,
             onRowError: (alertId, err) =>
               logger.error("clone-watch recheck: submit failed", {
                 alertId,
@@ -391,6 +421,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             rate_limited: rateLimited,
             unreached,
             dormant_dead: dormantDead,
+            // #1231: the cap, whether this run hit it, and the true due count
+            // (v328 window count; null = older RPC / not returned).
+            cap: RECHECK_BATCH_LIMIT,
+            cap_reached: candidates.length >= RECHECK_BATCH_LIMIT,
+            due_total: dueTotal,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
               .length,
             monitoring: candidates.filter(
