@@ -1882,10 +1882,16 @@ sends none, so a human verdict on an auto-parked or matcher-v4-audited alert
 keeps the machine note (#1260 review H1). Rows written before v335
 (`triage_source` NULL) count as human only with `triage_at` set and no machine
 marker: `auto-park%` (incl. the 98-row `auto-park (one-time backfill…)` form),
-`auto-triage%`, `[matcher-v4-audit]%`. `tp_actioned` counts as a TP: Netcraft's
-`merge_clone_alert_submission` rewrites a human `tp_confirmed` to it and never
-stamps `triage_at` or `triage_source`. A new machine writer MUST stamp
-`triage_source = 'machine'`.
+`auto-triage%`, `[matcher-v4-audit]%`. `tp_actioned` counts as a TP only when
+its origin is human. Netcraft's `merge_clone_alert_submission` never stamps
+`triage_at`, and since v338 (#1263) it stamps `triage_source = 'machine'`
+whenever it CHANGES the status, except `tp_confirmed → tp_actioned` (Netcraft
+executing a human verdict keeps that verdict's origin). The v335 header claimed
+the function never needed to stamp, which was wrong: the auto lane's worklist
+takes every status except `fp`, so before v338 a human `needs_investigation`
+the lane submitted became `tp_actioned` + `human` + `triage_at` in the month, and
+counted as a human TP (latent: 0 such rows in prod on 2026-09-27). A new
+machine writer MUST stamp `triage_source = 'machine'`.
 
 **Lane-health record.** The daily health digest (`/api/cron/health-digest`) writes
 one `alert_delivery_log` row per firing; its `metadata.lane_problems` (strings
