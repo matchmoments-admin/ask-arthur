@@ -344,8 +344,19 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       test: (o) => o.cap_reached === true,
       backlog: (o) => (typeof o.backlog === "number" ? o.backlog : null),
     },
-    shape: "pending>0 ∧ enriched=0",
-    silentZero: (o) => n(o, "pending") > 0 && n(o, "enriched") === 0,
+    // #1253, two more disjuncts — the re-offer is the only path that ever
+    // gives a deferred-WHOIS row a registrar, so a stalled one is the same
+    // silent loss the issue found:
+    //   - due rows, none re-offered;
+    //   - the due select FAILED (`whois_reoffer_due` written as null — not
+    //     absent, which is a row from before #1253). Across `consecutive` (2)
+    //     daily runs, a broken select pages instead of reading as "none due".
+    shape:
+      "(pending>0 ∧ enriched=0) ∨ (whois_reoffer_due>0 ∧ whois_reoffered=0) ∨ whois_reoffer_due=null",
+    silentZero: (o) =>
+      (n(o, "pending") > 0 && n(o, "enriched") === 0) ||
+      (n(o, "whois_reoffer_due") > 0 && n(o, "whois_reoffered") === 0) ||
+      o.whois_reoffer_due === null,
   },
   "shopfront-clone-notify-brand-prepare": {
     crons: ["30 9 * * *"],

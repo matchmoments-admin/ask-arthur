@@ -517,6 +517,34 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(data).toBe(0);
   });
 
+  // v336 (#1253): the retry column is written by both batch RPCs.
+  it("apply_clone_alert_attributions accepts attribution_retry_after (v336) and returns 0", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("apply_clone_alert_attributions", {
+      p_rows: [
+        {
+          id: -1,
+          attribution: { enriched_at: "smoke" },
+          campaign_key: null,
+          attribution_retry_after: "2026-10-01T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(0);
+  });
+
+  it("apply_clone_alert_whois_reoffers no-ops on an absent id and returns 0", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("apply_clone_alert_whois_reoffers", {
+      p_rows: [
+        { id: -1, whois: { source: "rdap" }, retry_after: null, campaign_key: null },
+      ],
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(0);
+  });
+
   it("record_clone_watch_jev_classification rejects an absent alert (FK) without a type error", async () => {
     const supabase = getClient();
     const { error } = await supabase.rpc("record_clone_watch_jev_classification", {

@@ -16,6 +16,36 @@ export interface WhoisResult {
   nameServers: string[];
   isPrivate: boolean;
   raw: Record<string, unknown> | null;
+  /**
+   * Present ONLY when no answer was obtained and asking again later may give
+   * one (#1253). Absent on a served lookup — including a 200 that carries no
+   * registrar, which is a real answer. Before this field every one of these
+   * paths returned the same all-null result as a served-but-empty lookup, so
+   * the clone-watch enricher saved a quota-skipped lookup as the row's FINAL
+   * attribution: ~130 rows a month kept no registrar forever (prod
+   * 2026-09-26). A caller that persists a result must not stamp it as final,
+   * or as a fresh cache entry, when this is set.
+   */
+  deferral?: WhoisDeferral;
+}
+
+export type WhoisDeferralReason =
+  /** The monthly guard for this priority is spent (no request made), or
+   *  whoisjson answered 429 — quota exhaustion, never a failure strike. */
+  | "quota_deferred"
+  /** whoisjson answered another non-200, or the request threw / timed out. */
+  | "http_error"
+  /** WHOIS_API_KEY is not set — no request was made. */
+  | "not_configured";
+
+export interface WhoisDeferral {
+  reason: WhoisDeferralReason;
+  /** ISO timestamp: the 1st of next month (UTC) for quota_deferred and
+   *  not_configured — when the guard's count resets, and a missing key is not
+   *  fixed by asking daily — else (http_error) now + 24h. */
+  retryAfter: string;
+  /** HTTP status, when whoisjson answered (429 or another non-200). */
+  status?: number;
 }
 
 const EMPTY_RESULT: WhoisResult = {
@@ -28,6 +58,35 @@ const EMPTY_RESULT: WhoisResult = {
   isPrivate: false,
   raw: null,
 };
+
+/** Retry delay after a failed request (http_error). */
+export const WHOIS_HTTP_RETRY_MS = 24 * 60 * 60 * 1000;
+
+/** The first instant of the next calendar month, UTC — when the guard's
+ *  count resets (monthKey() buckets by UTC month). */
+export function startOfNextMonthUtc(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+}
+
+function deferred(
+  reason: WhoisDeferralReason,
+  now: Date,
+  status?: number,
+): WhoisResult {
+  const retryAfter =
+    reason === "http_error"
+      ? new Date(now.getTime() + WHOIS_HTTP_RETRY_MS)
+      : startOfNextMonthUtc(now);
+  return {
+    ...EMPTY_RESULT,
+    nameServers: [],
+    deferral: {
+      reason,
+      retryAfter: retryAfter.toISOString(),
+      ...(status !== undefined ? { status } : {}),
+    },
+  };
+}
 
 /**
  * Monthly quota guard. whoisjson's free tier is 1,000 lookups/month and the
@@ -49,7 +108,8 @@ export const WHOISJSON_MONTHLY_GUARD: Record<WhoisPriority, number> = {
   batch: 700,
 };
 const QUOTA_CACHE_MS = 10 * 60 * 1000;
-let quotaCache: { month: string; count: number; fetchedAt: number } | null = null;
+let quotaCache: { month: string; count: number; fetchedAt: number } | null =
+  null;
 let lastGuardWarnKey: string | null = null;
 
 /** Reset the in-process quota cache — tests only. */
@@ -97,7 +157,9 @@ async function whoisjsonUsedThisMonth(now: Date): Promise<number | null> {
 /**
  * Look up WHOIS data for a domain via whoisjson.com.
  * Free tier: 1,000 requests/month, 20 req/min rate limit.
- * 5s timeout, non-blocking — failures return empty result.
+ * 5s timeout, non-blocking — never throws. A lookup that got no answer (quota
+ * guard, non-200, network error, no key) returns the all-null result with
+ * `deferral` set, so a caller can tell it from a served-but-empty record.
  */
 export async function lookupWhois(
   domain: string,
@@ -105,25 +167,28 @@ export async function lookupWhois(
 ): Promise<WhoisResult> {
   const priority: WhoisPriority = opts.priority ?? "interactive";
   const apiKey = process.env.WHOIS_API_KEY;
+  const now = new Date();
   if (!apiKey) {
     logger.warn("WHOIS_API_KEY not set, skipping WHOIS lookup");
-    return EMPTY_RESULT;
+    return deferred("not_configured", now);
   }
 
-  const now = new Date();
   const used = await whoisjsonUsedThisMonth(now);
   const guard = WHOISJSON_MONTHLY_GUARD[priority];
   if (used !== null && used >= guard) {
     const warnKey = `${monthKey(now)}:${priority}`;
     if (lastGuardWarnKey !== warnKey) {
       lastGuardWarnKey = warnKey;
-      logger.warn("whoisjson monthly guard reached — lookups skipped until next month", {
-        used,
-        guard,
-        priority,
-      });
+      logger.warn(
+        "whoisjson monthly guard reached — lookups skipped until next month",
+        {
+          used,
+          guard,
+          priority,
+        },
+      );
     }
-    return EMPTY_RESULT;
+    return deferred("quota_deferred", now);
   }
 
   try {
@@ -139,7 +204,17 @@ export async function lookupWhois(
 
     if (!res.ok) {
       logger.warn("WHOIS lookup failed", { status: res.status, domain });
-      return EMPTY_RESULT;
+      // A 429 is whoisjson's quota (or rate) wall — the provider's own count
+      // runs ahead of our guard, which counts only served 200s. It is quota
+      // exhaustion, NOT a failure (CLAUDE.md: a 429 never bumps a failure
+      // streak), so it defers to the guard's reset like the guard itself.
+      // whoisjson documents no other quota status that we have verified; any
+      // other non-200 is an http_error.
+      return deferred(
+        res.status === 429 ? "quota_deferred" : "http_error",
+        now,
+        res.status,
+      );
     }
 
     // Volume telemetry against whoisjson's 1,000/month free cap. We count only
@@ -239,7 +314,7 @@ export async function lookupWhois(
     };
   } catch (err) {
     logger.error("WHOIS lookup error", { error: String(err), domain });
-    return EMPTY_RESULT;
+    return deferred("http_error", now);
   }
 }
 
@@ -253,4 +328,29 @@ function parseDate(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The `scam_urls.whois_*` columns for a lookup result — the ONE mapping the
+ * scam_urls writers share (enrichment.ts, on-demand-url-enrich.ts,
+ * /api/scam-urls/report; they were three hand-kept copies). An unanswered
+ * lookup (`deferral` set) maps to NO columns (#1253): not nulls over existing
+ * values, and no `whois_lookup_at`, which whois-cached.ts and the report
+ * route read as "this domain has WHOIS data".
+ */
+export function whoisScamUrlColumns(
+  w: WhoisResult,
+  lookupAt: string,
+): Record<string, unknown> {
+  if (w.deferral) return {};
+  return {
+    whois_registrar: w.registrar,
+    whois_registrant_country: w.registrantCountry,
+    whois_created_date: w.createdDate,
+    whois_expires_date: w.expiresDate,
+    whois_name_servers: w.nameServers,
+    whois_is_private: w.isPrivate,
+    whois_raw: w.raw,
+    whois_lookup_at: lookupAt,
+  };
 }

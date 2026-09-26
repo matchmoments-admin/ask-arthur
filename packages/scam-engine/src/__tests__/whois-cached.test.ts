@@ -95,6 +95,25 @@ describe("getDomainCreatedDate", () => {
     expect(mockedWhois).toHaveBeenCalledWith("widgets.com.au", { priority: "interactive" });
   });
 
+  // #1253. Go-red (2026-09-27): drop `&& !whois.deferral` from the write-back
+  // guard in whois-cached.ts → `update` is called and this fails.
+  it("does not write an unanswered (deferred) lookup back as a cache entry", async () => {
+    const chain = supabaseChain({ data: null, error: null });
+    mockedCreate.mockReturnValue(chain as never);
+    mockedWhois.mockResolvedValue({
+      ...WHOIS_RESULT,
+      registrar: null,
+      registrarAbuseEmail: null,
+      registrantCountry: null,
+      createdDate: null,
+      expiresDate: null,
+      deferral: { reason: "quota_deferred", retryAfter: "2026-10-01T00:00:00.000Z" },
+    });
+    const result = await getDomainCreatedDate("widgets.com.au");
+    expect(result).toEqual({ createdDate: null, source: "live" });
+    expect(chain.update).not.toHaveBeenCalled();
+  });
+
   it("does a live lookup when no Supabase client is available", async () => {
     mockedCreate.mockReturnValue(null);
     mockedWhois.mockResolvedValue(WHOIS_RESULT);

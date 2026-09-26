@@ -106,6 +106,61 @@ describe("lookupDomainRegistration", () => {
     expect((await lookupDomainRegistration("x.shop")).source).toBe("whoisjson");
   });
 
+  // #1253. Go-red (2026-09-27): make fromWhois always return
+  // `source: "whoisjson"` → both deferral cases fail.
+  it.each([
+    ["quota_deferred", "2026-10-01T00:00:00.000Z"],
+    ["http_error", "2026-09-28T13:30:00.000Z"],
+  ] as const)(
+    "RDAP no record + whoisjson %s → source 'deferred' with retryAfter",
+    async (reason, retryAfter) => {
+      flags.rdapLookup = true;
+      lookupRdapOutcome.mockResolvedValue({
+        result: null,
+        outcome: "not_found",
+      });
+      lookupWhois.mockResolvedValue({
+        ...WHOIS,
+        registrar: null,
+        registrarAbuseEmail: null,
+        createdDate: null,
+        expiresDate: null,
+        nameServers: [],
+        deferral: { reason, retryAfter },
+      });
+      const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
+      expect(r.source).toBe("deferred");
+      expect(r.retryAfter).toBe(retryAfter);
+      expect(r.deferralReason).toBe(reason);
+      expect("deferral" in r).toBe(false);
+    },
+  );
+
+  // #1259 review. Go-red (2026-09-27): drop the deferralStatus spread in
+  // fromWhois → this fails (undefined), and the re-offer could no longer tell
+  // a 429 from another status.
+  it("carries the vendor HTTP status through as deferralStatus", async () => {
+    lookupWhois.mockResolvedValue({
+      ...WHOIS,
+      registrar: null,
+      deferral: {
+        reason: "quota_deferred",
+        retryAfter: "2026-10-01T00:00:00.000Z",
+        status: 429,
+      },
+    });
+    const r = await lookupDomainRegistration("x.shop");
+    expect(r.source).toBe("deferred");
+    expect(r.deferralStatus).toBe(429);
+  });
+
+  it("a served whoisjson answer with no registrar stays 'whoisjson' (final)", async () => {
+    lookupWhois.mockResolvedValue({ ...WHOIS, registrar: null });
+    const r = await lookupDomainRegistration("x.shop");
+    expect(r.source).toBe("whoisjson");
+    expect(r.retryAfter).toBeUndefined();
+  });
+
   it("both empty → source 'none'", async () => {
     flags.rdapLookup = true;
     lookupRdapOutcome.mockResolvedValue({ result: null, outcome: "error" });

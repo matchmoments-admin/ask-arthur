@@ -29,7 +29,7 @@ import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { lookupWhois } from "../whois";
+import { lookupWhois, whoisScamUrlColumns } from "../whois";
 import { checkSSL } from "../ssl";
 import { budgetedStep } from "./step-budget";
 
@@ -47,7 +47,8 @@ interface EnrichOutcome {
   skipped?: "budget_expired";
 }
 
-async function enrichDomain(entry: {
+/** Exported for tests only (#1253 deferral skip). */
+export async function enrichDomain(entry: {
   domain: string;
   urlIds: number[];
 }): Promise<EnrichOutcome> {
@@ -64,14 +65,10 @@ async function enrichDomain(entry: {
     const { error } = await supabase
       .from("scam_urls")
       .update({
-        whois_registrar: whois.registrar,
-        whois_registrant_country: whois.registrantCountry,
-        whois_created_date: whois.createdDate,
-        whois_expires_date: whois.expiresDate,
-        whois_name_servers: whois.nameServers,
-        whois_is_private: whois.isPrivate,
-        whois_raw: whois.raw,
-        whois_lookup_at: attemptedAt,
+        // #1253: an unanswered lookup maps to NO whois_* columns (see
+        // whoisScamUrlColumns). The row is still marked completed — there is
+        // no re-offer for scam_urls yet (PR #1259 follow-up).
+        ...whoisScamUrlColumns(whois, attemptedAt),
         ssl_valid: ssl.valid,
         ssl_issuer: ssl.issuer,
         ssl_days_remaining: ssl.daysRemaining,

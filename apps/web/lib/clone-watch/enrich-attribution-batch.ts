@@ -67,6 +67,9 @@ export interface AttributionWrite<A = unknown> {
   id: number;
   attribution: A;
   campaign_key: string | null;
+  /** #1253 (v336): when the WHOIS lookup was deferred, the instant to re-ask
+   *  it; null / absent = nothing to re-ask. */
+  attribution_retry_after?: string | null;
 }
 
 export interface EnrichBatchOutcome {

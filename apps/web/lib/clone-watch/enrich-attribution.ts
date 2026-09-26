@@ -2,7 +2,10 @@ import {
   lookupDomainRegistration,
   type DomainRegistration,
 } from "@askarthur/scam-engine/domain-registration";
-import { lookupCT, type CTLookupResult } from "@askarthur/scam-engine/ct-lookup";
+import {
+  lookupCT,
+  type CTLookupResult,
+} from "@askarthur/scam-engine/ct-lookup";
 import {
   checkAbuseIPDB,
   type AbuseIPDBResult,
@@ -40,8 +43,21 @@ export interface CloneAttribution {
     statuses: string[];
     /** Registrar IANA id (RDAP) — stable registrar key for campaign grouping. */
     registrarIanaId: string | null;
-    /** Where the record came from: rdap | whoisjson | none. */
+    /** Where the record came from: rdap | whoisjson | none | deferred. */
     source: string;
+    /** #1253 — only on `source: "deferred"`: when WHOIS may answer. The row's
+     *  `attribution_retry_after` column carries the same instant, and the
+     *  re-offer (whois-reoffer.ts) re-asks then. */
+    retryAfter?: string;
+    /** #1253 — only on `source: "deferred"`: quota_deferred | http_error |
+     *  not_configured. */
+    deferralReason?: string;
+    /** #1253 — only on `source: "deferred"` when whoisjson answered: its HTTP
+     *  status (429 = quota, never a strike). */
+    deferralStatus?: number;
+    /** #1253 — http_error deferrals this row has had in a row; the re-offer
+     *  stops asking at WHOIS_HTTP_ERROR_MAX_DEFERRALS. */
+    httpErrorDeferrals?: number;
   } | null;
   ct: {
     siblings: string[];
@@ -69,6 +85,49 @@ export interface HostingInfo {
   ip: string | null;
   country: string | null;
   asn: string | null;
+}
+
+/**
+ * The dossier's `whois` block — shared by the full enrichment and the #1253
+ * WHOIS re-offer, so both write the same shape. A deferred lookup keeps
+ * `source: "deferred"` + `retryAfter`; the caller also stamps the row's
+ * `attribution_retry_after` from `retryAfter` (whoisRetryAfter below).
+ */
+export function shapeWhoisSection(
+  whois: DomainRegistration | null,
+): CloneAttribution["whois"] {
+  if (!whois) return null;
+  return {
+    registrar: whois.registrar,
+    registrarAbuseEmail: whois.registrarAbuseEmail ?? null,
+    registrantCountry: whois.registrantCountry,
+    createdDate: whois.createdDate,
+    nameServers: whois.nameServers ?? [],
+    statuses: whois.statuses ?? [],
+    registrarIanaId: whois.registrarIanaId ?? null,
+    source: whois.source ?? "whoisjson",
+    ...(whois.source === "deferred"
+      ? {
+          ...(whois.retryAfter ? { retryAfter: whois.retryAfter } : {}),
+          ...(whois.deferralReason
+            ? { deferralReason: whois.deferralReason }
+            : {}),
+          ...(whois.deferralStatus !== undefined
+            ? { deferralStatus: whois.deferralStatus }
+            : {}),
+        }
+      : {}),
+  };
+}
+
+/** The `attribution_retry_after` to stamp for a dossier: its WHOIS block's
+ *  retryAfter when the lookup was deferred, else null (nothing to re-ask). */
+export function whoisRetryAfter(
+  dossier: Pick<CloneAttribution, "whois"> | null,
+): string | null {
+  const w = dossier?.whois;
+  if (!w || w.source !== "deferred") return null;
+  return typeof w.retryAfter === "string" ? w.retryAfter : null;
 }
 
 /**
@@ -102,18 +161,7 @@ export function shapeAttribution(args: {
     : null;
 
   return {
-    whois: whois
-      ? {
-          registrar: whois.registrar,
-          registrarAbuseEmail: whois.registrarAbuseEmail ?? null,
-          registrantCountry: whois.registrantCountry,
-          createdDate: whois.createdDate,
-          nameServers: whois.nameServers ?? [],
-          statuses: whois.statuses ?? [],
-          registrarIanaId: whois.registrarIanaId ?? null,
-          source: whois.source ?? "whoisjson",
-        }
-      : null,
+    whois: shapeWhoisSection(whois),
     ct: ctSection,
     ip_rep: ipRep
       ? {
@@ -163,9 +211,7 @@ export async function enrichCloneAttribution(
   // Cross-check the disclosed ABN against the ABR register (a cancelled /
   // not-found / name-mismatched ABN on a .au lookalike is a strong signal).
   // Second call because it depends on auRaw.abn; skipped when there's no ABN.
-  const abr = auRaw?.abn
-    ? await lookupABN(auRaw.abn).catch(() => null)
-    : null;
+  const abr = auRaw?.abn ? await lookupABN(auRaw.abn).catch(() => null) : null;
   const auRegistrant = buildAuRegistrantBlock(auRaw, abr, now);
 
   return shapeAttribution({

@@ -347,6 +347,26 @@ export interface LaneOutcome {
     cap_reached?: boolean;
     /** Rows eligible in the 35-day window (head count). null = count failed. */
     backlog?: number | null;
+    /** #1253 — rows whose first WHOIS lookup this run got no answer (quota
+     *  guard / http error / no key): written with `source: "deferred"` and
+     *  stamped `attribution_retry_after`. Absent before 2026-09-27. */
+    whois_deferred?: number;
+    /** #1253 — the WHOIS re-offer: rows due (`attribution_retry_after <=
+     *  now()`) handed to this run, capped at WHOIS_REOFFER_RUN_CAP. null =
+     *  the select failed. */
+    whois_reoffer_due?: number | null;
+    /** All rows due (head count). null = count failed. */
+    whois_reoffer_backlog?: number | null;
+    /** Re-offer lookups started this run. `due>0 ∧ reoffered=0` pages. */
+    whois_reoffered?: number;
+    /** Re-offers that got an answer (column cleared). */
+    whois_resolved?: number;
+    /** Re-offers deferred again (column pushed forward). */
+    whois_redeferred?: number;
+    /** Re-offers given up after repeated http errors (column cleared). */
+    whois_abandoned?: number;
+    /** Re-offer chunk writes that failed — rows stay due. */
+    whois_reoffer_write_failed?: number;
   };
   "shopfront-clone-notify-brand-prepare": {
     reason?: "no_unbatched_rows";
