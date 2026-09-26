@@ -57,6 +57,39 @@ import { SHORT_BRAND_NEIGHBOUR_WORDS } from "./short-brand-neighbour-words";
  */
 export const LEXICAL_MATCHER_VERSION = "v5";
 
+/**
+ * Which matcher a PERIOD was ingested under — the version the monthly store
+ * stamps (#1262 review, D2). Stamping `LEXICAL_MATCHER_VERSION` at WRITE time
+ * was a hazard: re-publishing September after the v5 merge would relabel a
+ * v4-ingested month as v5 and switch off the month-over-month suppression.
+ *
+ * Matching happens at ingest, so the honest label is a function of the month,
+ * not of the code that happens to fold it. Each entry is the first month
+ * (`YYYY-MM-01`) ingested under that version; earlier months take the first
+ * entry (June–August 2026 were re-classified under v4 on 2026-09-04).
+ *
+ * v5's cut-over is 2026-10-01 because the merge is scheduled for 1 October
+ * after 11:00 UTC; October carries under a day of v4 ingestion (the 1 Oct
+ * 08:30 UTC run). If the merge slips into a later month, move this date to
+ * that month in the same PR. The last entry must equal
+ * LEXICAL_MATCHER_VERSION (pinned by a test), so the next bump cannot forget
+ * to add its own cut-over.
+ */
+export const MATCHER_VERSION_CUTOVERS: ReadonlyArray<{ from: string; version: string }> = [
+  { from: "2026-06-01", version: "v4" },
+  { from: "2026-10-01", version: "v5" },
+];
+
+/** The first month ingested under v5 — also where targeting events begin. */
+export const MATCHER_V5_FROM = MATCHER_VERSION_CUTOVERS.find((c) => c.version === "v5")!.from;
+
+export function matcherVersionForPeriod(periodMonth: string): string {
+  const month = periodMonth.slice(0, 10);
+  let version = MATCHER_VERSION_CUTOVERS[0]!.version;
+  for (const c of MATCHER_VERSION_CUTOVERS) if (month >= c.from) version = c.version;
+  return version;
+}
+
 export type SignalType = "confusable" | "substring" | "levenshtein";
 
 export interface MatchResult {
@@ -407,11 +440,11 @@ export function candidateLabelKey(domain: string): string {
 //     only: Coles was measured and declined (woles.net is its one threat,
 //     shaped like koles/noles, for +9 alerts) — a known miss.
 //
-// Together: 8/9 recovered (woles.net is the known miss), 24 domains added to
-// the 90-day cohort (8 of them confirmed threats — 33%, against 8.9% for what
-// v4 matches), 34 on 90 days of the raw feed (~11 a month), zero dictionary
-// words re-admitted, zero v4
-// matches lost.
+// Together: 8/9 recovered (woles.net is the known miss), 21 domains added to
+// the 90-day cohort (8 of them confirmed threats — 38%, against 8.9% for what
+// v4 matches), 30 on 90 days of the raw feed (~10 a month), zero dictionary
+// words re-admitted, zero v4 matches lost. The denylist carries a small
+// foreign/brandable supplement (appli, bonde, bondo, bondy, bondu …; #1262 D3).
 
 /** Brand char → label char. Only pairs a reader's eye substitutes. */
 const HOMOGLYPH_SUBSTITUTIONS = new Set([

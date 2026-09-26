@@ -9,30 +9,61 @@
 // neighbourhood — a few hundred words, reviewable in a diff, O(1) Set lookup,
 // no bundled 50k-line asset.
 //
-// Sources used for the committed file (2026-09-27):
+// Sources used for the committed file (2026-09-27), with the SHA-256 of the
+// exact bytes read:
 //   - hermitdave/FrequencyWords en_50k.txt (2018 OpenSubtitles, CC-BY-SA-4.0)
+//     https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt
+//     sha256 5351ff405b1126ef555791dd4d9798a48e3e9a501a9fc481a9da957752cfb458
 //     — carries plurals and given/surnames (bands, codes, logan, hogan)
-//   - /usr/share/dict/web2 (Webster's 2nd, macOS) — plus the naive plural
-//     `<word>s`, since web2 has no plurals (gond → gonds)
-//   - /usr/share/dict/propernames (macOS)
-//   - SUPPLEMENT below — Australian words the lists above miss
+//   - /usr/share/dict/web2 (Webster's 2nd, macOS 26.2)
+//     sha256 be41ad97963bf8dabedd5871d5d691596175269d540956b0f9965a885c2bbab9
+//     — plus the naive plural `<word>s`, since web2 has no plurals (gond → gonds)
+//   - /usr/share/dict/propernames (macOS 26.2)
+//     sha256 626d634b40b1ad9257d0e4f16e155ea87d258dd458e9ccf94fb84bb1b63e585a
+//   - SUPPLEMENT below — Australian and foreign words the lists above miss
+//
+// REPRODUCIBILITY — stated plainly: the inputs are NOT pinned in the repo.
+// The macOS dictionaries differ between OS releases and do not exist on Linux
+// CI, and the FrequencyWords file is fetched from GitHub. Regenerating on
+// another machine can therefore produce a different list; compare the hashes
+// above first. There is deliberately no "committed file == generator output"
+// test for that reason. What IS checked in CI (lexical-match-v5.test.ts G5/G11):
+// every 5-char token is covered, every committed word really is one edit from
+// a covered token, and every SUPPLEMENT word is in the committed list.
 //
 // Usage (from the repo root):
 //   pnpm --filter @askarthur/web exec tsx ../../packages/shopfront-glue/scripts/gen-short-brand-neighbour-words.ts \
 //     <en_50k.txt> /usr/share/dict/web2 /usr/share/dict/propernames
 //
 // A new 5-char brand or alias on the watchlist makes the covered-token guard in
-// lexical-match.test.ts go red until this is re-run.
+// lexical-match-v5.test.ts go red until this is re-run.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AU_BRAND_WATCHLIST } from "../src/au-brand-watchlist";
 
-/** Australian place names / words the general lists miss. `bondi` is the
- *  matcher's own canonical FP (see the lexical-match.ts header); `cowes`
- *  (Phillip Island, VIC) reached the v5 harness as a Coles hit. */
-const SUPPLEMENT = ["bondi", "cowes"];
+/**
+ * Words the general lists miss. Exported so a test can pin them in the output.
+ *
+ *  - Australian: `bondi` is the matcher's own canonical FP (see the
+ *    lexical-match.ts header); `cowes` (Phillip Island, VIC) reached the v5
+ *    harness as a Coles hit.
+ *  - Foreign / brandable, in the neighbourhood of an OPEN brand (#1262 review,
+ *    D3). Hand-picked from the FrequencyWords fr/de/nl/sv/da/no 50k lists
+ *    (same repo and date as en_50k): appli (fr), appele (fr), applen / applet
+ *    (sv), bonde (fr bondé, sv/da/no "farmer"), bondo (sv/da/no); plus bondy
+ *    (a French commune) and bondu, named in the review.
+ *
+ * NOT the whole foreign lists: nl_50k contains `appie` — Albert Heijn's app —
+ * and appie.{bond,beer,autos,mom,beauty} is a CONFIRMED Apple campaign. A
+ * whole-list import would silently re-lose five threats. Curate; re-measure.
+ */
+export const SUPPLEMENT = [
+  "bondi", "cowes",
+  "appli", "appele", "applen", "applet",
+  "bonde", "bondo", "bondy", "bondu",
+];
 
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789-";
 
@@ -93,7 +124,7 @@ function main() {
 // while non-word squats (appie, bonos, bnds, b0nds) are recovered (#1150).
 
 /** The 5-char tokens this list was generated for. The covered-token guard in
- *  lexical-match.test.ts fails when the watchlist gains one that is not here. */
+ *  lexical-match-v5.test.ts fails when the watchlist gains one that is not here. */
 export const NEIGHBOUR_WORDS_COVERED_TOKENS: readonly string[] = ${JSON.stringify(covered)};
 
 export const SHORT_BRAND_NEIGHBOUR_WORDS: ReadonlySet<string> = new Set([
@@ -106,4 +137,5 @@ ${lines.join("\n")}
   console.log(`${covered.length} tokens, ${sorted.length} words → ${target}`);
 }
 
-main();
+// Run only as a script: the test imports SUPPLEMENT from this file.
+if (process.argv[1]?.includes("gen-short-brand-neighbour-words")) main();

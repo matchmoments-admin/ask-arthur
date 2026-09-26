@@ -559,7 +559,7 @@ export function foldFrozenMonths(
     const n = Number(r.clones ?? 0);
     const brand = r.brand.trim().toLowerCase();
     m.byBrand.set(brand, (m.byBrand.get(brand) ?? 0) + n);
-    // #1084 (v333): ONE row without targeting_events makes the whole month's
+    // #1084 (v337): ONE row without targeting_events makes the whole month's
     // event map unknown — a partial map would read the missing brands as 0.
     if (r.targeting_events == null) eventsMissing.set(month, true);
     else m.eventsByBrand?.set(brand, (m.eventsByBrand.get(brand) ?? 0) + Number(r.targeting_events));

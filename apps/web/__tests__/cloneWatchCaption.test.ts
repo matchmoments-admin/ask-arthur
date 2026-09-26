@@ -7,6 +7,7 @@ import {
   lifecycleBadge,
 } from "@/lib/clone-watch/outcome-copy";
 import { generateCloneWatchCaption } from "@/lib/clone-watch/clone-watch-caption";
+import { BULK_COUNTING_RULE } from "@/lib/clone-watch/clone-cohort";
 
 /** June 2026 shape: HESTA super fund, globals present, baseline (no MoM). */
 const JUNE: CloneWatchReportCard = {
@@ -522,5 +523,24 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
   it("still forbids time-to-takedown, as outcome-copy requires", () => {
     const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
     expect(c.body).not.toMatch(/time.to.takedown|median/i);
+  });
+});
+
+describe("L3 — the first comment carries the counting rule, v5 editions only (#1262 review, D4)", () => {
+  // Go-red (2026-09-27): dropping the BULK_COUNTING_RULE line from the first
+  // comment → the first test red; printing it unconditionally → the second red.
+  it("pinned in the first comment of a targeting-events edition", () => {
+    const c = generateCloneWatchCaption({ ...JUNE, perBrandUnit: "targeting_events" });
+    expect(c.firstComment).toContain(
+      "Per brand, one name bulk-registered across 4+ web endings in a month counts once.",
+    );
+    expect(c.body).not.toContain(BULK_COUNTING_RULE); // the body sits at the LinkedIn cap
+  });
+
+  it("absent from a pre-v5 edition, which counted domains", () => {
+    expect(generateCloneWatchCaption(JUNE).firstComment).not.toContain(BULK_COUNTING_RULE);
+    expect(
+      generateCloneWatchCaption({ ...JUNE, perBrandUnit: "domains" }).firstComment,
+    ).not.toContain(BULK_COUNTING_RULE);
   });
 });

@@ -6,6 +6,14 @@
 //
 //   G1 eight threats     — deleted `openShortNeighbourhood` from Apple/Bonds
 //                          AND the homoglyph return → 8/8 red.
+//   G10 cut-overs        — appended a later v4 entry to MATCHER_VERSION_CUTOVERS
+//                          → both G10 tests red.
+//   G11 word list       — (#1262 review, D3/D4) edits to the committed list:
+//                          drop "bondy" (a stale regeneration) → "every
+//                          SUPPLEMENT word" + bondy.cn red; add "appie" → G1's
+//                          five appie threats + the appie pin red; add a stray
+//                          "zebra" → "one edit from a covered token" red;
+//                          drop the six D3 words → six G2 foreign cases red.
 //   G9 Coles stays shut  — set `openShortNeighbourhood: true` back on Coles
 //                          → woles.net / colex.ca / coleg.ru match, red.
 //   G2 word floor        — commented out the SHORT_BRAND_NEIGHBOUR_WORDS check
@@ -30,10 +38,17 @@ import { describe, expect, it } from "vitest";
 import { AU_BRAND_WATCHLIST, type BrandEntry } from "../au-brand-watchlist";
 import {
   LEXICAL_MATCHER_VERSION,
+  MATCHER_V5_FROM,
+  MATCHER_VERSION_CUTOVERS,
+  matcherVersionForPeriod,
   candidateLabelKey,
   lexicalMatch,
 } from "../lexical-match";
-import { NEIGHBOUR_WORDS_COVERED_TOKENS } from "../short-brand-neighbour-words";
+import {
+  NEIGHBOUR_WORDS_COVERED_TOKENS,
+  SHORT_BRAND_NEIGHBOUR_WORDS,
+} from "../short-brand-neighbour-words";
+import { SUPPLEMENT } from "../../scripts/gen-short-brand-neighbour-words";
 
 const fiveCharTokens = (list: readonly BrandEntry[]) =>
   list.flatMap((e) =>
@@ -73,6 +88,8 @@ describe("G2 — the precision failures stay dead, including on open brands", ()
     "ponds.net", "gonds.quest", "gonds.co", "bondi.ink",
     // apple (OPEN)
     "apply.wiki", "ample.io",
+    // foreign / brandable neighbours of the OPEN brands (#1262 review, D3)
+    "appli.work", "appele.net", "bonde.cloud", "bondo.net", "bondy.cn", "bondu.berlin",
     // coles (closed since the #1150 decision; words stay dead regardless)
     "codes.net", "holes.net", "roles.world", "cowes.yachts",
     // closed brands — word neighbours
@@ -181,5 +198,45 @@ describe("G9 — Coles is NOT an open neighbourhood (#1150 decision, 2026-09-27)
   });
   it("the homoglyph path still covers Coles", () => {
     expect(lexicalMatch("c0les.net")?.evidence.short_brand_gate).toBe("homoglyph");
+  });
+});
+
+describe("G10 — the matcher a PERIOD was ingested under (#1262 review, D2)", () => {
+  it("June–September 2026 are v4; October onward is v5", () => {
+    expect(matcherVersionForPeriod("2026-06-01")).toBe("v4");
+    expect(matcherVersionForPeriod("2026-09-01")).toBe("v4");
+    expect(matcherVersionForPeriod("2026-10-01")).toBe("v5");
+    expect(matcherVersionForPeriod("2027-01-01")).toBe("v5");
+    expect(MATCHER_V5_FROM).toBe("2026-10-01");
+  });
+  it("the newest cut-over IS the code's version — the next bump must add one", () => {
+    expect(MATCHER_VERSION_CUTOVERS.at(-1)?.version).toBe(LEXICAL_MATCHER_VERSION);
+  });
+});
+
+describe("G11 — the committed neighbour-word list (#1262 review, D3/D4)", () => {
+  // The generator's INPUTS are not pinned in the repo (macOS dictionaries,
+  // a fetched frequency list — see the script header), so there is no
+  // "committed == regenerated" check. These are the checks that can run anywhere.
+  const oneEdit = (a: string, b: string) => {
+    if (Math.abs(a.length - b.length) > 1 || a === b) return false;
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return a.slice(i + 1) === b.slice(i + 1) || a.slice(i) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i);
+  };
+
+  it("every committed word is one edit from a covered token (nothing stale or stray)", () => {
+    const stray = [...SHORT_BRAND_NEIGHBOUR_WORDS].filter(
+      (w) => !NEIGHBOUR_WORDS_COVERED_TOKENS.some((t) => oneEdit(w, t)),
+    );
+    expect(stray).toEqual([]);
+  });
+
+  it("every SUPPLEMENT word made it into the committed list", () => {
+    expect(SUPPLEMENT.filter((w) => !SHORT_BRAND_NEIGHBOUR_WORDS.has(w))).toEqual([]);
+  });
+
+  it("appie is NOT a word here — it is a confirmed Apple campaign (nl_50k has it)", () => {
+    expect(SHORT_BRAND_NEIGHBOUR_WORDS.has("appie")).toBe(false);
   });
 });

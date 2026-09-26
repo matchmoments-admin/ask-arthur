@@ -18,6 +18,11 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
 import CoverageNote from "@/components/clone-watch/CoverageNote";
+import {
+  BULK_COUNTING_RULE,
+  perBrandUnitLabel,
+  periodCountsTargetingEvents,
+} from "@/lib/clone-watch/clone-cohort";
 
 export const revalidate = 3600; // 1 hour ISR
 
@@ -133,6 +138,23 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * The per-brand counting rule under a ranking (#1262 review, D1). The edition's
+ * unit comes from its PERIOD (the v5 cut-over), so a pre-v5 edition keeps
+ * saying domains and a v5 one says how a bulk registration is counted.
+ */
+function CountingRule({ unit }: { unit: "targeting_events" | "domains" }) {
+  return (
+    <p className="text-xs text-gov-slate mt-2">
+      Counted in {perBrandUnitLabel(unit)}.
+      {unit === "targeting_events" ? ` ${BULK_COUNTING_RULE}` : ""}{" "}
+      <Link href="/clone-watch/method" className="underline">
+        How we count these
+      </Link>
+    </p>
+  );
+}
+
 function BrandBars({ rows }: { rows: RankedBrand[] }) {
   const max = Math.max(1, ...rows.map((r) => r.clones));
   return (
@@ -161,6 +183,8 @@ export default async function CloneWatchMonthPage({
   if (!row) notFound();
 
   const label = periodLabel(row.period_month);
+  // Per-brand numbers are targeting events from the v5 cut-over (D1/D2).
+  const unit = periodCountsTargetingEvents(row.period_month) ? "targeting_events" : "domains";
   const mom = row.mom;
   // trend-copy.ts decides the wording (#1226): noise reads "about the same",
   // a matcher change shows nothing, a % only above the floor.
@@ -207,9 +231,9 @@ export default async function CloneWatchMonthPage({
           <p className="font-semibold mb-1">Spotlight: superannuation</p>
           <p>
             {row.super_fund.brand} was the #{row.super_fund.auRank} most-targeted
-            Australian brand this month ({row.super_fund.clones} lookalike
-            domains) — a sign impersonation has moved beyond banks and retail to
-            any trusted brand with money attached.
+            Australian brand this month ({row.super_fund.clones}{" "}
+            {perBrandUnitLabel(unit)}) — a sign impersonation has moved beyond
+            banks and retail to any trusted brand with money attached.
           </p>
         </div>
       )}
@@ -219,6 +243,7 @@ export default async function CloneWatchMonthPage({
           <h2 className="text-deep-navy text-sm font-bold mb-3">Most-targeted Australian brands</h2>
           <CoverageNote className="mb-3" />
           <BrandBars rows={row.top_au_brands} />
+          <CountingRule unit={unit} />
         </section>
       )}
 
@@ -226,6 +251,7 @@ export default async function CloneWatchMonthPage({
         <section className="mb-8">
           <h2 className="text-deep-navy text-sm font-bold mb-3">Global brands targeted</h2>
           <BrandBars rows={row.global_brands} />
+          <CountingRule unit={unit} />
         </section>
       )}
 

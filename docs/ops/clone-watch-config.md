@@ -721,7 +721,7 @@ only where v4 said no (every v4 match is a v5 match):
   any brand contact: opting Coles in took it 11 → 20 in 90 days for that
   one threat, whose shape (first-letter swap) matches koles.fi / noles.net.
   Homoglyphs (c0les) still match; a test pins the flag OFF.
-- **floor** — `SHORT_BRAND_NEIGHBOUR_WORDS` (generated, 164 words) blocks
+- **floor** — `SHORT_BRAND_NEIGHBOUR_WORDS` (generated, 172 words incl. an Australian + foreign supplement: bondi, cowes, appli, bonde, bondo, bondy, bondu …) blocks
   both paths: bonus/bands/gonds/apply/bondi/cowes stay dead.
 
 A row ingested under v5 carries `signals[].evidence.short_brand_gate`, so v5
@@ -736,11 +736,28 @@ WHERE s->'evidence' ? 'short_brand_gate'
 ORDER BY first_seen_at DESC;
 ```
 
+**The matcher is stamped by PERIOD, not by code (#1262 review, D2).** The
+store's `matcher_version` and the per-brand unit come from
+`matcherVersionForPeriod` / `MATCHER_VERSION_CUTOVERS` (lexical-match.ts):
+months before 2026-10-01 are v4 with `targeting_events` NULL and per-brand
+numbers in domains, even when re-folded or re-published by v5 code; from
+October they are v5 and targeting events. **If the merge slips past October,
+move the v5 cut-over to the merge month in the same PR.** October 2026
+includes under a day of v4 ingestion (the 1 Oct 08:30 UTC run, before the
+merge).
+
+**Word-list reproducibility (D4).** The generator's inputs are NOT pinned in
+the repo: `/usr/share/dict/*` differ between macOS releases (and do not exist
+on Linux), and en_50k is fetched. The script header records the URL and the
+SHA-256 of every input used for the committed list. CI checks what it can
+without the inputs (every word is one edit from a covered token; every
+supplement word is present; `appie` is absent) — not byte equality.
+
 **Why not the #1083 word denylist alone.** Measured, it is wrong in the
 data: 326 of the 478 labels v4 dropped since June are NOT dictionary words
 (xbank, dmart, medex, doula, iioet), so rejecting only words re-admits ~114
-a month at a 2.8% threat rate (v4's kept matches: 8.9%). v5 adds 24 domains
-to the 90-day cohort (30 since June), 8 of them confirmed threats, ~11 a
+a month at a 2.8% threat rate (v4's kept matches: 8.9%). v5 adds 21 domains
+to the 90-day cohort (26 since June), 8 of them confirmed threats, ~10 a
 month on the raw feed.
 
 **Opening another brand.** Set `openShortNeighbourhood` only on evidence (a
@@ -761,14 +778,14 @@ v5** — it would destroy lifecycle / Netcraft / weaponisation history. The
 harness above is the verification.
 
 **Re-triage after merge (operator; read-only plan, measured 2026-09-27).**
-Matching is decided at ingest. v5 re-admits 30 existing rows first seen
-June–August (June 9, July 14, August 7): 22 carry the v4 audit's mechanical
+Matching is decided at ingest. v5 re-admits 26 existing rows first seen
+June–August (June 8, July 12, August 6): 18 carry the v4 audit's mechanical
 `fp` and are dropped by `applyCohortRules`; the other 8 are the confirmed
 threats, already counted. From 2026-09-04 v4 never inserted its gated labels,
 so ~7 September v5 hits (measured on the raw feed) do not exist as rows —
 the ingest has no dated-backfill parameter, and none is proposed.
 
-- June–August are published as v4. Do not restate them: un-fp-ing their 22
+- June–August are published as v4. Do not restate them: un-fp-ing their 18
   rows changes nothing until a re-publish, and a re-publish restates
   editions already read (and re-stamps them `v5`) — not worth 36 rows spread
   over three months.
@@ -777,7 +794,7 @@ the ingest has no dated-backfill parameter, and none is proposed.
   (method changed, #1247), November's is the first comparable one.
 - If a restatement is ever wanted: `triage_status` back to
   `needs_investigation`, note `[matcher-v5-audit]`, `triage_by` NULL, for the
-  30 rows listed by id in PR #1262 (their signals predate v5, so the SQL
+  26 rows listed by id in PR #1262 (their signals predate v5, so the SQL
   above cannot find them) — then re-publish with an `editorialNote`.
 
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)

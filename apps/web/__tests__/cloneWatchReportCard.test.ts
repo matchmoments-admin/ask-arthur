@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { LEXICAL_MATCHER_VERSION } from "@askarthur/shopfront-glue";
 import type { FrozenMonth } from "@/lib/clone-watch/report-card";
 import { foldFrozenMonths } from "@/lib/clone-watch/monthly-brand-store";
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
@@ -265,10 +264,11 @@ const frozen = (byBrand: Record<string, number>, over: Partial<FrozenMonth> = {}
     byBrand: m,
     total: [...m.values()].reduce((a, b) => a + b, 0),
     brands: [...m.values()].filter((n) => n > 0).length,
-    matcherVersion: LEXICAL_MATCHER_VERSION,
+    // These editions are June–August 2026: ingested under v4, per-brand unit
+    // domains, no targeting events (#1262 D2 — the period decides, not the code).
+    matcherVersion: "v4",
     sweptDomains: 2_100_000,
-    // A v5 month with no bulk registrations: events = domains.
-    eventsByBrand: new Map(m),
+    eventsByBrand: null,
     ...over,
   };
 };

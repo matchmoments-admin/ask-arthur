@@ -8,6 +8,7 @@ import {
 import { buildOutcomesBlock } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { pickFurtherReading } from "@/lib/clone-watch/further-reading";
+import { BULK_COUNTING_RULE } from "@/lib/clone-watch/clone-cohort";
 
 /**
  * Deterministic evidence-first LinkedIn caption for the monthly Clone Watch
@@ -284,7 +285,8 @@ export function generateCloneWatchCaption(
     // Matcher v5 (#1084): the per-brand numbers above are targeting events. In
     // the comment, not the body — the body sits at the LinkedIn cap in the
     // worst case (cloneWatchCaption.test.ts "fits, with the disclosure intact").
-    "Per brand, one name bulk-registered across 4+ web endings in a month counts once.",
+    // Only for a targeting-events edition — a pre-v5 edition counted domains.
+    card.perBrandUnit === "targeting_events" ? BULK_COUNTING_RULE : "",
     methodUrl ? `How we count these → ${methodUrl}` : "",
     "Targeted brand and want your full clone list? Partner with us → https://askarthur.au/contact",
   ]
