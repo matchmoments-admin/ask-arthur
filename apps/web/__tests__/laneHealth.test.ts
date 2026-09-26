@@ -18,6 +18,8 @@ import {
   ABSENCE_WATCHES,
   classifyLaneHealth,
   LANE_SHAPES,
+  laneCrons,
+  laneExpectEvery,
   LANES_CHECKED,
   type LaneCostRow,
 } from "@/lib/laneHealth";
@@ -383,6 +385,21 @@ describe("classifyLaneHealth", () => {
       );
       expect(kinds(rows)).toEqual([]);
     });
+  });
+
+  it("a PARKED lane has no schedule and never pages absent (#1230)", () => {
+    expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].parked).toBeTruthy();
+    expect(laneCrons("shopfront-clone-fp-cluster-digest")).toEqual([]);
+    expect(laneExpectEvery("shopfront-clone-fp-cluster-digest")).toBe(Number.POSITIVE_INFINITY);
+    const problems = classifyLaneHealth(
+      without(LANES["shopfront-clone-fp-cluster-digest"].operation).filter(
+        (r) => r.feature !== LANES["shopfront-clone-fp-cluster-digest"].feature,
+      ),
+      { now: NOW },
+    );
+    expect(problems.filter((p) => p.lane === "shopfront-clone-fp-cluster-digest")).toEqual([]);
+    // The restore value is kept: un-parking is deleting the one field.
+    expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].crons).toEqual(["30 9 * * 0"]);
   });
 
   it("reports a lane whose last row is older than its cadence", () => {

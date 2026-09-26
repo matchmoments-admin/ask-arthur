@@ -573,6 +573,20 @@ schedule itself stays declared once, in `LANE_SHAPES.crons` — do not re-type i
 in the commit; (2) after deploy, `curl -X PUT https://askarthur.au/api/inngest` and read the
 body; (3) then the env flag.
 
+### Parked Lanes — `LANE_SHAPES[lane].parked` (#1230, 2026-09-26)
+
+A Lane whose schedule does nothing today is **parked**: `parked: "<why>"` in
+`LANE_SHAPES`. `laneCrons()` then returns no schedule (the function keeps its
+manual-trigger event), and the digest expects no row, so a parked Lane burns
+no runs and never pages `absent`. `crons` keeps the schedule to restore:
+**un-parking is deleting the `parked` field** (plus `PUT /api/inngest` after
+deploy). Parked 2026-09-26: `shopfront-clone-notify-brand-prepare` (no brand
+contact until the #1237 readiness gate; 100% `no_unbatched_rows`),
+`shopfront-clone-fp-cluster-digest` (no input since 2026-09-04). Also parked,
+outside the roster: `known-brands-discover` (100% `all_probed`; its cron line
+is commented in the function). `clone-watch-auto-triage` is retired
+separately, after #1238, which works the same `is_clone=false` rows.
+
 ### One declaration per Lane (2026-09-24)
 
 Each roster Lane's **cron schedule**, **flag gate** and **brake key** are declared once:

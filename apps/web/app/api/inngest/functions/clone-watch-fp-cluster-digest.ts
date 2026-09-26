@@ -64,6 +64,9 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     // the sibling weekly-digest (0 10) follows. (The old urlscan-rescan 0 11
     // cron was deleted in #583; rescans now run inside lifecycle-recheck.)
     ...laneCrons("shopfront-clone-fp-cluster-digest"),
+    // Parked (#1230): laneCrons() is empty while LANE_SHAPES says `parked`,
+    // so this event is the only trigger until it is un-parked.
+    { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
     { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
   ],
   withAxiomLogging(
