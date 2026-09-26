@@ -48,7 +48,7 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * Gated FF_CLONE_WATCH_ATTRIBUTION (default OFF). Brake: the shared
  * shopfront_clone_outreach $5/day cap (helpers are free-tier — whois/CT/geo $0,
  * AbuseIPDB free — so this is cheap; the cap is a backstop). Bounded at
- * ENRICH_RUN_CAP/run; runs daily just after auto-triage.
+ * ENRICH_RUN_CAP/run; runs daily at 13:30.
  */
 
 const BRAKE = LANES["clone-watch-enrich-attribution"].brake;
@@ -169,7 +169,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     throttle: { limit: 6, period: "1d" },
   },
   [
-    ...laneCrons("clone-watch-enrich-attribution"), // daily 13:30, just after auto-triage
+    ...laneCrons("clone-watch-enrich-attribution"), // daily 13:30
     // Verification/on-demand trigger. The enricher was the only clone-watch
     // stage without one (siblings: urlscan-submit, urlscan-retrieve,
     // lifecycle-recheck, enforcement-execute all have manual triggers), which

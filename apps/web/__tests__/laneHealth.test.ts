@@ -132,12 +132,6 @@ function healthyRows(): LaneCostRow[] {
       total_chunks: 1,
       failed_chunks: 0,
     }),
-    outcomeRow("clone-watch-auto-triage", 20, 3, {
-      parked: 2,
-      eligible: 3,
-      confirmed: 1,
-      offline: 2,
-    }),
     outcomeRow("shopfront-clone-feed-platform", 40, 2, { pool: 2, written: 2 }),
     outcomeRow("shopfront-clone-netcraft-auto/auto", 20, 1, { candidates: 1, marked: 1 }),
     outcomeRow("clone-watch-enrich-attribution", 19, 60, { pending: 60, enriched: 60 }),
@@ -482,49 +476,53 @@ describe("classifyLaneHealth", () => {
     ]);
   });
 
-  it("auto-triage pages when every eligible row is neither confirmed nor offline (a mis-set confirm threshold)", () => {
-    const rows = without("run");
-    for (const hoursAgo of [20, 44]) {
-      rows.push(
-        outcomeRow("clone-watch-auto-triage", hoursAgo, 5, {
-          parked: 1,
-          eligible: 5,
-          confirmed: 0,
-          offline: 0,
-        }),
-      );
-    }
+  // #1230: auto-park moved into the pre-classifier and is fail-soft there (a
+  // failed park never fails a batch of paid classifications). Fail-soft must
+  // not be silent: the Outcome Row's `auto_park_failed` pages.
+  // Go-red (2026-09-26): drop the `|| o.auto_park_failed === true` arm in
+  // LANE_SHAPES["shopfront-clone-haiku-preclassify"] → the first case below
+  // reports [] and fails; the second stays green.
+  it("pre-classifier pages when its auto-park failed, even though the batch classified", () => {
+    const rows = healthyRows();
+    rows.push(
+      outcomeRow("shopfront-clone-haiku-preclassify", 5, 5, {
+        alerts: 5,
+        classified: 5,
+        failed: 0,
+        auto_parked: 0,
+        auto_park_failed: true,
+      }),
+    );
     expect(classifyLaneHealth(rows, { now: NOW })).toEqual([
       expect.objectContaining({
-        lane: "clone-watch-auto-triage",
+        lane: "shopfront-clone-haiku-preclassify",
         kind: "silent_zero",
       }),
     ]);
   });
 
-  it("auto-triage is quiet when nothing was eligible (reason set), and when liveness explained the misses", () => {
-    const quiet = without("run");
-    quiet.push(
-      outcomeRow("clone-watch-auto-triage", 20, 0, {
-        reason: "no_eligible",
-        parked: 0,
-        eligible: 0,
-        confirmed: 0,
-        offline: 0,
-      }),
-    );
-    expect(classifyLaneHealth(quiet, { now: NOW })).toEqual([]);
+  it("pre-classifier is quiet on a batch that parked, parked nothing, or predates the field", () => {
+    for (const extra of [
+      { auto_parked: 2, auto_park_failed: false },
+      { auto_parked: 0, auto_park_failed: false },
+      {},
+    ]) {
+      const rows = healthyRows();
+      rows.push(
+        outcomeRow("shopfront-clone-haiku-preclassify", 5, 5, {
+          alerts: 5,
+          classified: 5,
+          failed: 0,
+          ...extra,
+        }),
+      );
+      expect(classifyLaneHealth(rows, { now: NOW })).toEqual([]);
+    }
+  });
 
-    const allOffline = without("run");
-    allOffline.push(
-      outcomeRow("clone-watch-auto-triage", 20, 4, {
-        parked: 0,
-        eligible: 4,
-        confirmed: 0,
-        offline: 4,
-      }),
-    );
-    expect(classifyLaneHealth(allOffline, { now: NOW })).toEqual([]);
+  it("the retired auto-triage lane is gone from the roster and the digest (#1230)", () => {
+    expect(Object.keys(LANES)).not.toContain("clone-watch-auto-triage");
+    expect(Object.keys(LANE_SHAPES)).not.toContain("clone-watch-auto-triage");
   });
 
   it("the event-driven feed-platform lane is never 'absent', only silent_zero", () => {

@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
  * **Counting boundaries is the whole difficulty, and this guard refuses to
  * guess it.** The first version of this test counted static `step.run(` call
  * sites, which undercounts every function whose step sites sit inside a
- * per-item loop: `clone-watch-auto-triage` has 3 sites in a 15-item loop = 45
+ * per-item loop: `clone-watch-auto-triage` (retired #1230) had 3 sites in a 15-item loop = 45
  * runtime boundaries, and the test passed it at 3. A guard that reads as
  * protection while protecting nothing is worse than no guard, so when a file
  * shows either signal that static counting is wrong —

@@ -84,11 +84,9 @@ export const LANES = {
     provider: "whoisds",
     operation: "nrd_daily_ingest",
   },
-  "clone-watch-auto-triage": {
-    feature: "shopfront_clone_auto_triage",
-    provider: "diagnostic",
-    operation: "run",
-  },
+  // `clone-watch-auto-triage` (feature shopfront_clone_auto_triage) was retired
+  // 2026-09-26 (#1230): its park step moved into the pre-classifier below,
+  // whose Outcome Row now carries `auto_parked`.
   "shopfront-clone-feed-platform": {
     feature: "clone_watch_feed_entity",
     provider: "internal",
@@ -323,14 +321,6 @@ export interface LaneOutcome {
     total_chunks: number;
     failed_chunks: number;
   };
-  "clone-watch-auto-triage": {
-    /** Set when the confirm path found nothing eligible; the park path still ran. */
-    reason?: "no_eligible";
-    parked: number;
-    eligible: number;
-    confirmed: number;
-    offline: number;
-  };
   "shopfront-clone-feed-platform": {
     pool: number;
     written: number;
@@ -381,6 +371,12 @@ export interface LaneOutcome {
     alerts: number;
     classified: number;
     failed: number;
+    /** #1230 — alerts this batch moved pending → needs_investigation (weak
+     *  not-a-clone tail, lib/clone-watch/auto-park.ts). Absent on braked runs
+     *  and rows written before 2026-09-26. */
+    auto_parked?: number;
+    /** #1230 — the park read/UPDATE failed; the batch still succeeded. */
+    auto_park_failed?: boolean;
   };
   "clone-watch-report-summary": {
     reason?: "frozen" | "no_clones";

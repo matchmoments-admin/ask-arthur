@@ -743,13 +743,10 @@ export const featureFlags = {
    *  only. */
   cloneWeaponisedAlert: readBoolEnv("FF_CLONE_WEAPONISED_ALERT"),
 
-  /** Auto-triage the confident, still-live clone tail (clone-watch-auto-triage
-   *  Inngest fn) — auto-confirms alerts that clear the strict bar (Haiku≥0.9 +
-   *  confusable/levenshtein + urlscan likely_phishing) AND pass a liveness
-   *  re-fetch, so operators stop clicking through the obvious cases. Sends the
-   *  alert email only to CLONE_WATCH_SHADOW_RECIPIENT (validation); real-brand
-   *  auto-send stays the #371-gated path. Default OFF. Server-side only. */
-  cloneWatchAutoTriage: readBoolEnv("FF_CLONE_WATCH_AUTO_TRIAGE"),
+  // `cloneWatchAutoTriage` (FF_CLONE_WATCH_AUTO_TRIAGE) was retired with the
+  // clone-watch-auto-triage function on 2026-09-26 (#1230): it confirmed 0
+  // alerts ever, and its auto-park runs ungated inside the pre-classifier
+  // (lib/clone-watch/auto-park.ts). The Vercel env var has no reader.
 
   /** Cross-stream corroboration priority in the clone-watch triage queue
    *  (Phase 2 of the brand-convergence-seam plan). When ON, the admin pending-
@@ -789,9 +786,10 @@ export const featureFlags = {
   brandRegister: readBoolEnv("FF_BRAND_REGISTER"),
 
   /** Quiet the daily NRD-sweep Telegram digest (shopfront-nrd-daily-ingest).
-   *  OPT-IN: default OFF preserves the current digest. Set true once the
-   *  auto-triage run-summary email replaces it as the operator's notification,
-   *  so Telegram stops being noisy after every match. Server-side only. */
+   *  OPT-IN: default OFF preserves the current digest. It was meant to be set
+   *  once the auto-triage run-summary email replaced the digest; that email
+   *  retired with auto-triage (#1230, it never sent), so the digest is the
+   *  operator's only per-sweep notification again. Server-side only. */
   cloneWatchTelegramQuiet: readBoolEnv("FF_CLONE_WATCH_TELEGRAM_QUIET"),
 
   /** Enrich tp_confirmed clones with an attribution dossier — WHOIS (registrar /

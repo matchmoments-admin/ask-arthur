@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  AUTO_CONFIRM_MIN_CONFIDENCE,
   IS_CLONE_MIN_P,
   RISK_INDICATOR_MIN_P,
   WORKLIST_MIN_CONFIDENCE,
@@ -18,15 +17,15 @@ const FN_DIR = join(process.cwd(), "app/api/inngest/functions");
 const CONSUMERS = [
   "clone-watch-urlscan-submit.ts",
   "clone-watch-netcraft-auto.ts",
-  "clone-watch-auto-triage.ts",
+  // clone-watch-auto-triage.ts retired 2026-09-26 (#1230), and with it
+  // AUTO_CONFIRM_MIN_CONFIDENCE.
 ];
 
 describe("preclassify thresholds", () => {
-  it("are ordered: is_clone ≤ worklist < auto-confirm ≤ 1, indicator cut in (0, 1]", () => {
+  it("are ordered: is_clone ≤ worklist ≤ 1, indicator cut in (0, 1]", () => {
     expect(IS_CLONE_MIN_P).toBeGreaterThan(0);
     expect(IS_CLONE_MIN_P).toBeLessThanOrEqual(WORKLIST_MIN_CONFIDENCE);
-    expect(WORKLIST_MIN_CONFIDENCE).toBeLessThan(AUTO_CONFIRM_MIN_CONFIDENCE);
-    expect(AUTO_CONFIRM_MIN_CONFIDENCE).toBeLessThanOrEqual(1);
+    expect(WORKLIST_MIN_CONFIDENCE).toBeLessThanOrEqual(1);
     expect(RISK_INDICATOR_MIN_P).toBeGreaterThan(0);
     expect(RISK_INDICATOR_MIN_P).toBeLessThanOrEqual(1);
   });
