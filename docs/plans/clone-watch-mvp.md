@@ -147,7 +147,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 - ID: `shopfront-nrd-daily-ingest`
 - Cron: `30 8 * * *` (daily 08:30 UTC — well-spaced from existing 08:00 UTC reddit-intel-trigger)
 - Feature flag gate: `FF_SHOPFRONT_CLONE_WATCH` (default OFF; flip ON after first successful prod run)
-- Steps:
+- Steps (**superseded 2026-09-26, #1228:** steps 1–3 are now ONE step, `download-parse-match-nrd`, which returns only `{ domains_scanned, hits }` — the domain list never crosses a step boundary because of Inngest's 4 MB step-output limit; see `docs/research/nrd-feed-coverage-2026-09.md`):
   1. `step.run("download-and-parse-nrd")` — computes yesterday's NRD URL via `computeNrdUrl(yesterdayUtc())` (or honours `WHOISDS_NRD_ZIP_URL` override for tests), fetches via `ssrfSafeDispatcher` (per #387). 60s timeout. URL pattern is `https://www.whoisds.com/whois-database/newly-registered-domains/${base64("YYYY-MM-DD.zip")}/nrd`.
   2. `step.run("parse-nrd-list")` — unzips, parses domain list. Returns `string[]`.
   3. `step.run("lexical-match-domains")` — runs each domain through `lexicalMatch()` against `AU_BRAND_WATCHLIST`. Returns hits.

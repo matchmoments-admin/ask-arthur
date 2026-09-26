@@ -17,6 +17,14 @@
 // Expected duration: 30s-3min for ~70K domains/day. Hard-capped
 // to <5 min per CLAUDE.md Inngest rule. statement_timeout='300s' per
 // CLAUDE.md long-running write loop rule.
+//
+// Feed size (#1228): whoisds' FREE file is truncated at exactly 70,000 lines
+// (~21% of ~330k daily registrations) — see
+// docs/research/nrd-feed-coverage-2026-09.md. download-parse-match-nrd runs
+// in ONE invocation under the /api/inngest route's maxDuration=300s: lexical
+// matching costs ~0.2 ms/domain against the full watchlist (~16 s at 70k,
+// ~80 s at a full ~350k feed on a dev laptop). Re-measure this before
+// switching to a paid full feed.
 
 import JSZip from "jszip";
 import { fetch as undiciFetch } from "undici";
@@ -47,7 +55,7 @@ const UPSERT_CHUNK_SIZE = 5_000;
 const TELEGRAM_DIGEST_TOP_N = 5;
 const FAILED_CHUNK_THROW_RATIO = 0.1; // throw if >10% of chunks failed
 
-interface MatchHit {
+export interface MatchHit {
   candidate_domain: string;
   candidate_url: string;
   url_hash: string;
@@ -98,24 +106,28 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       const nrdUrl =
         process.env.WHOISDS_NRD_ZIP_URL ?? computeNrdUrl(yesterdayUtc());
 
-      // Download + parse in a single step: Inngest serialises step return
-      // values to JSON, so a Uint8Array can't cross step boundaries.
-      const domains = await step.run("download-and-parse-nrd", async () => {
-        const buf = await downloadNrdZip(nrdUrl);
-        return parseNrdZip(buf);
-      });
-
-      const hits = await step.run("lexical-match-domains", async () => {
-        return matchDomains(domains);
-      });
+      // Download + parse + match in ONE step that returns only the hits and
+      // a count — never the domain list. Inngest caps step output at 4 MB per
+      // step AND across all steps of a run, and re-sends memoised output on
+      // every later step. The old two-step shape returned the whole list
+      // (~1.4 MB at whoisds' free 70k/day cap) from step 1; the full feed is
+      // ~330k/day (~6.6 MB) and would fail the run outright (#1228). Hits are
+      // ~30/day, so this step's output is KB-scale at any feed size.
+      const { domains_scanned, hits } = await step.run(
+        "download-parse-match-nrd",
+        async () => {
+          const buf = await downloadNrdZip(nrdUrl);
+          return scanNrdZip(buf, await getActiveWatchlist());
+        },
+      );
 
       const upsertResult = await step.run("upsert-clone-alerts", async () => {
         return upsertHitsInChunks(hits);
       });
 
       await step.run("log-cost-telemetry", () =>
-        recordLaneOutcome("shopfront-nrd-daily-ingest", domains.length, {
-          domains_scanned: domains.length,
+        recordLaneOutcome("shopfront-nrd-daily-ingest", domains_scanned, {
+          domains_scanned,
           hits_found: hits.length,
           rows_inserted: upsertResult.inserted,
           failed_chunks: upsertResult.failed_chunks,
@@ -206,7 +218,7 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
 
       await step.run("send-telegram-digest", async () => {
         await sendTelegramDigest({
-          domains_scanned: domains.length,
+          domains_scanned,
           hits,
           inserted: upsertResult.inserted,
           failed_chunks: upsertResult.failed_chunks,
@@ -216,14 +228,14 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       });
 
       logger.info("shopfront-nrd: run complete", {
-        domains: domains.length,
+        domains: domains_scanned,
         hits: hits.length,
         inserted: upsertResult.inserted,
         failed_chunks: upsertResult.failed_chunks,
       });
 
       return {
-        domains_scanned: domains.length,
+        domains_scanned,
         hits_found: hits.length,
         rows_inserted: upsertResult.inserted,
         failed_chunks: upsertResult.failed_chunks,
@@ -284,7 +296,15 @@ async function downloadNrdZip(url: string): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
-async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
+/**
+ * Streams every domain line of every `.txt` entry to `onDomain`, without
+ * holding the whole list. The single source of the line rules (trim,
+ * lower-case, skip blank and `#` comments) and the zip-bomb cap.
+ */
+async function forEachNrdDomain(
+  zipBuffer: Uint8Array,
+  onDomain: (domain: string) => void | Promise<void>,
+): Promise<void> {
   const zip = await JSZip.loadAsync(zipBuffer);
   const entries = Object.values(zip.files).filter(
     (f) => !f.dir && f.name.toLowerCase().endsWith(".txt"),
@@ -292,7 +312,6 @@ async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
   if (entries.length === 0) {
     throw new Error("NRD zip contained no .txt entries");
   }
-  const out: string[] = [];
   let uncompressedBytesSeen = 0;
   for (const entry of entries) {
     const text = await entry.async("string");
@@ -308,10 +327,43 @@ async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
     for (const raw of text.split(/\r?\n/)) {
       const line = raw.trim().toLowerCase();
       if (!line || line.startsWith("#")) continue;
-      out.push(line);
+      await onDomain(line);
     }
   }
+}
+
+/** The whole domain list. Test/diagnostic use only — the ingest never
+ *  materialises it across a step (see scanNrdZip). */
+export async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
+  const out: string[] = [];
+  await forEachNrdDomain(zipBuffer, (d) => {
+    out.push(d);
+  });
   return out;
+}
+
+export interface NrdScanResult {
+  domains_scanned: number;
+  hits: MatchHit[];
+}
+
+/**
+ * Parse + lexical-match in one pass. Returns only what crosses the step
+ * boundary: the domain count and the hits. Output size is proportional to
+ * hits, not to the feed (#1228).
+ */
+export async function scanNrdZip(
+  zipBuffer: Uint8Array,
+  watchlist: BrandEntry[],
+): Promise<NrdScanResult> {
+  let domains_scanned = 0;
+  const hits: MatchHit[] = [];
+  await forEachNrdDomain(zipBuffer, async (domain) => {
+    domains_scanned++;
+    const hit = await matchDomain(domain, watchlist);
+    if (hit) hits.push(hit);
+  });
+  return { domains_scanned, hits };
 }
 
 // ── Matching ──────────────────────────────────────────────────────────────
@@ -326,26 +378,23 @@ async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
 // which makes the matcher report a brand's own website as a clone of itself.
 // The shared merge rejects those instead.
 
-async function matchDomains(domains: string[]): Promise<MatchHit[]> {
-  const watchlist = await getActiveWatchlist();
-  const hits: MatchHit[] = [];
-  for (const domain of domains) {
-    const result = lexicalMatch(domain, watchlist);
-    if (!result) continue;
-    const candidate_url = canonicaliseCandidateUrl(domain);
-    const url_hash = await urlHash(candidate_url);
-    hits.push({
-      candidate_domain: domain,
-      candidate_url,
-      url_hash,
-      brand: result.brand,
-      legitimate_domain: result.legitimate_domain,
-      score: result.score,
-      signal_type: result.signal_type,
-      evidence: result.evidence,
-    });
-  }
-  return hits;
+async function matchDomain(
+  domain: string,
+  watchlist: BrandEntry[],
+): Promise<MatchHit | null> {
+  const result = lexicalMatch(domain, watchlist);
+  if (!result) return null;
+  const candidate_url = canonicaliseCandidateUrl(domain);
+  return {
+    candidate_domain: domain,
+    candidate_url,
+    url_hash: await urlHash(candidate_url),
+    brand: result.brand,
+    legitimate_domain: result.legitimate_domain,
+    score: result.score,
+    signal_type: result.signal_type,
+    evidence: result.evidence,
+  };
 }
 
 // ── Upsert ────────────────────────────────────────────────────────────────
@@ -578,4 +627,3 @@ async function postTelegram(
     });
   }
 }
-
