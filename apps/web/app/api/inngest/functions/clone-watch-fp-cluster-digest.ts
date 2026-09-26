@@ -67,7 +67,6 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     // Parked (#1230): laneCrons() is empty while LANE_SHAPES says `parked`,
     // so this event is the only trigger until it is un-parked.
     { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
-    { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-fp-cluster-digest" },
