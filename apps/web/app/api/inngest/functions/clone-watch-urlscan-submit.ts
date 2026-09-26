@@ -10,7 +10,6 @@ import {
   type CloneCandidate,
 } from "@/lib/clone-watch/urlscan-submit-one";
 import {
-  attemptedAuditIds,
   composeSubmitBatch,
   loadAuditSamples,
   stampAuditAttempts,
@@ -57,13 +56,21 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  *
  * NOT-A-CLONE AUDIT (#1238, v330). The lane also carries a random sample of
  * is_clone=false alerts — never scanned otherwise — so the pre-classifier's
- * false-negative rate is measured (lib/clone-watch/not-a-clone-audit.ts). They
- * take at most AUDIT_SLOTS_PER_RUN of the SUBMIT_BATCH_LIMIT slots; the batch
- * total, and so the lane's urlscan volume and wall-clock, are unchanged. The
- * weekly draw runs inside the load step (idempotent per UTC ISO week), gated
+ * false-negative rate is measured (lib/clone-watch/not-a-clone-audit.ts). The
+ * audit is MEASUREMENT: v330 routes a sampled miss to monitoring, never
+ * weaponised, and this lane logs one warn per miss for human review. Samples
+ * take at most AUDIT_SLOTS_PER_RUN of the SUBMIT_BATCH_LIMIT slots and run
+ * after the regular batch. Only ~33 regular rows were eligible on 2026-09-26,
+ * so they mostly fill otherwise-empty slots: while samples are due the lane
+ * makes up to 25 MORE urlscan submits a day (plus their retrieves). The run
+ * stays ≤ 75 submits in the 09:xx UTC hour, which no other urlscan lane shares
+ * (recheck fires at :30 of 00/06/12/18), so it stays inside urlscan's
+ * 100/hour; submits are sequential behind a DNS precheck and a reputation
+ * lookup each (75-row runs have taken 3–6 min), well under 60/min. The weekly
+ * draw runs inside the load step (once per UTC ISO week), gated
  * FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY; the one-off baseline is drawn by an
- * operator (docs/ops/clone-watch-config.md). Every sample the batch tried is
- * stamped so an unscannable one cannot re-present forever.
+ * operator (docs/ops/clone-watch-config.md). Every tried sample gets an attempt
+ * (168 h re-offer, max 3), so an unscannable one cannot re-present forever.
  */
 
 const SUBMIT_BATCH_LIMIT = 75;
@@ -127,8 +134,8 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
       const loaded = await step.run("load-gated-candidates", async () => {
-        // Audit samples first so the regular worklist is asked only for the
-        // slots they leave. Never fails the run (see loadAuditSamples).
+        // Not-a-clone audit (#1238): draw (weekly, flagged), claim new misses,
+        // list due samples. Never fails the run (see loadAuditSamples).
         const audit = await loadAuditSamples(sb, {
           drawWeekly: featureFlags.cloneWatchNotACloneAuditWeekly,
         });
@@ -137,22 +144,43 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             error: audit.error,
           });
         }
+        // The regular worklist is always asked for the FULL batch so v285's
+        // oldest-rows reserve (a third of p_limit) keeps its size;
+        // composeSubmitBatch trims the freshest tail to make room.
         const { data } = await sb.rpc(
           "list_clone_alerts_pending_urlscan_submit",
           {
-            p_limit: Math.max(1, SUBMIT_BATCH_LIMIT - audit.samples.length),
+            p_limit: SUBMIT_BATCH_LIMIT,
             p_min_confidence: MIN_CONFIDENCE,
             p_max_failure_streak: MAX_FAILURE_STREAK,
           },
         );
-        const plan = composeSubmitBatch(
-          (data as CloneCandidate[] | null) ?? [],
-          audit.samples,
-          SUBMIT_BATCH_LIMIT,
-        );
-        return { ...plan, auditDrawn: audit.drawn };
+        const fetched = (data as CloneCandidate[] | null) ?? [];
+        const plan = composeSubmitBatch(fetched, audit.samples, SUBMIT_BATCH_LIMIT);
+        return {
+          ...plan,
+          regularFetched: fetched.length,
+          auditDrawn: audit.drawn,
+          auditMisses: audit.misses,
+        };
       });
-      const { candidates, auditIds, auditDrawn } = loaded;
+      const { regular: candidates, audit: auditCandidates, auditDrawn } = loaded;
+
+      // One always-ship warn per audit miss (v330): a sampled "not a clone"
+      // that urlscan graded likely_phishing. It was routed to monitoring, NOT
+      // weaponised — no brand, feed or vendor action happens — so a human must
+      // look at it. claim_clone_not_a_clone_audit_misses returns each miss once.
+      for (const miss of loaded.auditMisses) {
+        logger.warn("clone-watch: not-a-clone audit MISS — review", {
+          alertId: miss.alert_id,
+          candidateDomain: miss.candidate_domain,
+          candidateUrl: miss.candidate_url,
+          cohortKey: miss.cohort_key,
+          classifier: miss.model_id,
+          confidence: miss.confidence,
+          missAt: miss.miss_at,
+        });
+      }
 
       // Retire what we are giving up on, BEFORE the empty-worklist return — a
       // quiet day is exactly when the horizon still needs sweeping. Widening the
@@ -185,7 +213,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         });
       }
 
-      if (candidates.length === 0) {
+      if (candidates.length === 0 && auditCandidates.length === 0) {
         // Still log the sweep — cost_telemetry is the durable record (this
         // logger is console-backed with no Axiom transport), so a run that only
         // retired rows must not be invisible. Unconditional since #1145: the
@@ -201,6 +229,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             rate_limited: 0,
             dormant_retired: dormant,
             audit_drawn: auditDrawn,
+            audit_misses: loaded.auditMisses.length,
             audit_offered: 0,
             audit_attempted: 0,
           }),
@@ -234,24 +263,31 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
           // copy for this lane and the recheck lane). A 429 is counted apart
           // from failures: quota exhaustion, row untouched, no evidence about
           // the URL.
+          const onRowError = (alertId: number, err: unknown) =>
+            logger.error("clone-watch urlscan submit: row failed", {
+              alertId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           const tally = await submitCandidateBatch(candidates, budget, {
-            onRowError: (alertId, err) =>
-              logger.error("clone-watch urlscan submit: row failed", {
-                alertId,
-                error: err instanceof Error ? err.message : String(err),
-              }),
+            onRowError,
           });
-          // Stamp the audit samples this batch tried, inside the same step so a
-          // replay cannot separate the submit from its stamp. A 429 or an
-          // unreached sample is not in attemptedIds and re-presents tomorrow.
-          const triedAudit = attemptedAuditIds(tally.attemptedIds, auditIds);
-          const stamped = await stampAuditAttempts(sb, triedAudit);
+          // Audit samples run AFTER the regular batch, on the same budget, as a
+          // SEPARATE tally: the Outcome Row's units / submitted / dns_* — and so
+          // the lane's silent-zero shape — describe regular work only, and a
+          // day of DNS-dead samples cannot read as a broken lane.
+          const auditTally = await submitCandidateBatch(auditCandidates, budget, {
+            onRowError,
+          });
+          // One attempt per tried sample, in the same step so a replay cannot
+          // separate the submit from its stamp. A 429 or an unreached sample is
+          // not in attemptedIds and stays due.
+          const stamped = await stampAuditAttempts(sb, auditTally.attemptedIds);
           if (stamped === null) {
             logger.error("clone-watch urlscan submit: audit stamp failed", {
-              ids: triedAudit.length,
+              ids: auditTally.attemptedIds.length,
             });
           }
-          return { ...tally, auditAttempted: triedAudit.length };
+          return { ...tally, audit: auditTally };
         },
       );
       const {
@@ -262,7 +298,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         dnsServfail,
         reputationHits,
         unreached,
-        auditAttempted,
+        audit: auditTally,
       } = batch;
 
       await step.run("log-cost", async () => {
@@ -281,12 +317,19 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             reputation_hits: reputationHits,
             dormant_retired: dormant,
             unreached,
-            // #1231: a full worklist means gated rows were left for tomorrow.
+            // #1231: gated rows were left for tomorrow — the worklist filled the
+            // whole fetch, or audit samples took slots regular rows would have.
             cap: SUBMIT_BATCH_LIMIT,
-            cap_reached: candidates.length >= SUBMIT_BATCH_LIMIT,
+            cap_reached:
+              loaded.regularFetched >= SUBMIT_BATCH_LIMIT || loaded.regularLeft > 0,
             audit_drawn: auditDrawn,
-            audit_offered: auditIds.length,
-            audit_attempted: auditAttempted,
+            audit_misses: loaded.auditMisses.length,
+            audit_offered: auditCandidates.length,
+            audit_attempted: auditTally.attemptedIds.length,
+            audit_submitted: auditTally.submitted,
+            audit_dns_skipped: auditTally.dnsSkipped + auditTally.dnsServfail,
+            audit_submit_failed: auditTally.submitFailed,
+            audit_rate_limited: auditTally.rateLimited,
           },
         );
       });

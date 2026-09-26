@@ -235,6 +235,11 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // (the Sep 12–16 shape) pages too. Pure quota → quotaExhausted.
     // DNS-precheck skips (no_host / SERVFAIL) are not work: a day whose whole
     // batch was dead domains submitted nothing correctly (2026-09-25).
+    // Not-a-clone audit samples (v330) are deliberately OUTSIDE every field
+    // read here: the lane writes them as a separate audit_* tally and `units`
+    // counts regular rows only, so a day whose batch was only DNS-dead audit
+    // samples reads units=0 — quiet, not silent. Guarded in
+    // __tests__/notACloneAuditLane.test.ts.
     silentZero: (o) =>
       n(o, "units") - n(o, "dns_skipped") - n(o, "dns_servfail") > 0 &&
       n(o, "submitted") === 0 &&

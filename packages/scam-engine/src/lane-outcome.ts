@@ -216,16 +216,25 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
-    /** Not-a-clone audit (#1238, v330): sample rows the weekly draw marked on
-     *  this run (0 on six days of seven, and while the weekly flag is off). */
+    /** Not-a-clone audit (#1238, v330). Kept OUT of `units`, `submitted` and
+     *  `dns_*` on purpose: those describe the regular gated batch, which is
+     *  what the silent-zero shape judges; the audit tally is separate. All
+     *  absent before v330. The FN rate itself is
+     *  clone_watch_not_a_clone_audit_summary(), not a per-run field. */
+    /** Sample rows the weekly draw marked on this run (0 on six days of seven,
+     *  and while the weekly flag is off). */
     audit_drawn?: number;
-    /** Audit samples included in this run's batch (≤ AUDIT_SLOTS_PER_RUN,
-     *  inside `units`, never on top of it). */
+    /** New misses claimed this run — each one also logged as a warn. */
+    audit_misses?: number;
+    /** Audit samples in this run's batch (≤ AUDIT_SLOTS_PER_RUN). */
     audit_offered?: number;
-    /** Audit samples the batch tried and stamped-for (excludes 429s and the
-     *  unreached tail). The FN rate itself is clone_watch_not_a_clone_audit_
-     *  summary(), not a per-run field. All three absent before v330. */
+    /** Samples tried (an attempt recorded; excludes 429s and unreached). */
     audit_attempted?: number;
+    audit_submitted?: number;
+    /** no_host + SERVFAIL at the DNS precheck. */
+    audit_dns_skipped?: number;
+    audit_submit_failed?: number;
+    audit_rate_limited?: number;
   };
   "shopfront-clone-urlscan-retrieve": {
     classified: number;

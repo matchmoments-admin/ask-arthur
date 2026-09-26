@@ -179,8 +179,11 @@ the monthly clone-watch report. Publishable only from witnessed transitions
 A random sample of never-scanned Clone Alerts the pre-classifier judged
 `is_clone=false`, urlscanned from a reserve of the submit Lane's slots to
 measure the pre-classifier's false-negative rate. A **miss** is a sample whose
-first post-draw urlscan verdict is `likely_phishing`; it is re-opened by the
-existing verdict edge (`detected → weaponised`), never by a raw update. The
+first post-draw urlscan verdict is `likely_phishing`. The audit is
+measurement: a miss goes to `monitoring` (v330's `apply_clone_urlscan_verdict`,
+keyed on sample membership + is_clone=false), never `weaponised`, and is logged
+for human review — it is never acted on under the brand the classifier
+rejected. The
 rate is derived (`clone_watch_not_a_clone_audit_summary`), not stored. Not the
 same thing as the **Vendor Gap**, which measures Netcraft, not our classifier.
 

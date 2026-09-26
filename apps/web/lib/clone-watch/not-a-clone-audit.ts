@@ -7,27 +7,32 @@
 // (clone-watch-urlscan-submit) carry a random sample of those alerts to
 // urlscan, so the false-negative rate is measured instead of assumed.
 //
-// How a sample moves (all SQL in supabase/migration-v330-*):
-//   draw   — an operator marks the one-off baseline (~100, SQL); the lane marks
-//            the weekly ~5% itself, once per UTC ISO week, when
-//            FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY is on.
-//   submit — the lane lists un-tried samples and gives them up to
-//            AUDIT_SLOTS_PER_RUN of its SUBMIT_BATCH_LIMIT slots. The batch
-//            total does not grow, so neither does urlscan volume.
-//   stamp  — every sample the lane tried (anything but a 429) is stamped, so an
-//            unscannable row cannot re-present forever.
-//   verdict— the retrieve lane persists the scan like any other; v307/v200 move
-//            a likely_phishing verdict detected → weaponised (the miss is
-//            re-opened by the existing guarded lifecycle RPC) and a benign one
-//            detected → monitoring.
-//   count  — clone_watch_not_a_clone_audit_summary() (#1237's scorecard input).
+// THE AUDIT IS MEASUREMENT. A miss is surfaced for human review and never
+// acted on externally under the brand label the classifier rejected: v330's
+// apply_clone_urlscan_verdict routes a sampled is_clone=false alert's
+// likely_phishing verdict to `monitoring`, never `weaponised`, so no weaponised
+// consumer (feed-platform, notify-weaponised, enforcement, Netcraft) is
+// reachable. The lane logs one always-ship warn per miss (claimAuditMisses).
+//
+// How a sample moves (SQL in supabase/migration-v330-*):
+//   draw    — an operator marks the one-off baseline (~100, SQL); the lane
+//             marks the weekly ~5% itself, once per UTC ISO week, when
+//             FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY is on. fp rows excluded.
+//   submit  — the lane lists `due` samples and runs them AFTER its regular
+//             batch, in up to AUDIT_SLOTS_PER_RUN of its SUBMIT_BATCH_LIMIT.
+//   attempt — every sample the lane tried (anything but a 429) gets
+//             attempts+1; a sample with no verdict is re-offered every 168 h,
+//             up to 3 attempts, then counts as unscannable.
+//   verdict — the retrieve lane persists the scan; benign → monitoring (and a
+//             weekly recheck), likely_phishing → monitoring + miss_at.
+//   count   — clone_watch_not_a_clone_audit_summary() (#1237's input).
 
 import type { CloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 
 /** Of the submit lane's daily SUBMIT_BATCH_LIMIT (75), at most this many go to
- *  audit samples. The baseline 100 drains in 4 daily runs; a weekly draw
- *  (~20 rows at today's pool) in one. It displaces at most this many regular
- *  candidates for a day — they are not lost, the worklist re-offers them. */
+ *  audit samples. Only ~33 regular rows were eligible on 2026-09-26, so in
+ *  practice the samples fill otherwise-empty slots: they ADD up to this many
+ *  urlscan submits a day (plus their retrieves) while samples are due. */
 export const AUDIT_SLOTS_PER_RUN = 25;
 
 /** The weekly sample: this fraction of the never-scanned not-a-clone pool inside
@@ -40,41 +45,33 @@ export const WEEKLY_AUDIT_FRACTION = 0.05;
 export const WEEKLY_AUDIT_HORIZON_DAYS = 90;
 
 export interface SubmitBatchPlan {
-  /** What the lane submits: regular candidates first, then audit samples. */
-  candidates: CloneCandidate[];
-  /** The audit-sample ids inside `candidates` (to stamp after the batch). */
-  auditIds: number[];
+  /** Regular gated candidates, trimmed to the slots the samples leave. */
+  regular: CloneCandidate[];
+  /** Audit samples, capped at the audit slots; run AFTER `regular`. */
+  audit: CloneCandidate[];
+  /** Regular rows the worklist returned but this run could not take. */
+  regularLeft: number;
 }
 
 /**
- * Compose the lane's batch from the regular gated worklist and the audit
- * samples. The total never exceeds `batchLimit` — samples take at most
- * `auditSlots`, regular candidates fill the rest. Samples go LAST: if the
- * wall-clock budget stops the loop early, the unreached tail is unstamped and
- * re-presents tomorrow, while the regular (time-sensitive) rows went first.
+ * Split the lane's batch between the regular gated worklist (fetched at the
+ * full SUBMIT_BATCH_LIMIT, so v285's oldest-rows reserve keeps its size) and
+ * the audit samples. The total never exceeds `batchLimit`: samples take at most
+ * `auditSlots`, the regular list is trimmed from its TAIL (the freshest rows,
+ * which are still eligible tomorrow) to fit.
  */
 export function composeSubmitBatch(
-  regular: readonly CloneCandidate[],
+  regularFetched: readonly CloneCandidate[],
   samples: readonly CloneCandidate[],
   batchLimit: number,
   auditSlots = AUDIT_SLOTS_PER_RUN,
 ): SubmitBatchPlan {
-  const audit = samples.slice(0, Math.max(0, Math.min(auditSlots, batchLimit)));
-  const auditIdSet = new Set(audit.map((c) => c.id));
-  const reg = regular
-    .filter((c) => !auditIdSet.has(c.id))
-    .slice(0, Math.max(0, batchLimit - audit.length));
-  return { candidates: [...reg, ...audit], auditIds: audit.map((c) => c.id) };
-}
-
-/** The audit samples the batch actually tried — `attemptedIds` from
- *  submitCandidateBatch already excludes 429s and unreached rows. */
-export function attemptedAuditIds(
-  attemptedIds: readonly number[],
-  auditIds: readonly number[],
-): number[] {
-  const audit = new Set(auditIds);
-  return attemptedIds.filter((id) => audit.has(id));
+  const regularIds = new Set(regularFetched.map((c) => c.id));
+  const audit = samples
+    .filter((c) => !regularIds.has(c.id))
+    .slice(0, Math.max(0, Math.min(auditSlots, batchLimit)));
+  const regular = regularFetched.slice(0, Math.max(0, batchLimit - audit.length));
+  return { regular, audit, regularLeft: regularFetched.length - regular.length };
 }
 
 type RpcClient = {
@@ -84,18 +81,30 @@ type RpcClient = {
   ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
 };
 
+export interface AuditMiss {
+  alert_id: number;
+  candidate_domain: string | null;
+  candidate_url: string | null;
+  cohort_key: string;
+  model_id: string | null;
+  confidence: number | null;
+  miss_at: string;
+}
+
 export interface AuditLoad {
   samples: CloneCandidate[];
   /** Rows the weekly draw marked on this call (0 on six days of seven). */
   drawn: number;
-  /** Set when a read failed; the lane then runs its regular batch unchanged. */
+  /** Misses recorded since the last run, claimed for the operator warn. */
+  misses: AuditMiss[];
+  /** Set when a call failed; the lane then runs its regular batch unchanged. */
   error?: string;
 }
 
 /**
- * Draw this week's sample (when enabled) and list the un-tried samples.
- * Never throws: the audit is secondary to the lane's real job, and before v330
- * is applied both RPCs simply do not exist — the lane must keep submitting.
+ * Draw this week's sample (when enabled), claim new misses, and list the due
+ * samples. Never throws: the audit is secondary to the lane's real job, and
+ * before v330 is applied these RPCs do not exist — the lane must keep working.
  */
 export async function loadAuditSamples(
   sb: RpcClient,
@@ -112,19 +121,23 @@ export async function loadAuditSamples(
     if (error) errors.push(`draw: ${error.message}`);
     else drawn = typeof data === "number" ? data : 0;
   }
+  const claimed = await sb.rpc("claim_clone_not_a_clone_audit_misses", {});
+  if (claimed.error) errors.push(`misses: ${claimed.error.message}`);
+  const misses = claimed.error ? [] : ((claimed.data as AuditMiss[] | null) ?? []);
+
   const { data, error } = await sb.rpc("list_clone_not_a_clone_audit_pending", {
     p_limit: opts.limit ?? AUDIT_SLOTS_PER_RUN,
   });
   if (error) errors.push(`list: ${error.message}`);
   const samples = error ? [] : ((data as CloneCandidate[] | null) ?? []);
   return errors.length
-    ? { samples, drawn, error: errors.join("; ") }
-    : { samples, drawn };
+    ? { samples, drawn, misses, error: errors.join("; ") }
+    : { samples, drawn, misses };
 }
 
-/** Stamp the tried samples. Returns the count stamped, or null when the write
- *  failed (the SQL worklist also drops a row once urlscan evidence shows an
- *  attempt after the draw, so a failed stamp cannot loop a row forever). */
+/** Record one attempt on each tried sample. Returns the count stamped, or null
+ *  when the write failed (the SQL state also reads the urlscan evidence clock,
+ *  so a lost stamp still waits out the 168 h cadence instead of looping). */
 export async function stampAuditAttempts(
   sb: RpcClient,
   ids: readonly number[],

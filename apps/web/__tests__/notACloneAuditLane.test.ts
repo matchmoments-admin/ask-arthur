@@ -6,14 +6,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Go-red record (2026-09-26, each guard reverted → its test failed → restored):
 //   - composeSubmitBatch: dropped the `batchLimit - audit.length` slice on the
 //     regular list                        → "never grows the batch past SUBMIT_BATCH_LIMIT" FAILED
-//   - composeSubmitBatch: samples placed FIRST → "samples go last" FAILED
-//   - submit fn: stamped `auditIds` instead of attemptedAuditIds(...)
+//   - composeSubmitBatch: trimmed the regular HEAD instead of the tail
+//                                       → "trims the freshest tail of the regular list" FAILED
+//   - submit fn: p_limit back to `SUBMIT_BATCH_LIMIT - samples`
+//                                       → "asks the regular worklist for the full batch" FAILED
+//   - submit fn: stamped every offered sample instead of auditTally.attemptedIds
 //                                       → "does not stamp a rate-limited sample" FAILED
+//   - submit fn: ran samples in the SAME tally as the regular rows
+//                                       → "records an attempt … keeps them out of units" FAILED
+//   - submit fn: counted samples in `units` (candidates + audit)
+//                                       → "a DNS-dead audit-only day is not silent_zero" FAILED
+//   - submit fn: dropped the per-miss logger.warn → "logs one warn per claimed miss" FAILED
 //   - submit fn: let loadAuditSamples' error throw out of the load step
 //                                       → "keeps submitting the regular batch when the audit RPCs are missing" FAILED
 
 const mocks = vi.hoisted(() => ({
-  rpc: vi.fn(), submit: vi.fn(), log: vi.fn(), flags: { cloneWatchNotACloneAuditWeekly: false },
+  rpc: vi.fn(), submit: vi.fn(), log: vi.fn(), warn: vi.fn(),
+  flags: { cloneWatchNotACloneAuditWeekly: false } as Record<string, boolean>,
 }));
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({ inngest: {
   createFunction: (_c: unknown, _t: unknown, handler: unknown) => handler,
@@ -23,8 +32,11 @@ vi.mock("@askarthur/scam-engine/inngest/with-axiom-logging", () => ({
 }));
 vi.mock("@askarthur/supabase/server", () => ({ createServiceClient: () => ({ rpc: mocks.rpc }) }));
 vi.mock("@askarthur/scam-engine/cost-log", () => ({ logCost: mocks.log }));
+vi.mock("@askarthur/utils/logger", () => ({
+  logger: { info: vi.fn(), error: vi.fn(), warn: mocks.warn, debug: vi.fn() },
+}));
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: new Proxy({}, {
-  get: (_t, key: string) => (key in mocks.flags ? mocks.flags[key as keyof typeof mocks.flags] : true),
+  get: (_t, key: string) => (key in mocks.flags ? mocks.flags[key] : true),
 }) }));
 vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/clone-watch/urlscan-submit-one")>();
@@ -35,12 +47,9 @@ vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
   };
 });
 
-import {
-  AUDIT_SLOTS_PER_RUN,
-  attemptedAuditIds,
-  composeSubmitBatch,
-} from "@/lib/clone-watch/not-a-clone-audit";
+import { AUDIT_SLOTS_PER_RUN, composeSubmitBatch } from "@/lib/clone-watch/not-a-clone-audit";
 import { cloneWatchUrlscanSubmit } from "@/app/api/inngest/functions/clone-watch-urlscan-submit";
+import { LANE_SHAPES } from "@/lib/laneHealth";
 
 const cand = (id: number) => ({ id, candidate_url: `https://c${id}.example`, candidate_domain: `c${id}.example` });
 const range = (from: number, n: number) => Array.from({ length: n }, (_, i) => cand(from + i));
@@ -54,23 +63,28 @@ const SUBMIT_BATCH_LIMIT = Number(/const SUBMIT_BATCH_LIMIT = (\d+)/.exec(SRC)![
 describe("composeSubmitBatch", () => {
   it("never grows the batch past SUBMIT_BATCH_LIMIT", () => {
     const plan = composeSubmitBatch(range(1, 75), range(1000, 40), 75);
-    expect(plan.candidates).toHaveLength(75);
-    expect(plan.auditIds).toHaveLength(AUDIT_SLOTS_PER_RUN);
+    expect(plan.regular.length + plan.audit.length).toBe(75);
+    expect(plan.audit).toHaveLength(AUDIT_SLOTS_PER_RUN);
+    expect(plan.regularLeft).toBe(AUDIT_SLOTS_PER_RUN);
   });
 
-  it("samples go last, regular candidates first", () => {
-    const plan = composeSubmitBatch(range(1, 3), range(1000, 2), 75);
-    expect(plan.candidates.map((c) => c.id)).toEqual([1, 2, 3, 1000, 1001]);
+  it("trims the freshest tail of the regular list (v285 puts the oldest reserve first)", () => {
+    const plan = composeSubmitBatch(range(1, 75), range(1000, 25), 75);
+    expect(plan.regular[0]!.id).toBe(1);
+    expect(plan.regular.at(-1)!.id).toBe(50);
   });
 
-  it("de-duplicates an alert that is on both lists", () => {
-    const plan = composeSubmitBatch([cand(1), cand(2)], [cand(2)], 75);
-    expect(plan.candidates.map((c) => c.id)).toEqual([1, 2]);
-    expect(plan.auditIds).toEqual([2]);
+  it("does not trim regular rows when samples fit in empty slots", () => {
+    const plan = composeSubmitBatch(range(1, 33), range(1000, 25), 75);
+    expect(plan.regular).toHaveLength(33);
+    expect(plan.audit).toHaveLength(25);
+    expect(plan.regularLeft).toBe(0);
   });
 
-  it("attemptedAuditIds keeps only tried samples", () => {
-    expect(attemptedAuditIds([1, 1000, 3], [1000, 1001])).toEqual([1000]);
+  it("de-duplicates an alert that is on both lists (it runs as regular)", () => {
+    const plan = composeSubmitBatch([cand(1), cand(2)], [cand(2), cand(3)], 75);
+    expect(plan.regular.map((c) => c.id)).toEqual([1, 2]);
+    expect(plan.audit.map((c) => c.id)).toEqual([3]);
   });
 });
 
@@ -90,6 +104,10 @@ describe("submit lane with audit samples", () => {
       step: { run: (_n: string, fn: () => unknown) => fn() },
     });
   const rpcs = (name: string) => mocks.rpc.mock.calls.filter(([n]) => n === name).map(([, a]) => a);
+  const outcome = () => {
+    const call = mocks.log.mock.calls.at(-1)![0] as { units: number; metadata: Record<string, unknown> };
+    return { units: call.units, ...call.metadata };
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -98,31 +116,35 @@ describe("submit lane with audit samples", () => {
     mocks.submit.mockResolvedValue({ kind: "submitted", reputationMalicious: false });
   });
 
-  function worklists(regular: ReturnType<typeof cand>[], samples: ReturnType<typeof cand>[]) {
+  function worklists(
+    regular: ReturnType<typeof cand>[],
+    samples: ReturnType<typeof cand>[],
+    misses: unknown[] = [],
+  ) {
     mocks.rpc.mockImplementation(async (name: string) => {
       if (name === "list_clone_alerts_pending_urlscan_submit") return { data: regular, error: null };
       if (name === "list_clone_not_a_clone_audit_pending") return { data: samples, error: null };
+      if (name === "claim_clone_not_a_clone_audit_misses") return { data: misses, error: null };
       if (name === "draw_clone_not_a_clone_audit_sample") return { data: 3, error: null };
       if (name === "mark_clone_not_a_clone_audit_attempted") return { data: 1, error: null };
       return { data: 0, error: null };
     });
   }
 
-  it("asks the regular worklist only for the slots the samples leave", async () => {
+  it("asks the regular worklist for the full batch and runs samples after it", async () => {
     worklists(range(1, 5), range(1000, 10));
     await invoke();
-    expect(rpcs("list_clone_alerts_pending_urlscan_submit")[0]).toMatchObject({ p_limit: SUBMIT_BATCH_LIMIT - 10 });
-    expect(mocks.submit).toHaveBeenCalledTimes(15);
+    expect(rpcs("list_clone_alerts_pending_urlscan_submit")[0]).toMatchObject({ p_limit: SUBMIT_BATCH_LIMIT });
+    expect(mocks.submit.mock.calls.map(([c]) => c.id)).toEqual([...range(1, 5), ...range(1000, 10)].map((c) => c.id));
   });
 
-  it("stamps the samples it tried and writes the audit fields on the Outcome Row", async () => {
+  it("records an attempt for the samples it tried and keeps them out of units", async () => {
     worklists(range(1, 2), range(1000, 2));
     await invoke();
     expect(rpcs("mark_clone_not_a_clone_audit_attempted")).toEqual([{ p_alert_ids: [1000, 1001] }]);
-    expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "submit_batch",
-      metadata: expect.objectContaining({ audit_drawn: 0, audit_offered: 2, audit_attempted: 2 }),
-    }));
+    expect(outcome()).toMatchObject({
+      units: 2, submitted: 2, audit_offered: 2, audit_attempted: 2, audit_submitted: 2, audit_drawn: 0,
+    });
   });
 
   it("does not stamp a rate-limited sample (quota says nothing about the URL)", async () => {
@@ -132,6 +154,42 @@ describe("submit lane with audit samples", () => {
       .mockResolvedValueOnce({ kind: "dns_no_host", reputationMalicious: false });
     await invoke();
     expect(rpcs("mark_clone_not_a_clone_audit_attempted")).toEqual([{ p_alert_ids: [1001] }]);
+    expect(outcome()).toMatchObject({ audit_rate_limited: 1, audit_dns_skipped: 1 });
+  });
+
+  it("a DNS-dead audit-only day is not silent_zero", async () => {
+    worklists([], range(1000, 25));
+    mocks.submit.mockResolvedValue({ kind: "dns_no_host", reputationMalicious: false });
+    await invoke();
+    const o = outcome();
+    expect(o).toMatchObject({ units: 0, submitted: 0, audit_offered: 25 });
+    const shape = LANE_SHAPES["shopfront-clone-urlscan-submit"];
+    expect(shape.silentZero(o as never)).toBe(false);
+  });
+
+  it("a genuinely broken regular batch still reads silent_zero with samples present", async () => {
+    worklists(range(1, 3), range(1000, 2));
+    mocks.submit.mockResolvedValue({ kind: "submit_failed", reputationMalicious: false });
+    await invoke();
+    const shape = LANE_SHAPES["shopfront-clone-urlscan-submit"];
+    expect(shape.silentZero(outcome() as never)).toBe(true);
+  });
+
+  it("logs one warn per claimed miss and counts them on the Outcome Row", async () => {
+    worklists(range(1, 1), [], [
+      { alert_id: 7, candidate_domain: "x.example", candidate_url: "https://x.example", cohort_key: "baseline:b", model_id: "jev-1.13.0", confidence: 0.2, miss_at: "2026-09-26T00:00:00Z" },
+      { alert_id: 8, candidate_domain: "y.example", candidate_url: "https://y.example", cohort_key: "baseline:b", model_id: "jev-1.13.0", confidence: 0.3, miss_at: "2026-09-26T00:00:00Z" },
+    ]);
+    await invoke();
+    const missWarns = mocks.warn.mock.calls.filter(([msg]) => String(msg).includes("not-a-clone audit MISS"));
+    expect(missWarns.map(([, ctx]) => (ctx as { alertId: number }).alertId)).toEqual([7, 8]);
+    expect(outcome()).toMatchObject({ audit_misses: 2 });
+  });
+
+  it("cap_reached is set when samples displaced regular rows", async () => {
+    worklists(range(1, 75), range(1000, 25));
+    await invoke();
+    expect(outcome()).toMatchObject({ units: 50, cap_reached: true, audit_offered: 25 });
   });
 
   it("draws the weekly sample only when the flag is on", async () => {
@@ -143,9 +201,7 @@ describe("submit lane with audit samples", () => {
     expect(rpcs("draw_clone_not_a_clone_audit_sample")).toEqual([
       { p_cohort: "weekly", p_fraction: 0.05, p_horizon_days: 90 },
     ]);
-    expect(mocks.log).toHaveBeenLastCalledWith(expect.objectContaining({
-      metadata: expect.objectContaining({ audit_drawn: 3 }),
-    }));
+    expect(outcome()).toMatchObject({ audit_drawn: 3 });
   });
 
   it("keeps submitting the regular batch when the audit RPCs are missing (v330 not applied)", async () => {
@@ -156,7 +212,6 @@ describe("submit lane with audit samples", () => {
     });
     await invoke();
     expect(mocks.submit).toHaveBeenCalledTimes(3);
-    expect(rpcs("list_clone_alerts_pending_urlscan_submit")[0]).toMatchObject({ p_limit: SUBMIT_BATCH_LIMIT });
     expect(rpcs("mark_clone_not_a_clone_audit_attempted")).toEqual([]);
   });
 });
