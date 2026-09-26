@@ -19,6 +19,11 @@
  */
 import { mapWithConcurrency } from "@askarthur/utils/concurrency";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import {
+  AUDIT_SAMPLE_EMBED,
+  isAuditWithheld,
+  type AuditSampleEmbed,
+} from "@/lib/clone-watch/clone-cohort";
 import { TERMINAL_STATES } from "@/lib/clone-watch/lifecycle";
 import {
   classifyHostLookups,
@@ -80,10 +85,17 @@ export interface StockRow {
   urlscan_uuid: string | null;
   urlscan_failure_streak: number | null;
   urlscan_evidence: { status?: unknown } | null;
+  /** Read only by `isAuditWithheld` (clone-cohort.ts, #1256). */
+  clone_watch_classifications?: { is_clone: boolean | null } | null;
+  clone_watch_not_a_clone_samples?: AuditSampleEmbed;
 }
 
+// The two embeds exist only for `isAuditWithheld` (#1256). Without them, a
+// not-a-clone audit sample's parked_for_sale verdict would move it from `live`
+// to `parked` in the brand's persisted stock split.
 export const STOCK_ROW_SELECT =
-  "id, candidate_domain, inferred_target_domain, attribution, urlscan_classification, lifecycle_state, urlscan_uuid, urlscan_failure_streak, urlscan_evidence";
+  "id, candidate_domain, inferred_target_domain, attribution, urlscan_classification, lifecycle_state, urlscan_uuid, urlscan_failure_streak, urlscan_evidence, clone_watch_classifications(is_clone), " +
+  AUDIT_SAMPLE_EMBED;
 
 /** One clone_liveness_snapshots row. */
 export interface SnapshotInsert {
@@ -187,10 +199,16 @@ export async function probeChunk(input: {
       } catch {
         dns = null;
       }
+      // #1256: a not-a-clone audit sample's verdict is not a fact about the
+      // brand, so the stock status reads only DNS and attribution for it. The
+      // mask is narrowed to the status input on purpose. `isDeadDormant` below
+      // reads urlscan_evidence as operational state, not as a brand count.
       const status = stockStatus({
         dns,
         attribution: row.attribution,
-        urlscan_classification: row.urlscan_classification,
+        urlscan_classification: isAuditWithheld(row)
+          ? null
+          : row.urlscan_classification,
         lifecycle_state: row.lifecycle_state,
       });
       if (

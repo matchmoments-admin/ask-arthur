@@ -88,7 +88,32 @@ export interface CloneAlertRow {
   weaponised_at?: string | null;
   first_seen_at?: string | null;
   triage_status?: string | null;
+  /**
+   * The not-a-clone audit ledger row (v330), a PostgREST to-one embed via its
+   * `alert_id` PK — null when the alert was never sampled. Read ONLY through
+   * `isAuditWithheld` / `withholdAuditVerdict` below.
+   */
+  clone_watch_not_a_clone_samples?: AuditSampleEmbed;
 }
+
+/**
+ * The embed's shape. PostgREST resolves it to-one (alert_id is the PK) and
+ * returns `null` for an unsampled alert — verified against prod 2026-09-27. An
+ * array is tolerated anyway: a to-many resolution would return `[]` for every
+ * unsampled row, and reading `[]` as "sampled" would withhold the whole month.
+ */
+export type AuditSampleEmbed =
+  | { miss_at: string | null }
+  | Array<{ miss_at: string | null }>
+  | null
+  | undefined;
+
+/**
+ * The embed a cohort-shaped read carries so `withholdAuditVerdict` can see
+ * whether an alert is a not-a-clone audit sample. Exported for the reads that
+ * select their own column list (brand-outreach-pilot.ts, month-end-stock.ts).
+ */
+export const AUDIT_SAMPLE_EMBED = "clone_watch_not_a_clone_samples(miss_at)";
 
 /**
  * The one SELECT every cohort read uses.
@@ -98,7 +123,8 @@ export interface CloneAlertRow {
  * missing one is a distribution that reads as 100% unknown.
  */
 export const CLONE_COHORT_SELECT =
-  "id, candidate_domain, candidate_url, inferred_target_domain, target_brand_normalized, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic, model_id)";
+  "id, candidate_domain, candidate_url, inferred_target_domain, target_brand_normalized, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic, model_id), " +
+  AUDIT_SAMPLE_EMBED;
 
 /** The NRD daily sweep — the only source these reporting surfaces count. */
 export const CLONE_COHORT_SOURCE = "nrd";
@@ -130,14 +156,102 @@ export function dedupeByCandidate<T extends { candidate_domain?: string | null }
 }
 
 /**
+ * NOT-A-CLONE AUDIT SAMPLES (#1256) — measurement, never a brand fact.
+ *
+ * The audit (v330, #1249) urlscans a random sample of alerts the pre-classifier
+ * judged is_clone=false. Before it existed those alerts were never scanned, so
+ * they reached every brand count as `unclassified`. Once scanned, their verdict
+ * — and the evidence and lifecycle move that come with it — would land in the
+ * brand's `likely_phishing` / `parked_for_sale` / hosting / squat-status
+ * numbers under the very brand the classifier REJECTED (prod example:
+ * threesbrewingdirect.shop → ing.com.au). A miss is routed to `monitoring` and
+ * never weaponised precisely so it is not acted on under that brand label;
+ * publishing it under that label would undo the point.
+ *
+ * So a sample still judged not-a-clone keeps its LEXICAL membership (it stays in
+ * `clones` / `detected` — it was a lexical match) and contributes nothing the
+ * audit scan produced:
+ *   - urlscan_classification → null. It counts as `unclassified`, exactly as
+ *     every unsampled is_clone=false alert does.
+ *   - urlscan_evidence and urlscan_uuid → null: hosting, screenshot, result
+ *     link and squat status.
+ *   - lifecycle_state `monitoring` → `detected`. The v330 draw takes only
+ *     `detected` alerts, and the only thing that moves a sample to
+ *     `monitoring` is the audit scan. Left alone, it would put the sample on
+ *     the brand's unactioned watch-list (`topRiskUnactioned`).
+ *
+ * "Still judged not-a-clone" means `is_clone IS NOT TRUE`. That is the same
+ * predicate v330 uses for `nac_audit` in list_clone_alerts_for_recheck and for
+ * the weaponise gate in apply_clone_urlscan_verdict. An operator re-judgement
+ * to is_clone=true releases the sample in both places. The rule covers misses
+ * (miss_at set) and benign or parked samples alike, because a parked verdict
+ * from the audit says no more about the brand than a phishing one does.
+ *
+ * The miss is counted per cohort key rather than per brand, by
+ * clone_watch_not_a_clone_audit_summary() (v330). The submit lane also logs
+ * each miss for review.
+ */
+function auditSampleOf(embed: AuditSampleEmbed): { miss_at: string | null } | null {
+  if (Array.isArray(embed)) return embed[0] ?? null;
+  return embed ?? null;
+}
+
+type AuditJudged = {
+  clone_watch_not_a_clone_samples?: AuditSampleEmbed;
+  clone_watch_classifications?: { is_clone: boolean | null } | null;
+};
+
+/** True when the row's urlscan-derived facts must not be attributed to its brand. */
+export function isAuditWithheld(row: AuditJudged): boolean {
+  return (
+    auditSampleOf(row.clone_watch_not_a_clone_samples) !== null &&
+    row.clone_watch_classifications?.is_clone !== true
+  );
+}
+
+/** A withheld sample urlscan graded likely_phishing (v330 `miss_at`). */
+export function isAuditMiss(row: AuditJudged): boolean {
+  return (
+    isAuditWithheld(row) &&
+    Boolean(auditSampleOf(row.clone_watch_not_a_clone_samples)?.miss_at)
+  );
+}
+
+/**
+ * The row as a brand-attributed count may see it. Identity for every row that
+ * is not a withheld sample; for a withheld one, a COPY with the audit scan's
+ * facts removed (see above). Generic so reads with their own column list apply
+ * the same rule. A key the row does not carry stays absent.
+ */
+export function withholdAuditVerdict<
+  T extends AuditJudged & {
+    urlscan_classification?: string | null;
+    urlscan_evidence?: unknown;
+    urlscan_uuid?: string | null;
+    lifecycle_state?: string | null;
+  },
+>(row: T): T {
+  if (!isAuditWithheld(row)) return row;
+  const out: T = { ...row, urlscan_classification: null, urlscan_evidence: null };
+  if ("urlscan_uuid" in row) out.urlscan_uuid = null;
+  if (row.lifecycle_state === "monitoring") out.lifecycle_state = "detected";
+  return out;
+}
+
+/**
  * Rows that survive the cohort rules, applied to an already-fetched page.
  *
  * Split from the fetch so it is testable without a database — the FP rules are
  * where the judgement lives, and they were previously only reachable through a
  * live query.
+ *
+ * Every surviving row also passes through `withholdAuditVerdict`, so a cohort
+ * consumer cannot forget to do it and attribute a not-a-clone audit scan to a
+ * brand. The row is kept because membership is lexical. Only the audit's facts
+ * are removed.
  */
 export function applyCohortRules(rows: CloneAlertRow[]): CloneAlertRow[] {
-  return rows.filter(
+  return rows.map(withholdAuditVerdict).filter(
     (r) =>
       // Confirmed false positives only. Untriaged (null) rows are the majority
       // and are exactly what these surfaces exist to report.

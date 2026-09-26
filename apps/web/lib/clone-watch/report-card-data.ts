@@ -6,6 +6,8 @@ import {
   applyCohortRules,
   CLONE_COHORT_SELECT,
   CLONE_COHORT_SOURCE,
+  isAuditMiss,
+  isAuditWithheld,
   type CloneAlertRow,
 } from "@/lib/clone-watch/clone-cohort";
 import { monthWindow, priorWindow } from "@/lib/clone-watch/month-window";
@@ -91,7 +93,25 @@ async function fetchMonth(
   if (truncated) {
     throw new Error(`report-card incomplete: ${periodMonth} exceeds ${FETCH_LIMIT} rows`);
   }
-  return applyCohortRules(raw);
+  // #1256: the not-a-clone audit marker rides INSIDE this query
+  // (AUDIT_SAMPLE_EMBED in CLONE_COHORT_SELECT), so there is no second read
+  // that can fail on its own and leave the month unmasked. If the embed cannot
+  // be read, the fetch above throws and the edition retries. It never
+  // publishes an audit miss under the brand the classifier rejected.
+  const cohort = applyCohortRules(raw);
+  // The mask keeps the embed, so the cohort rows still say which were withheld.
+  const withheld = cohort.filter(isAuditWithheld);
+  if (withheld.length > 0) {
+    // warn = always shipped to Axiom. Rare, and it moves published numbers.
+    logger.warn("report-card: audit samples withheld from brand counts", {
+      period: periodMonth,
+      withheld: withheld.length,
+      misses: withheld.filter(isAuditMiss).length,
+      consequence:
+        "kept in clones; urlscan verdict/evidence not attributed to the rejected brand",
+    });
+  }
+  return cohort;
 }
 
 /**

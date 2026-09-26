@@ -4,6 +4,11 @@ import type {
   CloneSampleRow,
 } from "@/emails/BrandOutreachPilot";
 import { readAttribution } from "@/lib/clone-watch/attribution";
+import {
+  AUDIT_SAMPLE_EMBED,
+  withholdAuditVerdict,
+  type AuditSampleEmbed,
+} from "@/lib/clone-watch/clone-cohort";
 
 /**
  * Live clone-detection sample for the brand-outreach pilot email.
@@ -33,9 +38,17 @@ export const CLONE_SAMPLE_SIZE = 5;
  */
 export const MIN_REPORTED_CLONES_FOR_OUTREACH = 3;
 
-/** Columns we read — kept in one place so the select + tests stay in sync. */
+/**
+ * Columns we read — kept in one place so the select + tests stay in sync.
+ *
+ * The classification and audit-sample embeds exist only for
+ * `withholdAuditVerdict` (#1256). Without them, a not-a-clone audit miss would
+ * appear in this brand's pitch as a likely-phishing lookalike with a urlscan
+ * link, under the brand the classifier rejected.
+ */
 export const CLONE_SAMPLE_SELECT =
-  "candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, urlscan_uuid, attribution, submitted_to, lifecycle_state, first_seen_at";
+  "candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, urlscan_uuid, attribution, submitted_to, lifecycle_state, first_seen_at, clone_watch_classifications(is_clone), " +
+  AUDIT_SAMPLE_EMBED;
 
 /** Raw `shopfront_clone_alerts` row shape for the columns we select. */
 export interface RawCloneAlert {
@@ -52,6 +65,9 @@ export interface RawCloneAlert {
   submitted_to: Record<string, unknown> | null;
   lifecycle_state: string | null;
   first_seen_at: string | null;
+  /** Read only by `withholdAuditVerdict` (clone-cohort.ts). */
+  clone_watch_classifications?: { is_clone: boolean | null } | null;
+  clone_watch_not_a_clone_samples?: AuditSampleEmbed;
 }
 
 /** Compact "IP · ASN · CC" hosting line, or null when nothing was captured. */
@@ -81,7 +97,10 @@ export function isReportedRow(row: CloneSampleRow): boolean {
 }
 
 /** Map a raw alert row → the presentation-ready sample row. Pure. */
-export function shapeCloneAlert(raw: RawCloneAlert): CloneSampleRow {
+export function shapeCloneAlert(input: RawCloneAlert): CloneSampleRow {
+  // A not-a-clone audit sample keeps its place in the sample as a lexical
+  // lookalike, but with nothing the audit scan produced (#1256).
+  const raw = withholdAuditVerdict(input);
   const uuid = raw.urlscan_uuid ?? raw.urlscan_evidence?.uuid ?? null;
   return {
     domain: raw.candidate_domain ?? "",

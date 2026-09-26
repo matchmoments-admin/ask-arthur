@@ -1477,6 +1477,41 @@ branch fails CLOSED: only an explicit re-judgement to `is_clone=true` lets a
 sample weaponise — a NULL or missing classification stays measurement. If a
 sample is re-judged `is_clone=true`, the normal edges apply again.
 
+**Reporting keeps samples out of brand counts (#1256).** A sample's verdict is
+not a fact about the brand the classifier rejected. Before #1256, the monthly
+cohort counted `urlscan_classification` for every NRD alert. That would have
+put an audit miss in the published per-brand `likely_phishing` count, for
+example threesbrewingdirect.shop under ing.com.au.
+
+Every cohort read now embeds `clone_watch_not_a_clone_samples(miss_at)` in the
+same PostgREST request (`AUDIT_SAMPLE_EMBED` in `CLONE_COHORT_SELECT`,
+`apps/web/lib/clone-watch/clone-cohort.ts`). `applyCohortRules` passes every
+row through `withholdAuditVerdict`. A row is withheld when it is sampled and
+still `is_clone IS NOT TRUE`, the same predicate v330 uses. A withheld row:
+
+- stays in `clones` / `detected`, because it was a lexical match;
+- reads `urlscan_classification`, `urlscan_evidence` and `urlscan_uuid` as null,
+  so it counts as `unclassified`, like every unsampled not-a-clone;
+- has `lifecycle_state` `monitoring` read back as `detected`. The draw takes
+  only `detected` alerts, so the move to `monitoring` came from the audit scan.
+
+This covers every surface built on the cohort: the report card and summary
+row, the caption, `/clone-watch/[period]`, the monthly brand store
+(`buildTrendRows` → `write_clone_watch_monthly_stats`), targeting intelligence,
+the stewardship watch-list and the internal digest. The outreach pilot sample
+(`brand-outreach-pilot.ts`) and the month-end stock status (`month-end-stock.ts`)
+carry the same embed and apply the same predicate.
+
+When a month has withheld rows, the report-card fetch logs
+`report-card: audit samples withheld from brand counts` as an always-ship warn
+with `withheld` and `misses`. The misses themselves are counted per cohort key,
+not per brand, by `clone_watch_not_a_clone_audit_summary()`. An operator
+re-judgement to `is_clone=true` releases the sample into the brand counts on
+the next fold.
+
+A failed read never publishes a miss under the brand. The marker rides in the
+cohort query, so the month fetch throws and the job retries.
+
 **Prod, queried 2026-09-26.**
 
 - 607 `source='nrd'` alerts are `detected`, `is_clone=false`, with no urlscan
