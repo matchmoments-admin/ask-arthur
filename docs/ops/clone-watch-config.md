@@ -1298,6 +1298,17 @@ Up to 90 urlscan rows/run, as before (changed rows first, then risk order
 with the 20% stale-floor reserve on the URLSCAN clock). Eligible rows past the
 cap are left unstamped (`deferred`) and lead the next run.
 
+**Opaque shared fronts** (#1261 review): behind a shared anycast front, a
+parked→phishing flip does not move DNS. The /24 overlap reads "unchanged"
+straight through it. The review measured 58 of the 108 weaponised alerts with
+a known IP on Cloudflare, and 429 of the 1,192 pool rows. A read whose A/AAAA
+touches `SHARED_FRONT_RANGES` (`lib/clone-watch/recheck-dns-gate.ts`) is
+**opaque**. That list is the one place to add a front, and covers Cloudflare's
+published v4 ranges plus 2606:4700::/32 and 2a06:98c1::/32, GoDaddy's AWS pair
+3.33.130.190 / 15.197.148.33, and Vercel 76.76.21.0/24 and 216.198.79.0/24.
+Opaque rows get the **7-day floor at any age** and rank **first in stale
+fill**. They're counted as `dns_opaque`.
+
 **Stale fill** (decision on #1261): cap slots the gate leaves unused go to
 DNS-unchanged rows, oldest `last_rechecked_at` first (NULL first, risk as the
 tiebreak), always after every gate-eligible row. The lane therefore spends the
@@ -1319,7 +1330,7 @@ at the DNS cadence.
 
 **Reading a run** (Outcome Row metadata): `dns_checked`, `dns_unchanged`
 (urlscan calls saved), `dns_changed`, `dns_unknown`, `dns_no_baseline`,
-`floor_due`, `deferred`, `stale_fill`, `dns_unreached`, `dns_ms` (the DNS phase's wall
+`floor_due`, `deferred`, `stale_fill`, `dns_opaque`, `dns_unreached`, `dns_ms` (the DNS phase's wall
 clock — raise `RECHECK_DNS.limit` from this, the cadence wants ~1,000/run).
 `due_total` is now "due for a recheck of either kind". Expect
 `dns_no_baseline` ≈ the whole slice for the first ~5–6 days after deploy
@@ -1331,7 +1342,7 @@ meanwhile), then `dns_unchanged` + `stale_fill` to dominate, with `submitted` st
 SELECT created_at, metadata->>'dns_checked' checked, metadata->>'dns_unchanged' unchanged,
        metadata->>'dns_changed' changed, metadata->>'dns_unknown' unknown,
        metadata->>'dns_no_baseline' no_baseline, metadata->>'floor_due' floor_due,
-       metadata->>'submitted' submitted, metadata->>'deferred' deferred, metadata->>'stale_fill' stale_fill,
+       metadata->>'submitted' submitted, metadata->>'deferred' deferred, metadata->>'stale_fill' stale_fill, metadata->>'dns_opaque' opaque,
        metadata->>'due_total' due, metadata->>'dns_ms' dns_ms
 FROM cost_telemetry
 WHERE feature = 'shopfront_clone_recheck' AND created_at > now() - interval '3 days'

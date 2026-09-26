@@ -301,6 +301,9 @@ export interface UrlscanPlan {
     /** DNS-unchanged rows urlscanned anyway in leftover cap slots, oldest
      *  urlscan rescan first. `dns_unchanged` counts only the rows skipped. */
     stale_fill: number;
+    /** DNS reads on a shared front (SHARED_FRONT_RANGES): 7-day floor at any
+     *  age, first in stale fill. */
+    dns_opaque: number;
   };
 }
 
@@ -344,10 +347,15 @@ export function planUrlscanRechecks(
     floor_due: 0,
     deferred: 0,
     stale_fill: 0,
+    dns_opaque: 0,
   };
   for (const row of slice) {
     const read = byId.get(row.id);
-    const floorDue = isUrlscanFloorDue(row, nowMs);
+    // Opaque (shared front, #1261 review): DNS can't see a content flip, so
+    // the 7-day floor applies at any age.
+    const opaque = read?.opaque === true;
+    if (opaque) counts.dns_opaque++;
+    const floorDue = isUrlscanFloorDue(row, nowMs, opaque);
     if (floorDue) counts.floor_due++;
     if (read) {
       if (read.verdict === "changed") counts.dns_changed++;
@@ -382,11 +390,21 @@ export function planUrlscanRechecks(
   // It spends nothing new: the same 90 cap, pacing and cooldown. Filled rows
   // are scanned rows — they leave unchangedIds and get a fresh baseline.
   const fillRoom = Math.max(0, limit - first.length - rest.length);
+  // Opaque rows rank FIRST: for them DNS "unchanged" means nothing, so a
+  // rescan is the only way to see a flip.
+  const isOpaque = (id: number) => byId.get(id)?.opaque === true;
   const fill = slice
     .filter((r) => unchangedIds.includes(r.id))
     .sort((a, b) => {
-      const ta = a.last_rechecked_at ? Date.parse(a.last_rechecked_at) : -Infinity;
-      const tb = b.last_rechecked_at ? Date.parse(b.last_rechecked_at) : -Infinity;
+      const oa = isOpaque(a.id) ? 0 : 1;
+      const ob = isOpaque(b.id) ? 0 : 1;
+      if (oa !== ob) return oa - ob;
+      const ta = a.last_rechecked_at
+        ? Date.parse(a.last_rechecked_at)
+        : -Infinity;
+      const tb = b.last_rechecked_at
+        ? Date.parse(b.last_rechecked_at)
+        : -Infinity;
       if (ta !== tb) return ta - tb; // oldest urlscan rescan first, NULLs first
       return byRiskDesc(a, b);
     })
@@ -398,7 +416,8 @@ export function planUrlscanRechecks(
   // Changed rows lead the submit order, the fill trails it, so a wall-clock
   // stop falls on the no-signal tail, never on a DNS change.
   const scan = [...first, ...rest, ...fill];
-  counts.deferred = changed.length + eligible.length - first.length - rest.length;
+  counts.deferred =
+    changed.length + eligible.length - first.length - rest.length;
   return { scan, unchangedIds: stamped, counts };
 }
 

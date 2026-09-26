@@ -7,8 +7,11 @@ import {
 import {
   dnsFingerprint,
   gateVerdict,
+  isOpaqueProbe,
+  isSharedFrontAddress,
   isUrlscanFloorDue,
   readRecheckDns,
+  SHARED_FRONT_RANGES,
   type DnsRead,
 } from "@/lib/clone-watch/recheck-dns-gate";
 
@@ -49,6 +52,13 @@ import {
  *     urlscan rescan first …" fails; `fillRoom = limit` (ignore the cap) →
  *     "stale fill never displaces a gate-eligible row or exceeds the cap" and
  *     the no-room case fail.
+ *   - OPAQUE SHARED FRONTS (#1261 review): isUrlscanFloorDue ignoring
+ *     `opaque` → "an opaque row gets the 7-day floor at ANY age" and the
+ *     planner floor case fail; the planner not passing `opaque` to the floor →
+ *     "planner: an old opaque unchanged row …" fails; dropping the
+ *     104.16.0.0/13 entry from SHARED_FRONT_RANGES → the address, probe and
+ *     readRecheckDns cases fail; dropping the opaque-first key from the fill
+ *     sort → "stale fill ranks opaque rows first …" fails.
  *   - readRecheckDns: map a thrown probe to the baseline → "a probe that throws
  *     reads unknown" fails.
  */
@@ -458,15 +468,15 @@ describe("planUrlscanRechecks", () => {
     );
     expect(p.scan.map((r) => r.id)).toEqual([5, 2, 4, 3]);
     expect(p.unchangedIds).toEqual([1]);
-    expect(p.counts).toMatchObject({ stale_fill: 3, dns_unchanged: 1, dns_changed: 1 });
+    expect(p.counts).toMatchObject({
+      stale_fill: 3,
+      dns_unchanged: 1,
+      dns_changed: 1,
+    });
   });
 
   it("stale fill never displaces a gate-eligible row or exceeds the cap", () => {
-    const slice = [
-      row(1, { last_rechecked_at: daysAgo(6) }),
-      row(2),
-      row(3),
-    ];
+    const slice = [row(1, { last_rechecked_at: daysAgo(6) }), row(2), row(3)];
     const p = planUrlscanRechecks(
       slice,
       [read(1, "unchanged"), read(2, "unknown"), read(3, "no_baseline")],
@@ -476,5 +486,139 @@ describe("planUrlscanRechecks", () => {
     expect(p.scan.map((r) => r.id).sort()).toEqual([2, 3]);
     expect(p.unchangedIds).toEqual([1]);
     expect(p.counts.stale_fill).toBe(0);
+  });
+});
+
+// Opaque shared fronts (#1261 review). Behind Cloudflare / GoDaddy's AWS pair
+// / Vercel a parked→phishing flip does not move DNS — the /24 overlap reads
+// "unchanged" through the flip. 58 of 108 weaponised alerts with a known IP
+// were on Cloudflare. These rows get the 7-day floor at any age and lead the
+// stale fill.
+describe("opaque shared fronts", () => {
+  it("recognises addresses inside the listed ranges, and only those", () => {
+    for (const ip of [
+      "104.21.5.5", // 104.16.0.0/13
+      "172.67.180.1", // 172.64.0.0/13
+      "188.114.97.3", // 188.114.96.0/20
+      "162.159.1.1", // 162.158.0.0/15
+      "3.33.130.190",
+      "15.197.148.33", // GoDaddy AWS pair
+      "76.76.21.21",
+      "216.198.79.1", // Vercel
+      "2606:4700:3030::6815:1",
+      "2a06:98c1:3120::3",
+    ])
+      expect(isSharedFrontAddress(ip), ip).toBe(true);
+    for (const ip of [
+      "104.24.0.1", // just past 104.16.0.0/13
+      "3.33.130.191", // neighbour of the /32
+      "76.76.22.1",
+      "8.8.8.8",
+      "2606:4701::1",
+      "not-an-ip",
+      "",
+    ])
+      expect(isSharedFrontAddress(ip), ip).toBe(false);
+  });
+
+  it("every listed range parses and contains its own base address", () => {
+    expect(SHARED_FRONT_RANGES.length).toBeGreaterThanOrEqual(20);
+    for (const r of SHARED_FRONT_RANGES)
+      expect(isSharedFrontAddress(r.split("/")[0]!), r).toBe(true);
+  });
+
+  it("a probe is opaque when ANY A/AAAA address is on a front", () => {
+    expect(
+      isOpaqueProbe({
+        a: rec(["8.8.8.8", "104.21.5.5"]),
+        aaaa: null,
+        ns: rec(["n"]),
+      }),
+    ).toBe(true);
+    expect(
+      isOpaqueProbe({
+        a: err("ENODATA"),
+        aaaa: rec(["2606:4700::1"]),
+        ns: rec(["n"]),
+      }),
+    ).toBe(true);
+    expect(
+      isOpaqueProbe({
+        a: rec(["8.8.8.8"]),
+        aaaa: null,
+        ns: rec(["ns.cloudflare.com"]),
+      }),
+    ).toBe(false);
+    expect(isOpaqueProbe(null)).toBe(false);
+  });
+
+  it("an opaque row gets the 7-day floor at ANY age", () => {
+    const old = { last_rechecked_at: daysAgo(8), first_seen_at: daysAgo(60) };
+    expect(isUrlscanFloorDue(old, NOW)).toBe(false); // 30-day floor
+    expect(isUrlscanFloorDue(old, NOW, true)).toBe(true); // opaque → 7-day
+    expect(
+      isUrlscanFloorDue({ ...old, last_rechecked_at: daysAgo(6) }, NOW, true),
+    ).toBe(false);
+  });
+
+  it("readRecheckDns marks the read opaque", async () => {
+    const out = await readRecheckDns(
+      [{ id: 1, candidate_domain: "a.example", recheck_dns_fingerprint: null }],
+      { expired: () => false },
+      async () => ({ a: rec(["104.21.5.5"]), aaaa: null, ns: rec(["n"]) }),
+    );
+    expect(out.reads[0]).toMatchObject({ id: 1, opaque: true });
+  });
+
+  const slim = (id: number, over: Partial<SliceRow> = {}): SliceRow => ({
+    id,
+    candidate_domain: `c${id}.example`,
+    candidate_url: `https://c${id}.example`,
+    lifecycle_state: "declined",
+    last_rechecked_at: daysAgo(1),
+    first_seen_at: daysAgo(60),
+    recheck_dns_fingerprint: "fp",
+    risk: 10,
+    ...over,
+  });
+  const unchanged = (id: number, opaque: boolean): DnsRead => ({
+    id,
+    verdict: "unchanged",
+    fingerprint: "fp",
+    opaque,
+  });
+
+  it("planner: an old opaque unchanged row past 7 days is floor-scanned and counted", () => {
+    const p = planUrlscanRechecks(
+      [
+        slim(1, { last_rechecked_at: daysAgo(8) }),
+        slim(2, { last_rechecked_at: daysAgo(8) }),
+      ],
+      [unchanged(1, true), unchanged(2, false)],
+      1, // one slot: the floor must win it over the fill
+      NOW,
+    );
+    expect(p.scan.map((r) => r.id)).toEqual([1]);
+    expect(p.unchangedIds).toEqual([2]);
+    expect(p.counts).toMatchObject({
+      dns_opaque: 1,
+      floor_due: 1,
+      stale_fill: 0,
+    });
+  });
+
+  it("stale fill ranks opaque rows first, even ahead of an older plain rescan", () => {
+    const p = planUrlscanRechecks(
+      [
+        slim(1, { last_rechecked_at: daysAgo(5) }),
+        slim(2, { last_rechecked_at: daysAgo(2) }),
+      ],
+      [unchanged(1, false), unchanged(2, true)],
+      1,
+      NOW,
+    );
+    expect(p.scan.map((r) => r.id)).toEqual([2]);
+    expect(p.unchangedIds).toEqual([1]);
+    expect(p.counts).toMatchObject({ stale_fill: 1, dns_opaque: 1 });
   });
 });

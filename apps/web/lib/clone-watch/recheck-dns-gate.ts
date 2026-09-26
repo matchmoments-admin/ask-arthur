@@ -215,23 +215,142 @@ export function gateVerdict(
 }
 
 /**
+ * SHARED FRONTS — address ranges where DNS says nothing about what is served.
+ *
+ * WHY. The gate assumes a go-live moves DNS. Behind a shared anycast front it
+ * does not: a parked page and a phishing kit on Cloudflare resolve to the SAME
+ * Cloudflare /24s, so the fingerprint reads "unchanged" through the exact flip
+ * we exist to catch. Measured in the #1261 review (2026-09-27): 58 of the 108
+ * weaponised alerts with a known IP were on Cloudflare, and 429 of the 1,192
+ * pool rows. A row whose A/AAAA set touches one of these ranges is OPAQUE:
+ * it gets the 7-day urlscan floor at ANY age (isUrlscanFloorDue below) and
+ * ranks first in stale fill (planUrlscanRechecks, clone-watch-lifecycle-recheck.ts).
+ *
+ * ONE list — add a front here, nowhere else.
+ *   - Cloudflare: every published IPv4 range (cloudflare.com/ips-v4) plus the
+ *     two IPv6 blocks that front customer zones. The review named the first
+ *     five; the rest are the same anycast network, so leaving them out would
+ *     make "opaque" depend on which PoP answered.
+ *   - GoDaddy's AWS Global Accelerator pair (named in the #1261 review) — many
+ *     GoDaddy-hosted and GoDaddy-parked names resolve to exactly these two.
+ *   - Vercel's shared apex and anycast ranges.
+ */
+export const SHARED_FRONT_RANGES: readonly string[] = [
+  // Cloudflare IPv4
+  "104.16.0.0/13",
+  "172.64.0.0/13",
+  "188.114.96.0/20",
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "131.0.72.0/22",
+  // Cloudflare IPv6
+  "2606:4700::/32",
+  "2a06:98c1::/32",
+  // GoDaddy (AWS Global Accelerator pair)
+  "3.33.130.190/32",
+  "15.197.148.33/32",
+  // Vercel
+  "76.76.21.0/24",
+  "216.198.79.0/24",
+];
+
+function v4ToBigInt(ip: string): bigint | null {
+  const o = ip.split(".");
+  if (o.length !== 4) return null;
+  let n = BigInt(0);
+  for (const part of o) {
+    if (!/^\d{1,3}$/.test(part) || Number(part) > 255) return null;
+    n = (n << BigInt(8)) | BigInt(Number(part));
+  }
+  return n;
+}
+
+function v6ToBigInt(ip: string): bigint | null {
+  const s = ip.toLowerCase().split("%")[0]!;
+  if (!s.includes(":")) return null;
+  const [head, tail] = s.split("::") as [string, string | undefined];
+  const h = head ? head.split(":") : [];
+  const t = tail !== undefined && tail !== "" ? tail.split(":") : [];
+  const groups =
+    tail === undefined
+      ? h
+      : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g)))
+    return null;
+  return groups.reduce(
+    (n, g) => (n << BigInt(16)) | BigInt(parseInt(g, 16)),
+    BigInt(0),
+  );
+}
+
+type ParsedRange = { v6: boolean; base: bigint; bits: number };
+
+const PARSED_FRONTS: readonly ParsedRange[] = SHARED_FRONT_RANGES.map(
+  (cidr) => {
+    const [addr, len] = cidr.split("/") as [string, string];
+    const v6 = addr.includes(":");
+    const base = v6 ? v6ToBigInt(addr) : v4ToBigInt(addr);
+    if (base === null)
+      throw new Error(`SHARED_FRONT_RANGES: bad address ${cidr}`);
+    return { v6, base, bits: Number(len) };
+  },
+);
+
+/** Is this one address inside a shared front? Unparseable → false. */
+export function isSharedFrontAddress(ip: string): boolean {
+  const v6 = ip.includes(":");
+  const n = v6 ? v6ToBigInt(ip) : v4ToBigInt(ip.trim());
+  if (n === null) return false;
+  const width = v6 ? 128 : 32;
+  return PARSED_FRONTS.some((r) => {
+    if (r.v6 !== v6) return false;
+    const shift = BigInt(width - r.bits);
+    return n >> shift === r.base >> shift;
+  });
+}
+
+/**
+ * Opaque = ANY A or AAAA record sits on a shared front. "Any", not "all": a
+ * mixed set still routes some visitors through the front, where DNS cannot
+ * see a content change — the conservative reading costs only earlier rescans.
+ */
+export function isOpaqueProbe(
+  probe: Parameters<typeof dnsFingerprint>[0],
+): boolean {
+  if (!probe) return false;
+  const addrs = [probe.a, probe.aaaa].flatMap((l) =>
+    l && "records" in l ? l.records : [],
+  );
+  return addrs.some(isSharedFrontAddress);
+}
+
+/**
  * Is this row due a mandatory urlscan rescan? Keys on `last_rechecked_at` —
  * the URLSCAN recheck clock, which a DNS read never moves. A row never
  * rescanned, or with an unreadable clock or age, is floor-due: fail toward
- * scanning.
+ * scanning. An OPAQUE row (shared front — DNS cannot see its content change)
+ * gets the young 7-day floor at any age.
  */
 export function isUrlscanFloorDue(
   row: { last_rechecked_at: string | null; first_seen_at?: string | null },
   nowMs: number,
+  opaque = false,
 ): boolean {
   const last = row.last_rechecked_at ? Date.parse(row.last_rechecked_at) : NaN;
   const seen = row.first_seen_at ? Date.parse(row.first_seen_at) : NaN;
   if (!Number.isFinite(last) || !Number.isFinite(seen)) return true;
   const DAY = 86_400_000;
   const young = nowMs - seen < URLSCAN_FLOOR.youngAgeDays * DAY;
-  const floorDays = young
-    ? URLSCAN_FLOOR.youngFloorDays
-    : URLSCAN_FLOOR.oldFloorDays;
+  const floorDays =
+    young || opaque ? URLSCAN_FLOOR.youngFloorDays : URLSCAN_FLOOR.oldFloorDays;
   return nowMs - last >= floorDays * DAY;
 }
 
@@ -240,6 +359,8 @@ export interface DnsRead {
   /** null = inconclusive. */
   fingerprint: string | null;
   verdict: DnsGateVerdict;
+  /** An address sits on a shared front (SHARED_FRONT_RANGES). Absent = false. */
+  opaque?: boolean;
 }
 
 /**
@@ -267,8 +388,11 @@ export async function readRecheckDns(
       return;
     }
     let fingerprint: string | null;
+    let opaque = false;
     try {
-      fingerprint = dnsFingerprint(await probe(t.candidate_domain));
+      const result = await probe(t.candidate_domain);
+      fingerprint = dnsFingerprint(result);
+      opaque = isOpaqueProbe(result);
     } catch {
       fingerprint = null;
     }
@@ -276,6 +400,7 @@ export async function readRecheckDns(
       id: t.id,
       fingerprint,
       verdict: gateVerdict(t.recheck_dns_fingerprint, fingerprint),
+      opaque,
     });
   });
   return { reads, unreached };

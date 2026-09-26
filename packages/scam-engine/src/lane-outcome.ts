@@ -220,6 +220,16 @@ export interface LaneOutcome {
      *  urlscan rescan first — keeps DNS-silent flips on a bounded revisit.
      *  `dns_unchanged` counts only the unchanged rows actually skipped. */
     stale_fill?: number;
+    /** DNS reads whose A/AAAA sit on a shared front (Cloudflare, GoDaddy's
+     *  AWS pair, Vercel — SHARED_FRONT_RANGES): DNS cannot see a content
+     *  flip there, so they get the 7-day floor at any age and lead the fill. */
+    dns_opaque?: number;
+    /** Slice rows the DNS phase's budget stopped before; they stay due. */
+    dns_unreached?: number;
+    /** Size of the DNS slice offered this run (≤ RECHECK_DNS.limit). */
+    dns_slice?: number;
+    /** Wall clock of the DNS phase, ms — the evidence for tuning the limit. */
+    dns_ms?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
@@ -504,7 +514,10 @@ export async function recordLaneError<L extends LaneId>(
     metadata: {
       ...metadata,
       lane,
-      error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+      error: (error instanceof Error ? error.message : String(error)).slice(
+        0,
+        500,
+      ),
     },
   });
 }
