@@ -1505,8 +1505,9 @@ carry the same embed and apply the same predicate.
 When a month has withheld rows, the report-card fetch logs
 `report-card: audit samples withheld from brand counts` as an always-ship warn
 with `withheld` and `misses`. The misses themselves are counted per cohort key,
-not per brand, by `clone_watch_not_a_clone_audit_summary()`. An operator
-re-judgement to `is_clone=true` releases the sample into the brand counts on
+not per brand, by `clone_watch_not_a_clone_audit_summary()`. A
+re-classification to `is_clone=true`, or an operator confirmation
+(`tp_confirmed` / `tp_actioned`), releases the sample into the brand counts on
 the next fold.
 
 A failed read never publishes a miss under the brand. The marker rides in the

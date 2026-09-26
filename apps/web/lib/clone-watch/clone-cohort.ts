@@ -182,8 +182,9 @@ export function dedupeByCandidate<T extends { candidate_domain?: string | null }
  *
  * "Still judged not-a-clone" means `is_clone IS NOT TRUE`. That is the same
  * predicate v330 uses for `nac_audit` in list_clone_alerts_for_recheck and for
- * the weaponise gate in apply_clone_urlscan_verdict. An operator re-judgement
- * to is_clone=true releases the sample in both places. The rule covers misses
+ * the weaponise gate in apply_clone_urlscan_verdict. A re-classification to
+ * is_clone=true releases the sample in both places; an operator confirmation
+ * (tp_confirmed / tp_actioned) releases it from the brand counts here. The rule covers misses
  * (miss_at set) and benign or parked samples alike, because a parked verdict
  * from the audit says no more about the brand than a phishing one does.
  *
