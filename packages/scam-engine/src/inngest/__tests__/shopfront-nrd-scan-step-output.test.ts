@@ -47,13 +47,14 @@ function fixtureLines(
   n: number,
   seed: number,
   brands = AU_BRAND_WATCHLIST,
+  hitRate = 1 / 3000,
 ): string[] {
   const rand = mulberry32(seed);
   const alpha = "abcdefghijklmnopqrstuvwxyz0123456789";
   const lines: string[] = ["# newly registered domains fixture", ""];
   for (let i = 0; i < n; i++) {
     const tld = TLDS[Math.floor(rand() * TLDS.length)];
-    if (rand() < 1 / 3000) {
+    if (rand() < hitRate) {
       const b = brands[Math.floor(rand() * brands.length)];
       const token = b!.brand.toLowerCase().replace(/[^a-z0-9]/g, "");
       const lure = LURES[Math.floor(rand() * LURES.length)];
@@ -125,8 +126,13 @@ describe("scanNrdZip — step output at full-feed volume (#1228)", () => {
 });
 
 describe("scanNrdZip — equivalence with the old parse-then-match path", () => {
+  // 3,000 lines at a 1-in-100 lookalike rate (~30 hits, the real per-day
+  // count): the full-watchlist match costs ~0.2 ms/domain locally and ~9x that
+  // on a shared CI runner, and this test runs it TWICE — at 20,000 lines it
+  // took 72 s on CI, blew its 60 s timeout, and the still-running match then
+  // starved the next test into its 5 s timeout (main CI, 2026-09-26).
   it("finds exactly the old path's hits, in order, and counts every domain", async () => {
-    const buf = await zipOf(fixtureLines(20_000, 42));
+    const buf = await zipOf(fixtureLines(3_000, 42, AU_BRAND_WATCHLIST, 1 / 100));
     const [scan, old] = await Promise.all([
       scanNrdZip(buf, AU_BRAND_WATCHLIST),
       oldPathHits(buf),
