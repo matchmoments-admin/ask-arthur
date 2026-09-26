@@ -78,7 +78,10 @@ export function describeTotalMove(mom: MomLike): string | null {
     case "same":
       return `That's about the same as ${mom.priorLabel} (${m.prior} → ${m.current}) — within normal month-to-month variation.${tail}`;
     default: {
-      const size = m.pct !== null ? `${Math.abs(m.pct)}%` : `${Math.abs(m.delta)}`;
+      const size =
+        m.pct !== null
+          ? `${Math.abs(m.pct)}%`
+          : `${Math.abs(m.delta)} domain${Math.abs(m.delta) === 1 ? "" : "s"}`;
       return `That's ${m.kind} ${size} on ${mom.priorLabel} (${m.prior} → ${m.current}).${tail}`;
     }
   }
@@ -96,6 +99,8 @@ export function shortTotalMove(mom: MomLike): string | null {
 
 /** "Jun 2026 664 → Jul 2026 915 → Aug 2026 855" — published months only. */
 export function threeMonthLine(mom: MomLike): string {
+  // A matcher change makes the months different measurements.
+  if (mom.methodChanged) return "";
   const pts = (mom.series ?? []).filter(
     (p): p is { label: string; total: number } => p.total !== null,
   );

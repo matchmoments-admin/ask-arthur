@@ -235,8 +235,14 @@ export async function loadCardInputs(month?: string): Promise<CardInputs> {
   // null — the card then says its prior is a live recount / omits the caveat.
   const twoBack = priorWindow(prevWin.startIso);
   const [priorStore, sweptDomains] = await Promise.all([
-    readFrozenMonths(sb, [prevWin.periodMonth, twoBack.periodMonth]),
-    readSweptDomains(sb, window),
+    // This month too: if it is already frozen, its stamped matcher version
+    // is the one the comparison must use.
+    readFrozenMonths(sb, [window.periodMonth, prevWin.periodMonth, twoBack.periodMonth]),
+    // Only a CLOSED month: mid-month the feed so far is compared with a
+    // whole prior month and would always read "smaller".
+    Date.now() >= Date.parse(window.endIso)
+      ? readSweptDomains(sb, window)
+      : Promise.resolve(null),
   ]);
 
   return {

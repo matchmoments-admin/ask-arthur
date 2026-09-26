@@ -76,7 +76,13 @@ export interface TrendExclusions {
  * that publishes no trend also publishes no dangling caveat.
  */
 export function buildTrendDisclosure(x: TrendExclusions): string {
-  if (x.claimable === 0) return "";
+  if (x.claimable === 0) {
+    // Nothing to claim — but a matcher change must still be said, or its
+    // silence reads as a quiet month.
+    return (x.methodChanged ?? 0) > 0
+      ? "Month-on-month change is withheld this month: we changed how lookalikes are matched, so the two months are not comparable."
+      : "";
+  }
   const methodChanged = x.methodChanged ?? 0;
   const withheld =
     x.coverageStarted + x.coverageEnded + x.belowFloor + x.unknown + methodChanged;
@@ -84,7 +90,7 @@ export function buildTrendDisclosure(x: TrendExclusions): string {
   // withheld: they are comparable, just not a rise or a fall.
   const same =
     x.unchanged > 0
-      ? ` ${x.unchanged} more moved by no more than chance would, and read as about the same.`
+      ? ` ${x.unchanged} more moved by no more than chance would, and count as about the same.`
       : "";
   if (withheld === 0) {
     return `Month-on-month change is shown for all ${x.claimable} brands we monitored across both months that moved beyond chance.${same}`;
@@ -107,7 +113,7 @@ export function buildTrendDisclosure(x: TrendExclusions): string {
   }
   return (
     `Month-on-month change is shown only for the ${x.claimable} brands we monitored ` +
-    `across both months with enough volume to compare. ${withheld} are excluded: ` +
+    `across both months that moved beyond chance. ${withheld} are excluded: ` +
     `${reasons.join("; ")}.${same} Everything else here is a count, not a trend.`
   );
 }

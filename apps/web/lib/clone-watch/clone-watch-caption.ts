@@ -32,6 +32,11 @@ import { pickFurtherReading } from "@/lib/clone-watch/further-reading";
  * weaponisedAfterDecline, escalation only when escalated>0).
  */
 
+/** Safety cap for LinkedIn's ~3,000-character commentary (entity escaping). */
+export const CAPTION_MAX = 2_900;
+/** The longest hashtag line (lead tag #Superannuation), for the shed check. */
+const HASHTAG_BUDGET = "#ScamAwareness #CyberSecurity #Australia #Superannuation";
+
 export interface CloneWatchCaption {
   /** Document title shown as the carousel label, e.g. "Australian Clone Watch — June 2026". */
   documentTitle: string;
@@ -200,10 +205,10 @@ export function generateCloneWatchCaption(
   // last month", shared with the public page.
   const move = describeTotalMove(card.mom);
   const trend3 = threeMonthLine(card.mom);
-  const seriesLine =
+  const seriesLineWith = (withTrend3: boolean) =>
     move === null
       ? `This is month one. Next month you'll see whether ${card.total} is the floor or the trend.`
-      : `${move}${trend3 ? ` Three months: ${trend3}.` : ""} We publish this every month — the trend is the story.`;
+      : `${move}${withTrend3 && trend3 ? ` Three months: ${trend3}.` : ""} We publish this every month — the trend is the story.`;
 
   // ── Vendor outcomes (F5) — only once the month's cohort has witnessed
   // gradings; all-zero months keep the pre-F5 caption shape exactly.
@@ -235,27 +240,34 @@ export function generateCloneWatchCaption(
   // describes.
   const trendDisclosure = buildTrendDisclosure(card.brandTrends.excluded);
 
-  const body = [
-    hook,
-    method,
-    findingsBlock,
-    tldLine,
-    globalsLine,
-    outcomesBlock,
-    classifierCaveat,
-    trendDisclosure,
-    STATIC_LESSON,
-    scamwatchCta,
-    seriesLine,
-    // Immediately after the MoM sentence, because that sentence is what a
-    // restatement contradicts: it quotes the prior month's total, and a reader
-    // holding last month's post sees a different number with no explanation.
-    card.note,
-    STATIC_CLOSING_Q,
-    STATIC_DISCLAIMER,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const assemble = (seriesLine: string) =>
+    [
+      hook,
+      method,
+      findingsBlock,
+      tldLine,
+      globalsLine,
+      outcomesBlock,
+      classifierCaveat,
+      trendDisclosure,
+      STATIC_LESSON,
+      scamwatchCta,
+      seriesLine,
+      // Immediately after the MoM sentence, because that sentence is what a
+      // restatement contradicts: it quotes the prior month's total, and a reader
+      // holding last month's post sees a different number with no explanation.
+      card.note,
+      STATIC_CLOSING_Q,
+      STATIC_DISCLAIMER,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+  // The three-month line is the least essential sentence (the delta, its
+  // caveats and the disclosure all stand without it), so it is the one shed
+  // when a heavy month would overrun the cap (#1226).
+  let body = assemble(seriesLineWith(true));
+  if (`${body}\n\n${HASHTAG_BUDGET}`.length > CAPTION_MAX) body = assemble(seriesLineWith(false));
 
   // ── Hashtags (lead tag rotates on the standout) ───────────────────────────
   const leadTag = sp.kind === "super_fund" ? "#Superannuation" : "#FraudPrevention";

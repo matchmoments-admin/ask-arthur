@@ -488,9 +488,14 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
     priorFrozen
       ? (priorFrozen.byBrand.get(brand) ?? 0)
       : (priorByBrand.get(brand)?.detected ?? 0);
+  // The reported month's OWN matcher version: its stamped value when it is
+  // already frozen (a re-compute after a later bump must not suppress an
+  // edition that was comparable), else the code in force now.
+  const currentFrozen = input.priorStore?.get(periodMonth) ?? null;
+  const currentMatcher = currentFrozen?.matcherVersion ?? LEXICAL_MATCHER_VERSION;
   const methodChanged =
     priorFrozen?.matcherVersion != null &&
-    priorFrozen.matcherVersion !== LEXICAL_MATCHER_VERSION;
+    priorFrozen.matcherVersion !== currentMatcher;
 
   let total = 0;
   let reportedToNetcraft = 0;
@@ -541,6 +546,11 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   const priorPeriod = priorYm.toISOString().slice(0, 7);
   const twoBack = priorWindow(prevWin.startIso);
   const twoBackFrozen = input.priorStore?.get(twoBack.periodMonth) ?? null;
+  // A series point from a different matcher is not the same measurement.
+  const seriesTwoBack =
+    twoBackFrozen && priorFrozen && twoBackFrozen.matcherVersion === priorFrozen.matcherVersion
+      ? twoBackFrozen
+      : null;
   const verdicts: TrendVerdict[] = [];
   const verdictByBrand = new Map<string, TrendVerdict>();
   const claimable: BrandTrendGate["claimable"] = [];
@@ -563,9 +573,11 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
         priorClones,
         delta: v.delta,
         pct: v.pct,
+        // Published months only: absent = not watched / not published
+        // (v325 writes a zero row for every watched brand), never 0.
         series: [
-          twoBackFrozen ? (twoBackFrozen.byBrand.get(brand) ?? 0) : null,
-          priorClones,
+          seriesTwoBack ? (seriesTwoBack.byBrand.get(brand) ?? null) : null,
+          priorFrozen ? priorClones : null,
           m.detected,
         ],
       });
@@ -609,8 +621,8 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
     methodChanged,
     feedShift,
     series: [
-      { label: twoBack.label, total: twoBackFrozen ? twoBackFrozen.total : null },
-      { label: prevWin.label, total: priorFrozen || prior.total > 0 ? prior.total : null },
+      { label: twoBack.label, total: seriesTwoBack ? seriesTwoBack.total : null },
+      { label: prevWin.label, total: priorFrozen ? priorFrozen.total : null },
       { label, total },
     ],
   };

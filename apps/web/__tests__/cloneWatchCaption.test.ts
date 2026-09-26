@@ -450,12 +450,21 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
       totalDelta: 228,
       totalPct: 28,
       brandsDelta: 26,
+      // #1226: every new sentence at its longest — feed-shift caveat and a
+      // three-month line with long labels, plus the "about the same" count.
+      noise: false,
+      feedShift: { priorSwept: 2_100_000, currentSwept: 1_400_000, pct: -33 },
+      series: [
+        { label: "September 2026", total: 1032 },
+        { label: "September 2026", total: 1032 },
+        { label: "September 2026", total: 1032 },
+      ],
     },
     brandTrends: {
       claimable: [],
       excluded: {
         claimable: 38,
-        unchanged: 0,
+        unchanged: 25,
         coverageStarted: 7,
         coverageEnded: 2,
         belowFloor: 108,
@@ -481,6 +490,17 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
       },
     },
   };
+
+  it("sheds the three-month line, never the disclosure, when a heavy month overruns (#1226)", () => {
+    const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
+    expect(c.body).not.toContain("Three months:");
+    expect(c.body).toContain("33% smaller"); // the feed caveat stays
+    const light = generateCloneWatchCaption(
+      { ...WORST, brandTrends: { ...WORST.brandTrends, excluded: { ...WORST.brandTrends.excluded, unchanged: 0 } }, mom: { ...WORST.mom, feedShift: null } },
+      "https://askarthur.au/method",
+    );
+    expect(light.body).toContain("Three months:"); // kept when it fits
+  });
 
   it("fits, with the disclosure intact", () => {
     const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");

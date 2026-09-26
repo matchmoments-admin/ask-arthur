@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildTrendDisclosure } from "@/lib/clone-watch/targeting-copy";
 import {
   describeTotalMove,
   shortTotalMove,
@@ -45,7 +46,7 @@ describe("trend-copy", () => {
 
   it("prints the absolute change when there is no percentage (below the floor)", () => {
     const m = mom({ priorTotal: 3, totalDelta: 9, totalPct: null, noise: false });
-    expect(describeTotalMove(m)).toBe("That's up 9 on July 2026 (3 → 12).");
+    expect(describeTotalMove(m)).toBe("That's up 9 domains on July 2026 (3 → 12).");
   });
 
   it("says nothing comparative across a matcher change", () => {
@@ -63,6 +64,15 @@ describe("trend-copy", () => {
     expect(describeTotalMove(m)).toContain("feed we sweep was 33% smaller than in July 2026");
   });
 
+  it("no three-month line across a matcher change (not the same measurement)", () => {
+    const series = [
+      { label: "Jun 2026", total: 664 },
+      { label: "Jul 2026", total: 915 },
+      { label: "Aug 2026", total: 855 },
+    ];
+    expect(threeMonthLine(mom({ series, methodChanged: true }))).toBe("");
+  });
+
   it("three-month line only from published months", () => {
     const series = [
       { label: "Jun 2026", total: 664 },
@@ -71,5 +81,21 @@ describe("trend-copy", () => {
     ];
     expect(threeMonthLine(mom({ series }))).toBe("Jun 2026 664 → Jul 2026 915 → Aug 2026 855");
     expect(threeMonthLine(mom({ series: [{ label: "Jun 2026", total: null }, ...series.slice(1)] }))).toBe("");
+  });
+});
+
+
+describe("buildTrendDisclosure — a matcher change is said even with nothing to claim", () => {
+  it("says the months are not comparable instead of going silent", () => {
+    const d = buildTrendDisclosure({
+      claimable: 0,
+      unchanged: 0,
+      coverageStarted: 0,
+      coverageEnded: 0,
+      belowFloor: 100,
+      unknown: 0,
+      methodChanged: 40,
+    });
+    expect(d).toMatch(/not comparable/);
   });
 });

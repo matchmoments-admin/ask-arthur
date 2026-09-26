@@ -364,6 +364,58 @@ describe("buildReportCard — month-over-month reads the FROZEN prior month (#12
   });
 });
 
+describe("month-over-month — review fixes (#1247)", () => {
+  const cov = [coveredThroughout("bonds.com.au")];
+
+  it("judges the matcher by the reported month's STAMPED version when it is frozen", () => {
+    // August re-computed after a hypothetical v5 bump: both months were v4.
+    const card = buildReportCard(
+      inputs({
+        rows: clones("bonds.com.au", 60, "cur"),
+        coverage: cov,
+        priorStore: new Map([
+          ["2026-08-01", frozen({ "bonds.com.au": 60 }, { matcherVersion: "v3" })],
+          ["2026-07-01", frozen({ "bonds.com.au": 30 }, { matcherVersion: "v3" })],
+        ]),
+      }),
+    );
+    expect(card.mom.methodChanged).toBe(false);
+  });
+
+  it("drops a series point from a different matcher, and never shows a live recount as published", () => {
+    const card = buildReportCard(
+      inputs({
+        rows: clones("bonds.com.au", 60, "cur"),
+        coverage: cov,
+        priorStore: new Map([
+          ["2026-07-01", frozen({ "bonds.com.au": 30 })],
+          ["2026-06-01", frozen({ "bonds.com.au": 12 }, { matcherVersion: "v3" })],
+        ]),
+      }),
+    );
+    expect(card.mom.series!.map((p) => p.total)).toEqual([null, 30, 60]);
+    const live = buildReportCard(
+      inputs({ rows: clones("bonds.com.au", 60, "cur"), priorRows: clones("bonds.com.au", 16, "pri"), coverage: cov }),
+    );
+    expect(live.mom.series![1]!.total).toBeNull();
+    expect(live.brandTrends.claimable[0]!.series![1]).toBeNull();
+  });
+
+  it("a brand absent from a published month is null in its series, not 0", () => {
+    const card = buildReportCard(
+      inputs({
+        rows: clones("bonds.com.au", 60, "cur"),
+        coverage: cov,
+        priorStore: new Map([
+          ["2026-07-01", frozen({ "bonds.com.au": 30 })],
+          ["2026-06-01", frozen({ "other.com.au": 12 })],
+        ]),
+      }),
+    );
+    expect(card.brandTrends.claimable[0]!.series).toEqual([null, 30, 60]);
+  });
+});
+
 describe("foldFrozenMonths", () => {
   it("sums per month, lower-cases brands, counts only targeted brands, keeps provenance", () => {
     const got = foldFrozenMonths([
