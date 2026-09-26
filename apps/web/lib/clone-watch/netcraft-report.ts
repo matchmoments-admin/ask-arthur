@@ -203,7 +203,10 @@ export async function postNetcraftBulk(
 
 /**
  * Record an ACCEPTED auto-lane bulk submission on each alert: the submission
- * ledger (`submitted_to.netcraft`, triage `tp_actioned`) and — where the SQL
+ * ledger (`submitted_to.netcraft`, triage `tp_actioned` — the RPC stamps
+ * `triage_source = 'machine'` unless the alert was a human `tp_confirmed`, so a
+ * lane-actioned deferral never reads as a human true positive; v338, #1263)
+ * and — where the SQL
  * lifecycle guard allows it — `detected|monitoring → reported`. The advance is
  * best-effort: most auto submissions are already `weaponised` (v284 evidence
  * gate), and `weaponised → reported` is not an edge, so a refusal is expected
