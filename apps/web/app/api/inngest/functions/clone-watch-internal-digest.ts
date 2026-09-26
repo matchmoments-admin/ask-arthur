@@ -191,7 +191,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
         };
       }
       // Operator recipient — prefer the clone-watch admin inbox
-      // (CLONE_WATCH_SHADOW_RECIPIENT, the same var clone-watch-auto-triage uses),
+      // (CLONE_WATCH_SHADOW_RECIPIENT, which the retired clone-watch-auto-triage also read),
       // falling back to the brand-stewardship shadow recipient. Decoupled so the
       // internal digest does NOT depend on BRAND_STEWARDSHIP_SHADOW_RECIPIENT —
       // setting that var would also redirect real brand-report sends to the shadow

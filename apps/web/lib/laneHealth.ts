@@ -326,20 +326,6 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       (n(o, "total_chunks") > 0 &&
         n(o, "failed_chunks") >= n(o, "total_chunks")),
   },
-  "clone-watch-auto-triage": {
-    crons: ["0 13 * * *"],
-    flags: ["cloneWatchAutoTriage"],
-    consecutive: 2,
-    // The lane's job is to CLEAR the queue: park the weak tail, confirm the
-    // strict one. A run that parks nothing while the pending queue is the
-    // reason it exists is the silent-zero shape. `eligible>0 ∧ confirmed=0 ∧
-    // offline=0` is the other: rows passed every gate and none was actioned
-    // or explained by liveness — which is exactly how a mis-set
-    // AUTO_CONFIRM_MIN_CONFIDENCE would present.
-    shape: "eligible>0 ∧ confirmed=0 ∧ offline=0",
-    silentZero: (o) =>
-      n(o, "eligible") > 0 && n(o, "confirmed") === 0 && n(o, "offline") === 0,
-  },
   "shopfront-clone-netcraft-auto/auto": {
     crons: NETCRAFT_AUTO_CRONS,
     flags: ["shopfrontCloneNetcraftAuto", "shopfrontCloneSubmitNetcraft", "shopfrontCloneOutreach"],
@@ -406,12 +392,17 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   "shopfront-clone-haiku-preclassify": {
     // Event-driven (the daily fan-out), so absence is watched by the
     // ABSENCE_WATCHES `classify` stream below, which proves vendor calls
-    // happen. This row judges the BATCH: alerts in, nothing classified.
+    // happen. This row judges the BATCH: alerts in, nothing classified —
+    // or the auto-park (#1230, moved in from the retired auto-triage) failed.
+    // The park is fail-soft so a batch never fails over it; this is what
+    // stops fail-soft from being silent (the alerts would just stay pending).
     expectEvery: Number.POSITIVE_INFINITY,
     flags: ["shopfrontClonePreclassify"],
     consecutive: 1,
-    shape: "alerts>0 ∧ classified=0",
-    silentZero: (o) => n(o, "alerts") > 0 && n(o, "classified") === 0,
+    shape: "alerts>0 ∧ classified=0, or auto_park_failed",
+    silentZero: (o) =>
+      (n(o, "alerts") > 0 && n(o, "classified") === 0) ||
+      o.auto_park_failed === true,
   },
   "clone-watch-report-summary": {
     // Monthly (1st, 11:00). Absence is THE signal for a monthly Lane: the

@@ -3,14 +3,13 @@ import {
   classifyDnsLookups,
   classifyHostLookups,
   classifySubmitPrecheck,
-  isCandidateLive,
   probeLivenessDetailed,
   probeLivenessVerdict,
 } from "@/lib/clone-watch/liveness";
 
 // v248 — the probe is three-valued: true = proved serving, false = proved gone
-// (NXDOMAIN only), null = inconclusive. isCandidateLive keeps the conservative
-// boolean view (live === true) so auto-triage's auto-confirm bar is unchanged.
+// (NXDOMAIN only), null = inconclusive. (The boolean isCandidateLive view
+// retired with auto-triage, its only caller — #1230.)
 // Every test injects resolveGone so no case touches a live resolver.
 
 const GONE = { resolveGone: async () => true };
@@ -141,24 +140,6 @@ describe("probeLivenessVerdict", () => {
       resolveGone: async () => null,
     });
     expect(v.live).toBeNull();
-  });
-});
-
-describe("isCandidateLive", () => {
-  it("keeps the conservative bar: only a proved-live host is true", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (String(url).includes("up")) return new Response("", { status: 403 });
-        if (String(url).includes("5xx")) return new Response("", { status: 502 });
-        throw transportError("ECONNREFUSED");
-      }),
-    );
-    expect(await isCandidateLive("https://up.example/")).toBe(true);
-    // Inconclusive reads as false here — auto-triage must not auto-confirm on a
-    // host it could not actually read.
-    expect(await isCandidateLive("https://5xx.example/")).toBe(false);
-    expect(await isCandidateLive("https://dead.example/", GONE)).toBe(false);
   });
 });
 

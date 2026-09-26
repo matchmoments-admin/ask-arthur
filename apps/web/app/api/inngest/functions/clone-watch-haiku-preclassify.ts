@@ -9,6 +9,7 @@ import {
 } from "@askarthur/scam-engine/inngest/events";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { autoParkNotClones } from "@/lib/clone-watch/auto-park";
 import { isPreclassifyBraked } from "@/lib/clone-watch/jev-classify-one";
 import {
   ClassificationOutputSchema,
@@ -72,6 +73,15 @@ import { laneGate } from "@/lib/laneHealth";
  * header + v311's), yet it gates four worklist RPCs. The shadow lane
  * exists to be measured by `clone_watch_jev_calibration()`; the decision
  * rule and delete plan live in docs/ops/clone-watch-config.md.
+ *
+ * AUTO-PARK (#1230, moved here from the retired clone-watch-auto-triage):
+ * at the end of `classify-batch`, after every classification in the batch is
+ * persisted, the batch's is_clone=false alerts that carry only a weak signal
+ * are parked pending → needs_investigation in ONE bulk UPDATE
+ * (lib/clone-watch/auto-park.ts — the eligibility cut is unchanged). No new
+ * step boundary. A failed park is logged and counted (`auto_park_failed` on
+ * the Outcome Row); it never fails the batch, and the alert simply stays
+ * `pending` for a human.
  */
 
 /** Parse + dedupe a batch's events: one entry per alertId (Inngest dedupes
@@ -109,7 +119,7 @@ export const PRECLASSIFY_BATCH_TIMEOUT = "30s";
 const BATCH_WALL_CLOCK_MS = 200_000;
 
 // inngest-finish-budget: 2 boundaries — classify-batch (budgeted 200 s, the
-// brake read rides inside it), log-outcome.
+// brake read and the auto-park UPDATE ride inside it), log-outcome.
 export const cloneWatchHaikuPreclassify = inngest.createFunction(
   {
     id: "shopfront-clone-haiku-preclassify",
@@ -160,7 +170,13 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
         BATCH_WALL_CLOCK_MS,
         async (budget) => {
           if (await isPreclassifyBraked()) {
-            return { braked: true as const, mode: preclassifyMode(), results: [] };
+            return {
+              braked: true as const,
+              mode: preclassifyMode(),
+              results: [],
+              autoParked: 0,
+              autoParkError: null,
+            };
           }
           const mode = preclassifyMode();
           const out: AlertResult[] = [];
@@ -178,7 +194,25 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
               });
             }
           });
-          return { braked: false as const, mode, results: out };
+          // Auto-park (#1230): every classification above is persisted, so
+          // this acts on the verdicts just written. Inside the step so a
+          // replay does not re-run it; never throws (lib/clone-watch/auto-park.ts).
+          const park = await autoParkNotClones(
+            sb,
+            out.flatMap((r) => (r.ok && !r.is_clone ? [r.alertId] : [])),
+          );
+          if (park.error) {
+            logger.warn("clone-watch preclassify: auto-park failed", {
+              error: park.error,
+            });
+          }
+          return {
+            braked: false as const,
+            mode,
+            results: out,
+            autoParked: park.parked,
+            autoParkError: park.error,
+          };
         },
       );
       // A run memoised by the previous code (before the brake fold) returned
@@ -190,6 +224,8 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
             braked: false as const,
             mode: preclassifyMode(),
             results: memoised as AlertResult[],
+            autoParked: 0,
+            autoParkError: null,
           }
         : memoised;
 
@@ -206,6 +242,9 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       }
 
       const { results, mode } = batch;
+      // `?? 0`: a run memoised before #1230 carries no auto-park fields.
+      const autoParked = batch.autoParked ?? 0;
+      const autoParkFailed = Boolean(batch.autoParkError);
       const classified = results.filter((r) => r.ok).length;
       const failed = results.length - classified;
       const unreached = alerts.length - results.length;
@@ -217,6 +256,8 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
           unreached,
           invalid,
           mode,
+          auto_parked: autoParked,
+          auto_park_failed: autoParkFailed,
         }),
       );
       logger.info("clone-watch preclassify: batch done", {
@@ -226,8 +267,17 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
         failed,
         unreached,
         invalid,
+        autoParked,
       });
-      return { ok: true, alerts: alerts.length, classified, failed, unreached, results };
+      return {
+        ok: true,
+        alerts: alerts.length,
+        classified,
+        failed,
+        unreached,
+        autoParked,
+        results,
+      };
     },
   ),
 );

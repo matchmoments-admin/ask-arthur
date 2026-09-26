@@ -260,10 +260,7 @@ describe("report evidence", () => {
 
 // Keep internal confirmation separate from a real recipient delivery.
 vi.mock("@/lib/bots/telegram/sendAdminMessage", () => ({ sendAdminTelegramMessage: vi.fn() }));
-vi.mock("@/lib/clone-watch/feed-entity", () => ({ feedCloneEntity: async () => {} }));
-vi.mock("@/lib/clone-watch/liveness", () => ({ isCandidateLive: async () => true }));
 import { cloneWatchNotifyBrand } from "@/app/api/inngest/functions/clone-watch-notify-brand";
-import { cloneWatchAutoTriage } from "@/app/api/inngest/functions/clone-watch-auto-triage";
 
 it.each(["shadow_summary", "fraud_inbox"])("handles a legacy %s notification stamp correctly", async (channel) => {
   mocks.rpc.mockResolvedValue({ data: null, error: null });
@@ -277,21 +274,6 @@ it.each(["shadow_summary", "fraud_inbox"])("handles a legacy %s notification sta
     ? { brand: "Brand", channel_type: "fraud_inbox", recipient: "abuse@brand.example" }
     : fn() } });
   expect(mocks.rpc.mock.calls.some(([name]) => name === "enqueue_clone_alert_notification")).toBe(channel === "shadow_summary");
-});
-
-it("records confirmation without a delivery stamp when shadow email is disabled", async () => {
-  vi.stubEnv("CLONE_WATCH_SHADOW_RECIPIENT", "");
-  vi.stubEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT", "");
-  const run = cloneWatchAutoTriage as unknown as (ctx: unknown) => Promise<unknown>;
-  await run({ step: { run: (name: string, fn: () => unknown) => {
-    if (name === "auto-park-weak-non-clones") return 0;
-    if (name === "select-eligible") return [{ id: 1, candidate_domain: "clone.example", candidate_url: "https://clone.example", inferred_target_domain: "brand.example" }];
-    return fn();
-  } } });
-  const stamp = mocks.rpc.mock.calls.find(([name]) => name === "merge_clone_alert_submission")?.[1];
-  expect(stamp?.p_key).toBe("auto_triage");
-  expect(stamp?.p_value.status).toBe("confirmed");
-  expect(stamp?.p_value.sent_at).toBeUndefined();
 });
 
 it.each([

@@ -17,7 +17,6 @@ import {
   toJevRpcArgs,
 } from "@/lib/clone-watch/jev-preclassify";
 import {
-  AUTO_CONFIRM_MIN_CONFIDENCE,
   IS_CLONE_MIN_P,
   RISK_INDICATOR_MIN_P,
   WORKLIST_MIN_CONFIDENCE,
@@ -313,7 +312,6 @@ describe("toClassificationRow (ADR-0026 — the v157 shape from Jev answers)", (
 
   it("thresholds are ordered so a gate can never admit a non-clone", () => {
     expect(IS_CLONE_MIN_P).toBeLessThanOrEqual(WORKLIST_MIN_CONFIDENCE);
-    expect(WORKLIST_MIN_CONFIDENCE).toBeLessThan(AUTO_CONFIRM_MIN_CONFIDENCE);
-    expect(AUTO_CONFIRM_MIN_CONFIDENCE).toBeLessThanOrEqual(1);
+    expect(WORKLIST_MIN_CONFIDENCE).toBeLessThanOrEqual(1);
   });
 });

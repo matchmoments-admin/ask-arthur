@@ -412,7 +412,7 @@ paged on 7 of 13 days for lanes that ran fine. Skip-paths (flag off, brake
 engaged, cooldown, no DB) still write nothing on purpose: a disabled lane
 _should_ read as absent. Lanes with **no
 per-run cost row** (notify-brand, notify-weaponised, enforcement-plan/-execute,
-auto-triage, reemergence-monitor, enrich-attribution, report-summary, the
+reemergence-monitor, enrich-attribution, report-summary, the
 three digests, scan-one) are deliberately NOT in the roster (the per-candidate
 submit-netcraft lane that used to be listed here was deleted 2026-09-23) —
 a predicate over rows that never exist would be a guard that reads as
@@ -584,8 +584,48 @@ deploy). Parked 2026-09-26: `shopfront-clone-notify-brand-prepare` (no brand
 contact until the #1237 readiness gate; 100% `no_unbatched_rows`),
 `shopfront-clone-fp-cluster-digest` (no input since 2026-09-04). Also parked,
 outside the roster: `known-brands-discover` (100% `all_probed`; its cron line
-is commented in the function). `clone-watch-auto-triage` is retired
-separately, after #1238, which works the same `is_clone=false` rows.
+is commented in the function). `clone-watch-auto-triage` is **retired**, not
+parked — see the next section.
+
+### Auto-park lives in the pre-classifier (#1230, 2026-09-26)
+
+`clone-watch-auto-triage` (daily 13:00) is **deleted**. Its confirm half
+confirmed **0 alerts ever** (`triage_notes LIKE 'auto-triage:%'` = 0, prod
+2026-09-26), and brand contact is on hold until the #1237 readiness gate. Its
+one live effect was the **auto-park**: `pending` NRD alerts the pre-classifier
+judged `is_clone=false` whose primary signal is weak (not confusable /
+levenshtein) → `triage_status='needs_investigation'` with the note
+`auto-park: pre-classifier is_clone=false + weak …` (reversible from the admin
+triage UI; no event, no fan-out). 244 rows carry that note; the last was
+2026-09-23 13:00.
+
+- **Where it runs now:** `shopfront-clone-haiku-preclassify`, at the end of the
+  `classify-batch` step, on that batch's `is_clone=false` alerts — one SELECT +
+  one bulk UPDATE, `triage_status='pending'` re-checked in the UPDATE's WHERE.
+  Code: `apps/web/lib/clone-watch/auto-park.ts` (`isAutoParkEligible` — the cut
+  is unchanged, carried over test-for-test in `cloneWatchAutoPark.test.ts`).
+  No new step boundary, no flag of its own (it runs whenever the
+  pre-classifier does).
+- **Fail-soft, not silent:** a failed park never fails the batch; the Outcome
+  Row (`shopfront_clone_preclassify` / `batch`) carries `auto_parked` and
+  `auto_park_failed`, and the health digest pages on `auto_park_failed`.
+- **Why moving it fixed something:** auto-triage read `.limit(200)` of an
+  UNORDERED pending set and filtered after. With 938 pending NRD rows it
+  parked 0 on 09-24 and 09-25 while 48 eligible rows sat in the queue. The
+  per-batch park has no worklist to starve.
+- **Backlog:** the 48 rows (prod 2026-09-26: 35 Haiku-judged, 13 Jev-judged,
+  first seen 2026-08-25 .. 09-25) are parked once by
+  `apps/web/scripts/backfill-auto-park.ts` (dry-run by default, `--apply` to
+  write; same `autoParkNotClones` write path; idempotent).
+- **Retired with it:** `FF_CLONE_WATCH_AUTO_TRIAGE` (no reader — delete from
+  Vercel), `AUTO_CONFIRM_MIN_CONFIDENCE`, the `CloneWatchRunSummary` email (never
+  sent), `isCandidateLive` (its only caller). `CLONE_WATCH_SHADOW_RECIPIENT`
+  stays (the internal digest reads it). Historical `shopfront_clone_auto_triage`
+  cost rows stay in `cost_telemetry`; nothing reads them.
+- **Interaction with #1238:** the not-a-clone audit sample (PR #1249, open at
+  the time of writing) draws from `is_clone=false` alerts excluding only
+  `triage_status='fp'`, so a parked (`needs_investigation`) alert is still
+  sampled.
 
 ### One declaration per Lane (2026-09-24)
 
@@ -1002,7 +1042,7 @@ accumulate.
 ### Reporter liveness pre-check (F3, three-valued since v248)
 
 Before filing, the issue reporter GETs each candidate URL
-(`lib/clone-watch/liveness.ts`, shared with auto-triage). All-dead uuid →
+(`lib/clone-watch/liveness.ts`). All-dead uuid →
 non-terminal `netcraft_issue.recheck_after` (+72h; revived sites re-enter,
 permanent deadness converges via the 30-day `submitted_at` window) — the
 one-per-submission issue slot is never spent on a dead site. Partial-live →
@@ -1012,8 +1052,7 @@ files the live subset; dead candidates stamp `skipped: 'dead_at_probe'`
 
 **Verdict semantics (v248).** The probe returns `true` / `false` / `null`, and
 **only NXDOMAIN is `false`**. Callers apply their own policy: the issue reporter
-files on `live !== false`; auto-triage keeps the conservative bar via
-`isCandidateLive()` (`live === true`).
+files on `live !== false`; a conservative caller reads `live === true`.
 
 | observation                                        | verdict | reason              |
 | -------------------------------------------------- | ------- | ------------------- |
@@ -1752,14 +1791,14 @@ selector re-fans tomorrow) — the Haiku path's recovery semantics, unchanged.
 
 **Thresholds — one home:** `apps/web/lib/clone-watch/preclassify-thresholds.ts`
 (`IS_CLONE_MIN_P` 0.4 · `WORKLIST_MIN_CONFIDENCE` 0.4 — urlscan-submit, dormant
-sweep, netcraft-auto · `AUTO_CONFIRM_MIN_CONFIDENCE` 0.8 — auto-triage ·
-`RISK_INDICATOR_MIN_P` 0.5). `preclassifyThresholds.test.ts` fails if a
+sweep, netcraft-auto · `RISK_INDICATOR_MIN_P` 0.5; `AUTO_CONFIRM_MIN_CONFIDENCE`
+0.8 retired with auto-triage, #1230). `preclassifyThresholds.test.ts` fails if a
 consumer grows a local literal. The evidence for each number is in the module
 header. **Retune** = edit the module, re-run the gate simulation below, PR.
 
 **Rollback:** set `FF_CLONE_WATCH_JEV_PRIMARY=false` on Vercel prod (PR with
 `[build]`). The Haiku path + Jev shadow tail resume exactly as before; rows Jev
-already wrote keep `model_id='jev-…'`; the gates at 0.4 / 0.8 then read Haiku's
+already wrote keep `model_id='jev-…'`; the 0.4 gates then read Haiku's
 confidence (≤ 5 historical Haiku rows sit in [0.4, 0.7)). The shadow tail has no
 absence watch of its own in rollback mode (accepted, unattended).
 

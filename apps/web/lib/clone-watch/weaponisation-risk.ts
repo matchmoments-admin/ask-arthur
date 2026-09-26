@@ -55,7 +55,7 @@ export interface WeaponisationRisk {
 }
 
 /** Primary signal_type of an alert's signals[] (the strongest/first signal).
- *  Canonical home since F3 — auto-triage re-exports for its strict bar. */
+ *  Canonical home since F3; also read by the auto-park cut (lib/clone-watch/auto-park.ts). */
 export function primarySignalType(signals: unknown): string | null {
   if (!Array.isArray(signals) || signals.length === 0) return null;
   const s = signals[0];
@@ -83,7 +83,7 @@ const URLSCAN_PRIOR_DEFAULT = 6; // unscanned/null ≈ unresolved
 const HIGH_RISK_INTENTS = new Set(["credential_phishing", "payment_fraud"]);
 const INTENT_POINTS = 10;
 
-/** Deliberate-deception signals (matches auto-triage's strict bar);
+/** Deliberate-deception signals (the auto-park cut's STRONG_SIGNALS);
  *  substring is the high-FP class. */
 const SIGNAL_POINTS: Record<string, number> = {
   confusable: 12,

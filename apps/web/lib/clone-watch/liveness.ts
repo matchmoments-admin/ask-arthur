@@ -2,12 +2,13 @@ import { Resolver } from "node:dns/promises";
 import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
 
 /**
- * Clone-watch liveness probing — shared by auto-triage (confirm a clone is
- * still serving before auto-confirming) and the Netcraft issue reporter
- * (never spend a one-per-submission issue slot on a dead site).
+ * Clone-watch liveness probing — used by the Netcraft issue reporter (never
+ * spend a one-per-submission issue slot on a dead site), the submit DNS
+ * precheck and re-emergence.
  *
- * Moved verbatim from clone-watch-auto-triage.ts (F3); auto-triage re-exports
- * so its callers and tests are unchanged.
+ * Moved from clone-watch-auto-triage.ts (F3). Auto-triage retired 2026-09-26
+ * (#1230) and took its boolean `isCandidateLive` view with it (no other
+ * caller); a caller wanting that conservative bar reads `.live === true`.
  *
  * ── Three-valued, 2026-07-26 ────────────────────────────────────────────────
  * The original probe collapsed EVERY fetch rejection into `false`, so NXDOMAIN,
@@ -30,7 +31,7 @@ import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
  * DNS is the only honest test we control.
  *
  * Callers apply their own policy over the same verdict:
- *   - auto-triage keeps the CONSERVATIVE bar via isCandidateLive() (live === true)
+ *   - a CONSERVATIVE caller ("proved serving") reads live === true
  *   - the issue reporter files on live !== false (never waste the slot on a
  *     confirmed-dead host, but never silently drop a live one either)
  */
@@ -423,19 +424,6 @@ export async function probeLivenessVerdict(
   }
 }
 
-/**
- * Conservative boolean view — "is this host PROVED to be serving?".
- * Inconclusive reads as false, so auto-triage's strict auto-confirm bar is
- * unchanged by the three-valued rewrite. Do NOT use this where the question is
- * "is this host dead?" — use probeLivenessVerdict and test `live === false`.
- */
-export async function isCandidateLive(
-  url: string,
-  deps: LivenessDeps = {},
-): Promise<boolean> {
-  return (await probeLivenessVerdict(url, deps)).live === true;
-}
-
 /** Bounded-concurrency map over unique URLs. Never throws. */
 async function probeMap<T>(
   urls: string[],
@@ -465,8 +453,8 @@ async function probeMap<T>(
  * The boolean-map variant this replaced (`probeLiveness`) lost its last caller
  * when the issue reporter moved to verdicts, and a batch helper that discards
  * the reason is the exact shape that made the July false-dead incident
- * undiagnosable. Callers wanting the conservative view compose
- * `isCandidateLive` themselves, or read `.live === true` off the verdict.
+ * undiagnosable. Callers wanting the conservative view read `.live === true`
+ * off the verdict.
  */
 export async function probeLivenessDetailed(
   urls: string[],

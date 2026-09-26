@@ -1,7 +1,7 @@
 // Platform Entity bridge — the one module that turns a weaponised Clone Alert
 // into a Platform Entity (scam_entities domain + hosting IP, plus a scam_urls
-// row) and back again. Every caller — the weaponised.v1 consumer, auto-triage,
-// the admin triage route — crosses this seam; the write itself is the v309
+// row) and back again. Every caller — the weaponised.v1 consumer (feed-platform)
+// and the admin triage route — crosses this seam; the write itself is the v309
 // RPC pair so the two rows and the ledger stamp are one transaction.
 //
 // Gated FF_CLONE_WATCH_FEED_ENTITIES. BLAST-RADIUS: scam_entities and

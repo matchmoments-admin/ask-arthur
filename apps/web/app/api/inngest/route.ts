@@ -62,7 +62,6 @@ import { cloneWatchReemergenceMonitor } from "./functions/clone-watch-reemergenc
 import { cloneWatchUrlscanSubmit } from "./functions/clone-watch-urlscan-submit";
 import { cloneWatchUrlscanRetrieve } from "./functions/clone-watch-urlscan-retrieve";
 import { cloneWatchUrlscanScanOne } from "./functions/clone-watch-urlscan-scan-one";
-import { cloneWatchAutoTriage } from "./functions/clone-watch-auto-triage";
 import { cloneWatchEnrichAttribution } from "./functions/clone-watch-enrich-attribution";
 // PR-B2 — daily batch builder + Telegram approval flow (v151)
 import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-brand-prepare";
@@ -135,7 +134,8 @@ const appFunctions = [
   cloneWatchUrlscanSubmit,
   cloneWatchUrlscanRetrieve,
   cloneWatchUrlscanScanOne,
-  cloneWatchAutoTriage,
+  // clone-watch-auto-triage retired 2026-09-26 (#1230) — its auto-park now
+  // runs inside shopfront-clone-haiku-preclassify.
   cloneWatchEnrichAttribution,
   // Clone-watch approval-gated daily-batch builder (v151)
   cloneWatchNotifyBrandPrepare,
