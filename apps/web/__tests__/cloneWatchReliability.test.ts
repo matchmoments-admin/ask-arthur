@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(), from: vi.fn(), send: vi.fn(), submit: vi.fn(), log: vi.fn(),
-  elapsed: vi.fn(), pages: vi.fn(),
+  elapsed: vi.fn(), pages: vi.fn(), dns: vi.fn(),
 }));
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({ inngest: {
   createFunction: (_config: unknown, _trigger: unknown, handler: unknown) => handler,
@@ -31,6 +31,12 @@ vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/cost-telemetry", () => ({ logCost: mocks.log, logCostAsync: mocks.log }));
+// v334: the recheck lane DNS-reads its slice before urlscan. No live resolver
+// in tests — default null (inconclusive → scanned, i.e. the pre-v334 path).
+vi.mock("@/lib/clone-watch/liveness", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/clone-watch/liveness")>()),
+  probeStockDns: mocks.dns,
+}));
 
 import { cloneWatchUrlscanRetrieve } from "@/app/api/inngest/functions/clone-watch-urlscan-retrieve";
 import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
@@ -67,6 +73,7 @@ beforeEach(() => {
   mocks.rpc.mockResolvedValue({ data: [], error: null });
   mocks.from.mockReturnValue(query({ data: [], count: 0, error: null }));
   mocks.submit.mockResolvedValue({ kind: "submitted" });
+  mocks.dns.mockResolvedValue(null);
 });
 
 describe("worker recovery", () => {
@@ -206,6 +213,64 @@ describe("worker recovery", () => {
         ? { data: null, error: { message: "boom" } }
         : { data: null, error: null });
     await expect(invoke(cloneWatchLifecycleRecheck)).rejects.toThrow("mark_clone_alerts_rechecked failed for 1 alerts: boom");
+  });
+  // v334 (#1229 part 2a) end to end through the handler: the DNS gate decides
+  // the submit order (a DNS change leads), leftover cap slots go to unchanged
+  // rows as stale fill, every scanned row gets its new baseline, and a failed
+  // DNS write is loud. The "unchanged rows are stamped, not scanned" half
+  // needs a full cap (90 paced submits) and is pinned in recheckDnsGate.test.ts.
+  // Go-red (2026-09-27): passing `slice` instead of `plan.scan` to
+  // submitCandidateBatch fails the submit-order assertion; dropping the
+  // record-dns step fails the record assertions; swallowing its error fails
+  // the throw.
+  it("urlscans the changed row first, fills the cap with unchanged ones, and writes baselines", async () => {
+    const recent = new Date(Date.now() - 86_400_000).toISOString();
+    const young = new Date(Date.now() - 5 * 86_400_000).toISOString();
+    const FP_SAME = "v1|a=1.1.1.0/24|aaaa=-|ns=ns.same";
+    const candidates = [1, 2, 3].map(id => ({
+      id, candidate_url: `https://c${id}.example`, candidate_domain: `c${id}.example`,
+      lifecycle_state: "declined", last_rechecked_at: recent, first_seen_at: young,
+      recheck_dns_fingerprint: FP_SAME, queue_clock_at: recent,
+    }));
+    mocks.rpc.mockImplementation(async name => ({ data: name === "list_clone_alerts_for_recheck" ? candidates : null, error: null }));
+    // c3's A record moved; c1 and c2 read exactly as at their last rescan.
+    mocks.dns.mockImplementation(async (host: string) => ({
+      a: { records: [host === "c3.example" ? "203.0.113.9" : "1.1.1.1"] },
+      aaaa: null,
+      ns: { records: ["ns.same"] },
+    }));
+    await invoke(cloneWatchLifecycleRecheck);
+
+    // The changed row leads; the two unchanged rows ride the leftover cap as
+    // stale fill (oldest rescan first — tied here, so id order), not stamped.
+    expect(mocks.submit.mock.calls.map((c) => (c[0] as { id: number }).id)).toEqual([3, 1, 2]);
+    expect(stampedIds()?.slice().sort()).toEqual([1, 2, 3]);
+    const rec = mocks.rpc.mock.calls.filter(([n]) => n === "record_clone_recheck_dns");
+    expect(rec).toHaveLength(1);
+    const FP_NEW = "v1|a=203.0.113.0/24|aaaa=-|ns=ns.same";
+    expect(rec[0]![1]).toEqual({
+      p_unchanged_ids: [],
+      p_scanned: expect.arrayContaining([
+        { id: 3, fp: FP_NEW },
+        { id: 1, fp: FP_SAME },
+        { id: 2, fp: FP_SAME },
+      ]),
+    });
+    const outcome = mocks.log.mock.calls
+      .map((c) => c[0] as { feature?: string; metadata?: Record<string, unknown> })
+      .find((r) => r.feature === "shopfront_clone_recheck");
+    expect(outcome?.metadata).toMatchObject({
+      rechecked: 3, submitted: 3, dns_checked: 3, dns_unchanged: 0, dns_changed: 1,
+      stale_fill: 2, dns_unknown: 0, dns_no_baseline: 0, floor_due: 0, deferred: 0,
+    });
+
+    mocks.rpc.mockReset();
+    mocks.rpc.mockImplementation(async name => name === "list_clone_alerts_for_recheck"
+      ? { data: candidates, error: null }
+      : name === "record_clone_recheck_dns"
+        ? { data: null, error: { message: "gone" } }
+        : { data: null, error: null });
+    await expect(invoke(cloneWatchLifecycleRecheck)).rejects.toThrow("record_clone_recheck_dns failed: gone");
   });
   // From #1124 to #1141 the submit loop's budget was a spanning one measured
   // from event.ts. A cron event's ts is the scheduled tick; the fn reaches

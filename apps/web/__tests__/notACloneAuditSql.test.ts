@@ -67,6 +67,11 @@ beforeAll(async () => {
   await db.exec(migration("migration-v307-clone-scan-atomic-completion.sql"));
   await db.exec(migration("migration-v328-recheck-due-total.sql"));
   await db.exec(migration("migration-v330-clone-not-a-clone-audit-sample.sql"));
+  // v334 re-creates list_clone_alerts_for_recheck (DNS gate). Loaded so the
+  // "v330 recheck worklist" cases below run against the CURRENT body — the
+  // audit cadence must survive the rewrite.
+  await db.exec(migration("migration-v331-clone-watch-batch-writes.sql"));
+  await db.exec(migration("migration-v334-recheck-dns-change-gate.sql"));
 }, 30_000);
 afterAll(async () => db?.close());
 beforeEach(async () =>

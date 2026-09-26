@@ -194,17 +194,22 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     flags: ["shopfrontCloneRecheck", "shopfrontCloneUrlscan"],
     consecutive: 2,
     shape:
-      "pool>0 ∧ rechecked=0 (not quota), or nothing submitted while real submits failed",
+      "pool>0 ∧ rechecked=0 ∧ dns_unchanged=0 (not quota), or nothing submitted while real submits failed",
     // One rule for both urlscan lanes: a run with ZERO successful submits and
     // at least one GENUINE submit failure is broken, whatever else happened
     // (429s and DNS skips don't excuse it). A pure-quota run (failures 0) is
     // left to quotaExhausted. An all-rate-limited run rechecks nothing by
     // design (rows left unstamped to retry first). Rows before 2026-09-24
     // carry no rate_limited (n() → 0) and judge as before.
+    // v334: a run whose whole DNS slice read UNCHANGED urlscans nothing by
+    // design — it stamped every row it read, which is the lane working. It is
+    // silent only if it also stamped nothing (dns_unchanged = 0). Rows before
+    // v334 carry no dns_unchanged (n() → 0) and judge as before.
     silentZero: (o) =>
       (n(o, "pool") > 0 &&
         n(o, "rechecked") === 0 &&
-        n(o, "rate_limited") === 0) ||
+        n(o, "rate_limited") === 0 &&
+        n(o, "dns_unchanged") === 0) ||
       (n(o, "rechecked") > 0 &&
         n(o, "submitted") === 0 &&
         n(o, "submit_failed") > 0),

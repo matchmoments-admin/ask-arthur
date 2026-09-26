@@ -193,8 +193,43 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
-    /** Rows due in total (v328 window count). null = not returned. */
+    /** Rows due in total (v328 window count). null = not returned. Since
+     *  v334 the queue clock is GREATEST(urlscan clock, DNS clock), so this is
+     *  "due for a recheck of either kind" — the DNS gate's backlog. Kept as
+     *  ONE number rather than split into due_urlscan/due_dns: urlscan demand
+     *  is decided per run AFTER the DNS read, so its backlog is `deferred`. */
     due_total?: number | null;
+    /** v334 DNS gate (#1229 part 2a, recheck-dns-gate.ts). All absent on
+     *  quiet runs and rows written before v334. */
+    /** Rows of the DNS slice actually read (unreached ones excluded). */
+    dns_checked?: number;
+    /** Fingerprint unchanged since the last rescan and not floor-due: NO
+     *  urlscan, DNS stamp only. This is real work — a run of only these is a
+     *  healthy run, not a silent zero (LANE_SHAPES). */
+    dns_unchanged?: number;
+    dns_changed?: number;
+    /** A query SERVFAILed / timed out: urlscanned (the gate fails open). */
+    dns_unknown?: number;
+    /** No baseline yet (never rescanned since v334): urlscanned. */
+    dns_no_baseline?: number;
+    /** Offered rows owed a mandatory rescan whatever DNS said (7 d / 30 d). */
+    floor_due?: number;
+    /** Eligible for urlscan but past the cap; unstamped, they lead next run. */
+    deferred?: number;
+    /** DNS-unchanged rows urlscanned anyway in leftover cap slots, oldest
+     *  urlscan rescan first — keeps DNS-silent flips on a bounded revisit.
+     *  `dns_unchanged` counts only the unchanged rows actually skipped. */
+    stale_fill?: number;
+    /** DNS reads whose A/AAAA sit on a shared front (Cloudflare, GoDaddy's
+     *  AWS pair, Vercel — SHARED_FRONT_RANGES): DNS cannot see a content
+     *  flip there, so they get the 7-day floor at any age and lead the fill. */
+    dns_opaque?: number;
+    /** Slice rows the DNS phase's budget stopped before; they stay due. */
+    dns_unreached?: number;
+    /** Size of the DNS slice offered this run (≤ RECHECK_DNS.limit). */
+    dns_slice?: number;
+    /** Wall clock of the DNS phase, ms — the evidence for tuning the limit. */
+    dns_ms?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
@@ -479,7 +514,10 @@ export async function recordLaneError<L extends LaneId>(
     metadata: {
       ...metadata,
       lane,
-      error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+      error: (error instanceof Error ? error.message : String(error)).slice(
+        0,
+        500,
+      ),
     },
   });
 }
