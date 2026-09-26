@@ -39,7 +39,9 @@ describe("clone lifecycle spec", () => {
     // complexity on, and that classifyByUrlState mirrors. A weaponised clone
     // that a later vendor pass grades benign must NOT become `declined` again
     // — that would erase the observation the escalation lane is built on.
-    expect(nextStates("weaponised")).toEqual(["taken_down"]);
+    // v329 added the second exit: witnessed offline → dormant (never
+    // taken_down, which every reader renders as "actioned by Netcraft").
+    expect(nextStates("weaponised").sort()).toEqual(["dormant", "taken_down"]);
     expect(canTransition("weaponised", "declined")).toBe(false);
     expect(canTransition("weaponised", "monitoring")).toBe(false);
     expect(canTransition("weaponised", "detected")).toBe(false);

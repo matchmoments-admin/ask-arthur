@@ -12,6 +12,8 @@
  *   apply_netcraft_reconcile       (v249) — a CASE inside a bare UPDATE, with
  *                                          its own no-downgrade set
  *   mark_stale_clone_alerts_dormant(v285/286) — a raw UPDATE
+ *   record_weaponised_liveness     (v329) — weaponised → dormant on a
+ *                                          confirmed NXDOMAIN
  *   NO_DOWNGRADE_STATES / classifyByUrlState (netcraft-urls.ts) — a TS mirror
  *                                          of v249, existing only because SQL
  *                                          functions have no unit-test seam
@@ -112,7 +114,8 @@ export type LifecycleTrigger =
   | "urlscan_verdict"
   | "netcraft_submit"
   | "netcraft_reconcile"
-  | "stale_sweep";
+  | "stale_sweep"
+  | "liveness_sweep";
 
 export interface LifecycleEdge {
   from: CloneLifecycleState;
@@ -128,7 +131,8 @@ export interface LifecycleEdge {
  *
  * The two rules worth stating in prose because they are what the guards spend
  * their complexity on:
- *   - NO DOWNGRADE: once `weaponised`, the only exit is `taken_down`. A
+ *   - NO DOWNGRADE: once `weaponised`, the only exits are `taken_down`
+ *     (vendor actioned) and, since v329, `dormant` (witnessed offline). A
  *     later benign vendor verdict must NOT move it back to declined —
  *     `apply_netcraft_reconcile` enforces this and `classifyByUrlState`
  *     mirrors it.
@@ -160,6 +164,11 @@ export const LIFECYCLE_EDGES: readonly LifecycleEdge[] = [
 
   // aged out without ever being scanned (v285/v286)
   { from: "detected", to: "dormant", trigger: "stale_sweep", because: "passed the 90-day scan horizon unscanned" },
+
+  // witnessed offline (v329, record_weaponised_liveness). NOT taken_down: every
+  // reader of taken_down says "actioned by Netcraft" / "Blocklisted", and a
+  // site that stopped resolving was not. offline_since dates it.
+  { from: "weaponised", to: "dormant", trigger: "liveness_sweep", because: "stopped resolving — NXDOMAIN on two DNS reads >= 12 h apart" },
 ];
 
 /** The question that used to take five file reads. */

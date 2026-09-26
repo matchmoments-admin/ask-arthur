@@ -26,6 +26,7 @@ import {
 } from "@/lib/clone-watch/netcraft-issue-report";
 import {
   fetchNetcraftSubmissionUrls,
+  isSubmissionProcessing,
   NETCRAFT_URL_STATE,
   selectFalseNegativeCandidates,
   type PendingAlert,
@@ -296,6 +297,8 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         hasIssues: 0,
         transientErrors: 0,
         notYetDeferred: 0,
+        // #1148: uuids Netcraft was still processing — deferred, never POSTed.
+        processingDeferred: 0,
         permanentRejects: 0,
         drained: 0,
         livePosts: 0,
@@ -396,6 +399,25 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             status: fetched.status,
           });
           continue; // transient — retried next run (no stamp)
+        }
+
+        // #1148 — Netcraft has not finished this submission. Checked BEFORE
+        // the no-escalatable pre-filter: a still-processing batch's
+        // state_counts reads only `processing`, which that filter drained as a
+        // terminal `no_escalatable_state` before Netcraft had graded anything.
+        // report_issue would 400 "wait until fully processed" anyway — the one
+        // body behind every autobrake trip this lane has had (#1157). Same
+        // deferral as that 400 (transient_state, 24h, bounded rounds);
+        // processing measured 0 min – 12.1 h, so the next daily run sees it
+        // done. No POST, no liveness probe, no stamp that could drain it.
+        if (isSubmissionProcessing(fetched.submissionState)) {
+          counts.processingDeferred++;
+          if (!dryRun) {
+            await step.run(`defer-processing-${uuid}`, () =>
+              bulkDefer(allIds, "transient_state", TRANSIENT_RECHECK_MS),
+            );
+          }
+          continue;
         }
 
         // state_counts pre-filter said the batch has no escalatable state.

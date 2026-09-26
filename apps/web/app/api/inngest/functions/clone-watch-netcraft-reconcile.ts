@@ -16,6 +16,16 @@ import {
 } from "@/lib/clone-watch/netcraft-urls";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
 import { html, joinHtml } from "@askarthur/utils/html";
+import {
+  readWeaponisedLiveness,
+  WEAPONISED_LIVENESS,
+  type LivenessTarget,
+} from "@/lib/clone-watch/weaponised-liveness";
+import {
+  buildVendorGapPage,
+  VENDOR_GAP_ESCALATION,
+  type VendorGapRow,
+} from "@/lib/clone-watch/vendor-gap-escalation";
 
 /**
  * Clone-Watch — Netcraft PER-URL lifecycle reconciler (PR3.1, Part A).
@@ -58,6 +68,17 @@ import { html, joinHtml } from "@askarthur/utils/html";
  * time-to-takedown KPI (their real takedown time is unknowable). New clones,
  * observed daily from submission, get an accurate (to one cadence) takedown_at.
  *
+ * v329 (#1234) — the lane is also the OUTCOME observer for weaponised clones,
+ * in two steps that run on every run, quiet Netcraft worklist or not:
+ *   - liveness-sweep: a DNS-only read of every weaponised alert (no urlscan
+ *     quota, no 30-day window). NXDOMAIN twice >= 12 h apart moves it to
+ *     `dormant` with a witnessed `offline_since` (weaponised-liveness.ts,
+ *     record_weaponised_liveness). 142 weaponised on 2026-09-26, 63 NXDOMAIN.
+ *   - escalate-vendor-gap: a weaponised clone Netcraft still grades clean
+ *     after its own escalation path ran out pages the operator, then is
+ *     stamped `submitted_to.vendor_gap` (vendor-gap-escalation.ts). 76 met
+ *     the bar on 2026-09-26; none had ever reached a human lever.
+ *
  * See docs/plans/clone-watch-brand-story-reporting.md §3 Part A.
  */
 
@@ -79,14 +100,18 @@ const FETCH_CONCURRENCY = 4;
 const FETCH_WALL_CLOCK_MS = 180_000;
 const CADENCE_HOURS = 24;
 const MAX_AGE_DAYS = 30;
+// v329: in-step budget for the weaponised DNS sweep. 142 names at 16 in
+// flight measured ~10 s (2026-09-26); a lookup caps at 4 s per query.
+const LIVENESS_WALL_CLOCK_MS = 60_000;
 
 interface ReconcileGroup {
   netcraft_uuid: string;
   alerts: ReconcileAlert[];
 }
 
-// inngest-finish-budget: 6 boundaries — load-worklist, fetch-all (budgeted
-// 180 s), apply-all, page-on-outage, log-cost, log-cost-quiet (exclusive).
+// inngest-finish-budget: 8 boundaries — load-worklist, fetch-all (budgeted
+// 180 s), apply-all, page-on-outage, liveness-sweep (budgeted 60 s, v329),
+// escalate-vendor-gap (v329), log-cost, log-cost-quiet (exclusive).
 export const cloneWatchNetcraftReconcile = inngest.createFunction(
   {
     id: "shopfront-clone-netcraft-reconcile",
@@ -94,11 +119,11 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     retries: 2,
     singleton: { mode: "skip" },
     concurrency: { limit: 1 },
-    // 8m: 6 counted boundaries × 30 s queue wait + the 180 s in-step fetch
-    // budget + slack (ADR-0019; inngestFinishBudgets.test.ts). Was 15m when
-    // every uuid cost two queued steps; the batched shape (v316) removes that
-    // queue-wait multiplier, which was the long pole.
-    timeouts: { finish: "8m" },
+    // 9m: 8 counted boundaries × 30 s queue wait + the 180 s fetch and 60 s
+    // liveness in-step budgets + slack (ADR-0019; inngestFinishBudgets.test.ts).
+    // Was 15m when every uuid cost two queued steps (v316), 8m until v329
+    // added the liveness sweep and the vendor-gap escalation.
+    timeouts: { finish: "9m" },
   },
   [
     // Twice daily (v284). Two 24-uuid runs (v316); unchanged verdicts back off
@@ -118,6 +143,112 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
 
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+      // v329 — weaponised outcome observation (#1234). Runs on BOTH paths
+      // below: a quiet Netcraft worklist says nothing about the weaponised
+      // set. Both steps soft-fail — an RPC error (e.g. this code deployed
+      // before v329 is applied) becomes a null count plus the message in the
+      // Outcome Row, never a throw, so the Netcraft half still writes its row.
+      const observeWeaponisedOutcomes = async () => {
+        const liveness = await budgetedStep(
+          step,
+          "liveness-sweep",
+          LIVENESS_WALL_CLOCK_MS,
+          async (budget) => {
+            const { data, error } = await sb.rpc("list_weaponised_for_liveness", {
+              p_limit: WEAPONISED_LIVENESS.limit,
+              p_cadence_hours: WEAPONISED_LIVENESS.cadenceHours,
+            });
+            if (error) return { error: `list: ${error.message}` };
+            const rows =
+              (data as Array<LivenessTarget & { due_total: number }> | null) ?? [];
+            // due_total is counted before the RPC's LIMIT: a truncated sweep
+            // reports what it left behind, not a clean zero.
+            const due = rows.length ? Number(rows[0]!.due_total) : 0;
+            const sweep = await readWeaponisedLiveness(rows, budget);
+            const zero = { checked: 0, present: 0, gone_unconfirmed: 0, offline_confirmed: 0, inconclusive: 0 };
+            if (sweep.reads.length === 0) return { due, unreached: sweep.unreached, ...zero };
+            const rec = await sb.rpc("record_weaponised_liveness", {
+              p_results: sweep.reads,
+              p_confirm_hours: WEAPONISED_LIVENESS.confirmHours,
+            });
+            if (rec.error) return { error: `record: ${rec.error.message}` };
+            const r = (Array.isArray(rec.data) ? rec.data[0] : rec.data) as
+              | Record<string, number>
+              | undefined;
+            return {
+              due,
+              unreached: sweep.unreached,
+              checked: Number(r?.checked ?? 0),
+              present: Number(r?.present ?? 0),
+              gone_unconfirmed: Number(r?.gone_unconfirmed ?? 0),
+              offline_confirmed: Number(r?.offline_confirmed ?? 0),
+              inconclusive: Number(r?.inconclusive ?? 0),
+            };
+          },
+        );
+
+        // List → page → mark, in ONE step. A failed page throws before
+        // anything is stamped, so the step retry re-lists the same rows
+        // (at-least-once); a memoised success never re-pages. Stamping first
+        // would make a lost Telegram message a lost escalation.
+        const vendorGap = await step.run("escalate-vendor-gap", async () => {
+          const { data, error } = await sb.rpc("list_netcraft_vendor_gap", {
+            p_min_issue_age_hours: VENDOR_GAP_ESCALATION.minIssueAgeHours,
+            p_limit: VENDOR_GAP_ESCALATION.limit,
+          });
+          if (error) {
+            return { escalated: null, paged: false, error: `list: ${error.message}` };
+          }
+          const rows = (data as VendorGapRow[] | null) ?? [];
+          const message = buildVendorGapPage(rows);
+          if (!message) return { escalated: 0, paged: false };
+          const sent = await sendAdminTelegramMessage(message);
+          // No Telegram config: the escalation cannot reach anyone, so nothing
+          // is stamped and the rows stay listed until it can.
+          if (!sent.ok && sent.reason === "no_config") {
+            return { escalated: 0, paged: false, unpaged: rows.length };
+          }
+          if (!sent.ok) {
+            throw new Error(`vendor-gap page failed: ${sent.error ?? sent.reason}`);
+          }
+          const mark = await sb.rpc("mark_netcraft_vendor_gap_escalated", {
+            p_alert_ids: rows.map((r) => r.id),
+            p_min_issue_age_hours: VENDOR_GAP_ESCALATION.minIssueAgeHours,
+          });
+          // Paged but not stamped: the next run re-pages the same rows —
+          // louder than silence — and the error travels in the Outcome Row.
+          if (mark.error) {
+            return { escalated: null, paged: true, error: `mark: ${mark.error.message}` };
+          }
+          logEnforcementEvent("declined", {
+            alertId: rows[0]!.id,
+            domain: "netcraft-vendor-gap",
+            channel: "netcraft",
+            runId,
+            extra: { reason: "vendor_gap_escalated", count: rows.length },
+          });
+          return { escalated: Number(mark.data ?? 0), paged: true };
+        });
+
+        return {
+          ...("error" in liveness
+            ? { liveness_checked: null, liveness_error: liveness.error }
+            : {
+                liveness_due: liveness.due,
+                liveness_checked: liveness.checked,
+                liveness_present: liveness.present,
+                liveness_gone_unconfirmed: liveness.gone_unconfirmed,
+                offline_confirmed: liveness.offline_confirmed,
+                liveness_inconclusive: liveness.inconclusive,
+                liveness_unreached: liveness.unreached,
+              }),
+          vendor_gap_escalated: vendorGap.escalated,
+          vendor_gap_paged: vendorGap.paged,
+          ...("unpaged" in vendorGap ? { vendor_gap_unpaged: vendorGap.unpaged } : {}),
+          ...("error" in vendorGap ? { vendor_gap_error: vendorGap.error } : {}),
+        };
+      };
 
       const groups = await step.run("load-worklist", async () => {
         const { data, error } = await sb.rpc("list_clone_alerts_for_netcraft_reconcile", {
@@ -150,15 +281,17 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         // shape is uuids=0 on THREE consecutive rows — 36h with nothing to
         // reconcile against ~10 resubmits/day is a broken worklist RPC, not a
         // quiet day, so the quiet row is deliberately allowed to count.
+        const outcome = await observeWeaponisedOutcomes();
         await step.run("log-cost-quiet", () =>
           recordLaneOutcome("shopfront-clone-netcraft-reconcile", 0, {
             reason: "nothing_pending",
             uuids: 0,
             taken_down: 0,
             declined: 0,
+            ...outcome,
           }),
         );
-        return { ok: true, uuids: 0, taken_down: 0, declined: 0 };
+        return { ok: true, uuids: 0, taken_down: 0, declined: 0, ...outcome };
       }
 
       const apply = async (
@@ -280,17 +413,24 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         });
       }
 
+      const outcome = await observeWeaponisedOutcomes();
+
       await step.run("log-cost", () =>
         recordLaneOutcome("shopfront-clone-netcraft-reconcile", groups.length, {
           uuids: groups.length,
           ...counts,
           cap: UUID_LIMIT,
           cap_reached: groups.length >= UUID_LIMIT,
+          ...outcome,
         }),
       );
 
-      logger.info("netcraft-reconcile: complete", { uuids: groups.length, ...counts });
-      return { ok: true, uuids: groups.length, ...counts };
+      logger.info("netcraft-reconcile: complete", {
+        uuids: groups.length,
+        ...counts,
+        ...outcome,
+      });
+      return { ok: true, uuids: groups.length, ...counts, ...outcome };
     },
   ),
 );

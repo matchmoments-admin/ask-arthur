@@ -23,6 +23,12 @@ import {
   formatMedianHours,
   MEDIAN_FLOOR,
 } from "@/lib/clone-watch/duration-kpis";
+import {
+  formatDurationMinutes,
+  parseTakedownStats,
+  publishableMedian,
+  type TakedownStats,
+} from "@/lib/clone-watch/takedown-stats";
 import FeatureCard from "@/components/FeatureCard";
 import SampleReportForm from "@/components/SampleReportForm";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
@@ -97,12 +103,6 @@ interface PublicImpactSnapshot {
   brands_protected: number;
 }
 
-interface PublicTakedownStats {
-  window_days: number;
-  takedowns_total: number;
-  median_minutes: number;
-}
-
 interface PublicVendorGapStats {
   window_days: number;
   decline_to_weaponise_n: number;
@@ -117,7 +117,7 @@ interface PublicVendorGapStats {
 
 async function getPublicImpact(): Promise<{
   impact: PublicImpactSnapshot;
-  takedown: PublicTakedownStats | null;
+  takedown: TakedownStats | null;
   vendorGap: PublicVendorGapStats | null;
 } | null> {
   const supabase = createServiceClient();
@@ -131,10 +131,7 @@ async function getPublicImpact(): Promise<{
   ]);
   if (!Array.isArray(impactRes.data) || impactRes.data.length === 0) return null;
   const impact = impactRes.data[0] as PublicImpactSnapshot;
-  const takedown =
-    Array.isArray(takedownRes.data) && takedownRes.data[0]
-      ? (takedownRes.data[0] as PublicTakedownStats)
-      : null;
+  const takedown = parseTakedownStats(takedownRes.data);
   const vendorGap =
     Array.isArray(vendorGapRes.data) && vendorGapRes.data[0]
       ? (vendorGapRes.data[0] as PublicVendorGapStats)
@@ -268,11 +265,27 @@ function PublicImpactPanel({
   vendorGap,
 }: {
   impact: PublicImpactSnapshot;
-  takedown: PublicTakedownStats | null;
+  takedown: TakedownStats | null;
   vendorGap: PublicVendorGapStats | null;
 }) {
-  const fmtMinutes = (m: number) =>
-    m < 60 ? `${m} min` : `${(m / 60).toFixed(1)}h`;
+  // "Taken down" in our data means Netcraft CLASSIFIED the URL malicious
+  // (browser blocklists act on that) — not that the site went offline. Until
+  // #1234 this tile subtracted OUR submitted_at from Netcraft's classification
+  // time; Netcraft classifies inside the seconds our stamp trails its receipt,
+  // so it read "0 min" with a fastest of −2 min. It now shows detection →
+  // blocklisting: our urlscan witness of live phishing (weaponised_at) to
+  // Netcraft's own classification time. Hour-scale, so the clocks' seconds of
+  // skew cannot flip its sign; a site Netcraft had blocked before we saw it is
+  // counted apart in SQL, never averaged in. Only with a sample worth a median.
+  const blocklistMedian = publishableMedian(takedown?.detectToBlock ?? null, MEDIAN_FLOOR);
+  const blocklistTile =
+    blocklistMedian !== null && takedown?.detectToBlock
+      ? {
+          value: formatDurationMinutes(blocklistMedian),
+          label: "Median time to blocklisting",
+          sub: `phishing detected → Netcraft blocklist (n=${takedown.detectToBlock.n})`,
+        }
+      : null;
   const perDay = Math.round(impact.candidates_total / (impact.window_days || 30));
   const pct =
     impact.candidates_total > 0
@@ -295,22 +308,11 @@ function PublicImpactPanel({
       label: "Reported to Netcraft",
       sub: "forwarded to blocklists",
     },
-    // "Taken down" in our data means Netcraft CLASSIFIED the URL malicious
-    // (browser blocklists act on that) — not that the site went offline. On
-    // weaponised re-reports that classification lands in seconds, so a
-    // "time-to-takedown from report to removal" tile read "0 min" (review
-    // 2026-09-23). Say what it is, and only with a sample worth a median.
-    takedown && takedown.takedowns_total >= MEDIAN_FLOOR
-      ? {
-          value: fmtMinutes(takedown.median_minutes),
-          label: "Median time to blocklisting",
-          sub: `report → Netcraft malicious classification (n=${takedown.takedowns_total})`,
-        }
-      : {
-          value: impact.brand_notifications_total.toLocaleString(),
-          label: "Brand teams notified",
-          sub: "aggregate-only policy",
-        },
+    blocklistTile ?? {
+      value: impact.brand_notifications_total.toLocaleString(),
+      label: "Brand teams notified",
+      sub: "aggregate-only policy",
+    },
   ];
 
   return (

@@ -795,6 +795,51 @@ id>` (Inngest dedups a retried `fire-events` step), and `runUrlBlocklistOnward` 
 > and Netcraft credits by that email (leaderboard handle `br_4918435`); its crediting emails
 > showed 10 sites credited all-time as of 2026-09-22.
 
+> **v329 (#1234, absorbs #1148) — takedown and outcome metrics on one clock each.** Measured
+> 2026-09-26 before the change: `clone_watch_takedown_stats(30)` read n=8, **median 0 min,
+> fastest −2 min** — it subtracted OUR `submitted_at` (written after the POST returns, 1–142 s
+> after Netcraft's receipt) from Netcraft's classification time. It now returns:
+>
+> | Column(s)                                       | Definition                                                                                                                                        | 30d value at change                     |
+> | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+> | `takedowns_total`                               | Netcraft malicious classifications dated in the window                                                                                            | 8                                       |
+> | `median/p90/fastest/slowest_minutes`, `timed_n` | Netcraft triage latency, **both ends Netcraft's clock**: `takedown_received_at` → `takedown_at`. NULL when `timed_n = 0`.                         | n=0 (receipt not persisted before v329) |
+> | `detect_to_block_*`                             | our `weaponised_at` → vendor-dated `takedown_at`; a site Netcraft blocked before we saw it phishing is `blocked_before_detection`, never averaged | n=7, median 231 min (3.9 h)             |
+> | `weaponised_*`                                  | cohort weaponised in the window, by current outcome                                                                                               | 41 → 8 blocklisted, 33 still weaponised |
+>
+> The public `/clone-watch` tile now shows **detection → blocklist** (n ≥ `MEDIAN_FLOOR` 5),
+> not "report → classification". All three readers go through
+> `apps/web/lib/clone-watch/takedown-stats.ts`; a null is "not measured", never "0 min".
+>
+> **Witnessed offline.** Nothing rechecked a `weaponised` alert (recheck admits monitoring/declined;
+> reconcile/issue stop at 30 days): 142 weaponised, 109 weaponised > 30 days ago, 5 rechecked in
+> 7 days; a DNS read found 63 NXDOMAIN. The reconcile lane now DNS-reads every weaponised alert
+> (≤ 200/run, 20 h cadence, no urlscan quota). First NXDOMAIN sets `offline_since`; a second
+> ≥ 12 h later moves it to `dormant` (alert_state `expired`). Never `taken_down` — that state
+> means "Netcraft classified it" to every reader (outcome-copy, squatting, clone-metrics).
+>
+> **No-threat-on-phishing escalation.** 76 weaponised alerts had Netcraft grading them clean after
+> its own path ran out (49 "Already reported and rejected.", 27 with our issue on the current
+> submission unanswered ≥ 72 h) and **zero** enforcement cases (`shopfront_takedown_attempts` is
+> empty — `FF_CLONE_ENFORCEMENT` is dark) or onward reports. The reconcile lane pages the operator
+> (≤ 50/run, defanged domains) and only then stamps `submitted_to.vendor_gap`, once per alert.
+> 72 h because 4 of the 9 issue → malicious conversions ever recorded landed within 71 h.
+>
+> **#1148 min-age gate — answered with Netcraft's own flag.** Receipt → end of processing over 30
+> submissions: 0 min to 12.1 h (median ≈ 5 min; 5 of 30 over 1.5 h). A fixed worklist min-age
+> would need ≥ 12 h and delay every filing by it. The issue lane instead defers a submission whose
+> `state` is still `processing` (24 h, `transient_state`) before any POST — and before the
+> no-escalatable pre-filter, which used to DRAIN such a batch terminally because its
+> `state_counts` read only `processing`.
+>
+> ```sql
+> -- the whole outcome picture in one call
+> select * from clone_watch_takedown_stats(30);
+> -- weaponised clones handed to the operator
+> select id, candidate_domain, submitted_to->'vendor_gap' from shopfront_clone_alerts
+>  where submitted_to ? 'vendor_gap' order by (submitted_to->'vendor_gap'->>'escalated_at') desc;
+> ```
+
 The per-URL flow (PRs #701/#702/#703, all default-OFF) that reads
 `GET /submission/{uuid}/urls` (keyless — no API key), drives the lifecycle, and
 files false-negative `report_issue` escalations. Plans:

@@ -259,6 +259,9 @@ export interface LaneOutcome {
     permanentRejects: number;
     /** True when THIS run tripped the brake. Live brake state is feature_brakes. */
     braked: boolean;
+    /** #1148 — uuids Netcraft was still processing: deferred 24 h, never
+     *  POSTed or drained. Absent on quiet runs and rows before 2026-09-26. */
+    processingDeferred?: number;
   };
   "shopfront-clone-netcraft-auto/resubmit": {
     reason?: "none_pending_or_cap" | "all_dead" | "bulk_submit_failed";
@@ -278,6 +281,16 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
+    /** v329 (#1234) weaponised DNS sweep. null = the sweep's RPC failed
+     *  (liveness_error carries why); absent on rows before 2026-09-26. */
+    liveness_checked?: number | null;
+    /** Weaponised rows due a read (counted before the per-run LIMIT). */
+    liveness_due?: number;
+    /** Second NXDOMAIN >= 12 h after the first: weaponised → dormant. */
+    offline_confirmed?: number;
+    /** No-threat-on-phishing alerts paged to the operator and stamped
+     *  submitted_to.vendor_gap this run. null = list or mark failed. */
+    vendor_gap_escalated?: number | null;
   };
   "shopfront-nrd-daily-ingest": {
     domains_scanned: number;

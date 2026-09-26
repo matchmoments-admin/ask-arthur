@@ -12,6 +12,11 @@ import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
 import EnforcementCasesPanel, {
   type EnforcementCase,
 } from "./EnforcementCasesPanel";
+import {
+  formatDurationMinutes,
+  parseTakedownStats,
+  type TakedownStats,
+} from "@/lib/clone-watch/takedown-stats";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +36,7 @@ export default async function CloneWatchAdminPage() {
   let pendingBatches: PendingBatch[] = [];
   let weekly: WeeklySnapshot = EMPTY_WEEKLY;
   let brandBreakdown: BrandBreakdownRow[] = [];
-  let takedown: TakedownStats = EMPTY_TAKEDOWN;
+  let takedown: TakedownStats | null = null;
   let disputes: DisputeRow[] = [];
   // Alerts no automated lane will retry (v272, union added v274). Null = not read.
   let stranded: {
@@ -142,9 +147,7 @@ export default async function CloneWatchAdminPage() {
     if (Array.isArray(brandRes.data)) {
       brandBreakdown = brandRes.data as BrandBreakdownRow[];
     }
-    if (Array.isArray(takedownRes.data) && takedownRes.data[0]) {
-      takedown = takedownRes.data[0] as TakedownStats;
-    }
+    takedown = parseTakedownStats(takedownRes.data);
     if (Array.isArray(pendingBatchesRes.data)) {
       pendingBatches = groupPendingBatches(
         pendingBatchesRes.data as PendingBatchRow[],
@@ -325,26 +328,12 @@ function WeeklyKpis({
   );
 }
 
-interface TakedownStats {
-  window_days: number;
-  takedowns_total: number;
-  median_minutes: number;
-  p90_minutes: number;
-  fastest_minutes: number;
-  slowest_minutes: number;
-}
-
-const EMPTY_TAKEDOWN: TakedownStats = {
-  window_days: 30,
-  takedowns_total: 0,
-  median_minutes: 0,
-  p90_minutes: 0,
-  fastest_minutes: 0,
-  slowest_minutes: 0,
-};
-
-function TakedownStatsRow({ stats }: { stats: TakedownStats }) {
-  if (stats.takedowns_total === 0) {
+// v329 (#1234): each duration is on ONE clock and a null is "not measured",
+// never "0 min" — see lib/clone-watch/takedown-stats.ts. The old tiles
+// subtracted our submitted_at from Netcraft's classification time and showed
+// a median of 0 and a fastest of −2 min.
+function TakedownStatsRow({ stats }: { stats: TakedownStats | null }) {
+  if (!stats || stats.blocklisted === 0) {
     return (
       <div className="mb-6 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-500">
         Netcraft takedown data populates once the first TP-confirmed row clears
@@ -357,18 +346,31 @@ function TakedownStatsRow({ stats }: { stats: TakedownStats }) {
       </div>
     );
   }
-  const fmt = (m: number) =>
-    m < 60 ? `${m} min` : `${(m / 60).toFixed(1)}h`;
+  const fmt = formatDurationMinutes;
+  const d = stats.detectToBlock;
+  const t = stats.triageMinutes;
+  const c = stats.cohort;
   const tiles: Array<{ label: string; value: string }> = [
-    { label: "Takedowns recorded (30d)", value: stats.takedowns_total.toLocaleString() },
-    { label: "Median time-to-takedown", value: fmt(stats.median_minutes) },
-    { label: "P90 time-to-takedown", value: fmt(stats.p90_minutes) },
-    { label: "Fastest", value: fmt(stats.fastest_minutes) },
+    { label: `Blocklisted by Netcraft (${stats.windowDays}d)`, value: stats.blocklisted.toLocaleString() },
+    { label: `Detection → blocklist, median (n=${d?.n ?? 0})`, value: fmt(d?.median ?? null) },
+    { label: `Detection → blocklist, P90 (n=${d?.n ?? 0})`, value: fmt(d?.p90 ?? null) },
+    { label: `Netcraft triage, its own clock (n=${t?.n ?? 0})`, value: fmt(t?.median ?? null) },
   ];
+  if (c) {
+    tiles.push(
+      { label: `Weaponised (${stats.windowDays}d cohort)`, value: c.weaponised.toLocaleString() },
+      { label: "…now blocklisted / offline", value: `${c.blocklisted} / ${c.offline}` },
+      { label: "…still weaponised (no-threat verdict)", value: `${c.open} (${c.vendorGap})` },
+      { label: "…escalated to operator", value: c.escalated.toLocaleString() },
+    );
+  }
   return (
     <div className="mb-6 bg-white border border-border-light rounded-xl shadow-sm p-4">
       <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400 mb-3">
-        Takedown stats · last {stats.window_days} days
+        Takedown stats · last {stats.windowDays} days
+        {stats.blockedBeforeDetection
+          ? ` · ${stats.blockedBeforeDetection} already blocked before we saw phishing (not counted)`
+          : ""}
       </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {tiles.map((t) => (
