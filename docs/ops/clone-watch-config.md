@@ -710,13 +710,17 @@ prints — LinkedIn caption and `/clone-watch/[period]` alike.
 
 **What changed.** v4 gated the 1-edit neighbourhood of every 5-char token
 and lost nine CONFIRMED threats (appie.{bond,beer,autos,mom,beauty},
-appve.vu, bonos.buzz, bnds.cl, woles.net). v5 re-opens it on two paths,
+appve.vu, bonos.buzz, bnds.cl, woles.net). v5 recovers 8 of them on two paths,
 only where v4 said no (every v4 match is a v5 match):
 
 - **homoglyph** — one visual-confusable substitution (`HOMOGLYPH_SUBSTITUTIONS`
   in `lexical-match.ts`), every brand: appie, b0nds, c0les, sh3in.
 - **open_neighbourhood** — brands flagged `openShortNeighbourhood` in
-  `au-brand-watchlist.ts` (Apple, Bonds, Coles): any non-word 1-edit label.
+  `au-brand-watchlist.ts` (Apple, Bonds): any non-word 1-edit label.
+- **known miss: woles.net (Coles).** Decision 2026-09-27, accuracy before
+  any brand contact: opting Coles in took it 11 → 20 in 90 days for that
+  one threat, whose shape (first-letter swap) matches koles.fi / noles.net.
+  Homoglyphs (c0les) still match; a test pins the flag OFF.
 - **floor** — `SHORT_BRAND_NEIGHBOUR_WORDS` (generated, 164 words) blocks
   both paths: bonus/bands/gonds/apply/bondi/cowes stay dead.
 
@@ -735,8 +739,8 @@ ORDER BY first_seen_at DESC;
 **Why not the #1083 word denylist alone.** Measured, it is wrong in the
 data: 326 of the 478 labels v4 dropped since June are NOT dictionary words
 (xbank, dmart, medex, doula, iioet), so rejecting only words re-admits ~114
-a month at a 2.8% threat rate (v4's kept matches: 8.9%). v5 adds 33 domains
-to the 90-day cohort (45 since June), 9 of them confirmed threats, ~16 a
+a month at a 2.8% threat rate (v4's kept matches: 8.9%). v5 adds 24 domains
+to the 90-day cohort (30 since June), 8 of them confirmed threats, ~11 a
 month on the raw feed.
 
 **Opening another brand.** Set `openShortNeighbourhood` only on evidence (a
@@ -757,14 +761,14 @@ v5** — it would destroy lifecycle / Netcraft / weaponisation history. The
 harness above is the verification.
 
 **Re-triage after merge (operator; read-only plan, measured 2026-09-27).**
-Matching is decided at ingest. v5 re-admits 45 existing rows first seen
-June–August (June 16, July 20, August 9): 36 carry the v4 audit's mechanical
-`fp` and are dropped by `applyCohortRules`; the other 9 are the confirmed
+Matching is decided at ingest. v5 re-admits 30 existing rows first seen
+June–August (June 9, July 14, August 7): 22 carry the v4 audit's mechanical
+`fp` and are dropped by `applyCohortRules`; the other 8 are the confirmed
 threats, already counted. From 2026-09-04 v4 never inserted its gated labels,
-so ~11 September v5 hits (measured on the raw feed) do not exist as rows —
+so ~7 September v5 hits (measured on the raw feed) do not exist as rows —
 the ingest has no dated-backfill parameter, and none is proposed.
 
-- June–August are published as v4. Do not restate them: un-fp-ing their 36
+- June–August are published as v4. Do not restate them: un-fp-ing their 22
   rows changes nothing until a re-publish, and a re-publish restates
   editions already read (and re-stamps them `v5`) — not worth 36 rows spread
   over three months.
@@ -773,7 +777,7 @@ the ingest has no dated-backfill parameter, and none is proposed.
   (method changed, #1247), November's is the first comparable one.
 - If a restatement is ever wanted: `triage_status` back to
   `needs_investigation`, note `[matcher-v5-audit]`, `triage_by` NULL, for the
-  45 rows listed by id in PR #1262 (their signals predate v5, so the SQL
+  30 rows listed by id in PR #1262 (their signals predate v5, so the SQL
   above cannot find them) — then re-publish with an `editorialNote`.
 
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)

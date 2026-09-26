@@ -403,11 +403,14 @@ export function candidateLabelKey(domain: string): string {
 //     Brand-agnostic: `appie` for apple, and #1083's b0nds / c0les / sh3in.
 //   * open_neighbourhood — the brand entry opts in (`openShortNeighbourhood`),
 //     for brands whose short neighbourhood produced confirmed threats. Any
-//     non-word 1-edit label then matches (bonos, bnds, woles, appve).
+//     non-word 1-edit label then matches (bonos, bnds, appve). Apple + Bonds
+//     only: Coles was measured and declined (woles.net is its one threat,
+//     shaped like koles/noles, for +9 alerts) — a known miss.
 //
-// Together: 9/9 recovered, 33 domains added to the 90-day cohort (9 of them
-// confirmed threats — 27%, against 8.9% for what v4 matches), 48 on 90 days of
-// the raw feed (~16 a month), zero dictionary words re-admitted, zero v4
+// Together: 8/9 recovered (woles.net is the known miss), 24 domains added to
+// the 90-day cohort (8 of them confirmed threats — 33%, against 8.9% for what
+// v4 matches), 34 on 90 days of the raw feed (~11 a month), zero dictionary
+// words re-admitted, zero v4
 // matches lost.
 
 /** Brand char → label char. Only pairs a reader's eye substitutes. */
