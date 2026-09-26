@@ -193,7 +193,11 @@ first post-draw urlscan verdict is `likely_phishing`. The audit is
 measurement: a miss goes to `monitoring` (v330's `apply_clone_urlscan_verdict`,
 keyed on sample membership + is_clone=false), never `weaponised`, and is logged
 for human review — it is never acted on under the brand the classifier
-rejected. The
+rejected. Nor is it reported under that brand (#1256). While a sample is not
+re-judged `is_clone=true`, the Clone Cohort keeps it in the brand's clone
+count, which is lexical, and **withholds** its urlscan verdict, evidence and
+the lifecycle move the audit caused (`withholdAuditVerdict`, clone-cohort.ts).
+The
 rate is derived (`clone_watch_not_a_clone_audit_summary`), not stored. Not the
 same thing as the **Vendor Gap**, which measures Netcraft, not our classifier.
 
