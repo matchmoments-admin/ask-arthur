@@ -20,6 +20,7 @@ import {
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
 import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 /**
@@ -102,7 +103,8 @@ const MAX_CANDIDATES_PER_BATCH = 50;
 // it. 10 groups x 6 boundaries keeps a run inside a ~31m budget.
 const MAX_GROUPS_PER_RUN = 10;
 
-// inngest-finish-budget: 69 boundaries — 9 static + 6 per-group steps
+// inngest-finish-budget: 70 boundaries — 10 static (incl. #1237's
+// check-readiness) + 6 per-group steps
 // (mint-batch-id/render/assign/mark-sent/record-sent/log-cost) x
 // MAX_GROUPS_PER_RUN (10). See #1074 for the batching fold.
 export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
@@ -114,7 +116,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     // { limit: 1 }` shape — same "no overlapping runs" guarantee, but the
     // slot releases cleanly on cancel/timeout/error. See PR #455.
     singleton: { mode: "skip" },
-    timeouts: { finish: "36m" },
+    // 37m (was 36m): 70 x 30s + 60s slack = 36m floor after #1237 added a step.
+    timeouts: { finish: "37m" },
   },
   [
     ...laneCrons("shopfront-clone-notify-brand-prepare"),
@@ -240,7 +243,17 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       .slice(0, MAX_GROUPS_PER_RUN);
     const groupsDeferredForCap = Math.max(0, groups.length - cappedGroups.length);
 
-    const autoSend = featureFlags.shopfrontCloneNotifyBrandAutoSend;
+    // Auto-send needs the flag AND the readiness scorecard (#1237, founder
+    // decision #1227): ready for the last READINESS_REQUIRED_MONTHS closed
+    // months. Not ready / unreadable → the batches are still prepared, for
+    // manual approval (whose send route runs the same gate) — never sent.
+    const readiness = featureFlags.shopfrontCloneNotifyBrandAutoSend
+      ? await step.run("check-readiness", () => readReadinessGate(sb))
+      : null;
+    const autoSend = resolveAutoSend(
+      featureFlags.shopfrontCloneNotifyBrandAutoSend,
+      readiness,
+    );
 
     let batchesPrepared = 0;
     let autoSent = 0;
@@ -486,6 +499,18 @@ export { urlscanEvidenceFromJsonb };
  * Null/failure-shape rows are simply omitted from the result; the
  * template gracefully handles the missing case.
  */
+/**
+ * Auto-send only when the flag is on AND the readiness gate says ready. A null
+ * or malformed gate (not read, or a replayed memo of another shape) is NOT
+ * ready — this can only ever narrow auto-send, never widen it.
+ */
+export function resolveAutoSend(
+  flag: boolean,
+  readiness: { ready?: unknown } | null | undefined,
+): boolean {
+  return flag === true && readiness?.ready === true;
+}
+
 export async function fetchUrlscanEvidence(
   sb: NonNullable<ReturnType<typeof createServiceClient>>,
   alertIds: number[],

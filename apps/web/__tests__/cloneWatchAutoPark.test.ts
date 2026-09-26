@@ -147,6 +147,9 @@ describe("autoParkNotClones", () => {
       triage_status: "needs_investigation",
       triage_at: "2026-09-26T08:31:00.000Z",
       triage_notes: AUTO_PARK_NOTE,
+      // v335 (#1237): origin recorded apart from the note. Go-red 2026-09-27:
+      // dropped triage_source from the auto-park UPDATE → this test FAILED.
+      triage_source: "machine",
     })).toBe(true);
     expect(has(update, "in", "id", [1, 3])).toBe(true);
   });

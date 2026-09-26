@@ -12,6 +12,7 @@ import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { html, joinHtml } from "@askarthur/utils/html";
+import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -45,7 +46,9 @@ function periodLabel(periodMonth: string): string {
  *     defamation/legal risk, so it does NOT require the #371 sign-off gate.
  *   • Otherwise → the real brand contact (recipient_email), gated by
  *     FF_BRAND_STEWARDSHIP_SEND (default OFF; #371 legal sign-off of the
- *     outreach copy is the precondition to flip it).
+ *     outreach copy is the precondition to flip it) AND by the readiness
+ *     scorecard (#1237): ready for the last READINESS_REQUIRED_MONTHS closed
+ *     months, fail-closed on a missing or unreadable scorecard.
  *
  * Idempotent: refuses if the row is already 'sent', and passes a stable Resend
  * idempotencyKey so a retry never double-sends. On Resend failure the row is
@@ -90,6 +93,20 @@ export async function POST(
     if (!featureFlags.brandStewardshipSend) {
       return NextResponse.json(
         { error: "send_disabled", detail: "FF_BRAND_STEWARDSHIP_SEND is OFF (pending #371 legal sign-off)" },
+        { status: 403 },
+      );
+    }
+    // Readiness gate (#1237, founder decision #1227): a REAL brand send also
+    // needs the last READINESS_REQUIRED_MONTHS closed months to read ready in
+    // clone_watch_readiness. Not ready, not computed, or unreadable → refused;
+    // the shadow path above is untouched and stays the only way to send.
+    const readiness = await readReadinessGate(sb);
+    if (!readiness.ready) {
+      return NextResponse.json(
+        {
+          error: "not_ready",
+          detail: `Clone Watch readiness scorecard is not ready for ${readiness.months.join(", ")} (${readiness.reason}). Real brand sends stay in shadow until it is — see /admin/clone-watch.`,
+        },
         { status: 403 },
       );
     }

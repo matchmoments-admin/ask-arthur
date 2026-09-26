@@ -7,6 +7,7 @@ import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
 
 // POST /api/admin/clone-watch/batches/[batchId]/send
 //
@@ -104,6 +105,21 @@ export async function POST(
     return NextResponse.json(
       { error: "supabase_unavailable" },
       { status: 503 },
+    );
+  }
+
+  // 0. Readiness gate (#1237, founder decision #1227). This route mails the
+  //    brand's REAL contact — it has no shadow mode — so it refuses unless
+  //    the last READINESS_REQUIRED_MONTHS closed months read ready in
+  //    clone_watch_readiness. Missing or unreadable scorecard → refused.
+  const readiness = await readReadinessGate(sb);
+  if (!readiness.ready) {
+    return NextResponse.json(
+      {
+        error: "not_ready",
+        detail: `Clone Watch readiness scorecard is not ready for ${readiness.months.join(", ")} (${readiness.reason}). No brand is contacted until it is — see /admin/clone-watch.`,
+      },
+      { status: 403 },
     );
   }
 

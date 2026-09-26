@@ -8,6 +8,12 @@ import CloneWatchTriage, {
 } from "./CloneWatchTriage";
 import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import BackfillButton from "./BackfillButton";
+import ReadinessPanel from "./ReadinessPanel";
+import { readRecentReadiness } from "@/lib/clone-watch/readiness-data";
+import {
+  evaluateReadinessGate,
+  fromReadinessRow,
+} from "@/lib/clone-watch/readiness";
 import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
 import EnforcementCasesPanel, {
   type EnforcementCase,
@@ -48,8 +54,13 @@ export default async function CloneWatchAdminPage() {
     uuidNoSubmittedAt: number;
   } | null = null;
   let enforcementCases: EnforcementCase[] = [];
+  // Readiness scorecard (#1237). null = unreadable, which the gate reads as
+  // NOT ready — the panel says so rather than showing an empty table.
+  let readinessRows: Array<Record<string, unknown>> | null = null;
 
   if (supabase) {
+    readinessRows = await readRecentReadiness(supabase, 3);
+    if (readinessRows === null) loadErrors.push("readiness scorecard");
     const [
       pendingRes,
       weeklyRes,
@@ -178,6 +189,8 @@ export default async function CloneWatchAdminPage() {
   // overly broad for SC bodies.
   // eslint-disable-next-line react-hooks/purity
   const computedAt = Date.now();
+  const readinessGate = evaluateReadinessGate(readinessRows, new Date(computedAt));
+  const readinessCards = readinessRows?.map(fromReadinessRow) ?? null;
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
@@ -237,6 +250,8 @@ export default async function CloneWatchAdminPage() {
           with no scan id by a failed submit before v272.
         </p>
       )}
+      <ReadinessPanel cards={readinessCards} gate={readinessGate} />
+
       <WeeklyKpis snapshot={weekly} pendingCount={pendingTotal} />
 
       <TakedownStatsRow stats={takedown} />

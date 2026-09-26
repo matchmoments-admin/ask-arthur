@@ -342,6 +342,12 @@ export async function GET(req: Request) {
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
       lanes_checked: LANES_CHECKED,
+      // Explicitly EMPTY, not absent. The readiness scorecard (#1237, v335
+      // clone_watch_readiness_inputs) counts a day as MEASURED only when its
+      // row carries a lane_problems array — before this key, a clean day and
+      // a day the digest never recorded read the same, and an unrecorded day
+      // must stay "not measured", never "healthy".
+      lane_problems: [],
       cost_usd: cost.cost_usd,
     });
     return NextResponse.json({

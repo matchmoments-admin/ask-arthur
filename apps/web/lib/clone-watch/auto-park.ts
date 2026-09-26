@@ -94,6 +94,11 @@ export async function autoParkNotClones(
         triage_status: "needs_investigation",
         triage_at: nowIso,
         triage_notes: AUTO_PARK_NOTE,
+        // Verdict origin (v335, #1237): the readiness scorecard counts only
+        // human verdicts, and the note is not a reliable discriminator — a
+        // later human verdict keeps this note (set_clone_alert_triage
+        // COALESCEs it). The human path stamps 'human' over this.
+        triage_source: "machine",
       })
       .in("id", parkIds)
       .eq("triage_status", "pending")
