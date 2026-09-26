@@ -31,6 +31,7 @@
  * job — and that inverted dependency is why the two SELECT lists could drift in
  * the first place: the shape had two owners and no home.
  */
+import { candidateLabelKey } from "@askarthur/shopfront-glue";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 
 /**
@@ -246,6 +247,75 @@ export function withholdAuditVerdict<
   if ("urlscan_uuid" in row) out.urlscan_uuid = null;
   if (row.lifecycle_state === "monitoring") out.lifecycle_state = "detected";
   return out;
+}
+
+/**
+ * A same-name spread across this many distinct TLDs is ONE bulk registration
+ * (#1084). Calibrated on the June–September 2026 cohort under matcher v5
+ * (per brand, per month, labels compared after IDN decode + confusable fold):
+ *
+ *   distinct TLDs   groups   domains   groups with a confirmed threat
+ *   2               115      230       11
+ *   3                27       81        5
+ *   4                 7       28        3
+ *   5+                6       36        1
+ *
+ * ≥3 starts folding coincidences of a common word (`eleven.*`, `stan.*`,
+ * `target.nz/.tk/.bid`); ≥4 folds 13 groups / 64 domains over four months —
+ * `amaz0n.*` × 7, `mc-donalds.*` × 7, `appie.*` × 6, `ubank.*` × 6. Under the
+ * v3 matcher `gonds.*` × 9 was one of them and made Bonds August's spotlight
+ * (v4's word gate has since killed eight of the nine). Groups are rarely
+ * same-day: a bulk drop surfaces over 1–9 days of the feed, so the window is
+ * the reporting month, not the ingest day.
+ *
+ * A burst is NOT benign — `appie.*` × 6 was a real Apple campaign with five
+ * confirmed threats. That is why this is a counting unit and never a filter:
+ * every domain stays an alert and in every per-domain metric; only the
+ * brand's targeting-event count treats the spread as one decision by one
+ * registrant.
+ */
+export const BULK_REGISTRATION_MIN_TLDS = 4;
+
+export interface TargetingEvents {
+  /** Distinct candidate domains, with each bulk registration counted once. */
+  events: number;
+  /** The folded groups, largest first — for the digest / audit, not the count. */
+  bulkRegistrations: Array<{ label: string; domains: number }>;
+}
+
+/**
+ * Fold ONE brand's distinct candidate domains into targeting events.
+ *
+ * Per brand, because the question is "how many times was THIS brand
+ * targeted". The caller passes the brand's deduped domains for one month; the
+ * key is `candidateLabelKey`, the matcher's own normalisation, so a label that
+ * matched as the same name folds as the same name.
+ */
+export function countTargetingEvents(
+  candidateDomains: Iterable<string>,
+): TargetingEvents {
+  const byLabel = new Map<string, Set<string>>();
+  for (const d of candidateDomains) {
+    const domain = d.trim().toLowerCase();
+    if (!domain) continue;
+    const label = candidateLabelKey(domain);
+    const suffix = domain.slice(domain.indexOf(".") + 1);
+    const tlds = byLabel.get(label) ?? new Set<string>();
+    tlds.add(suffix);
+    byLabel.set(label, tlds);
+  }
+  let events = 0;
+  const bulkRegistrations: TargetingEvents["bulkRegistrations"] = [];
+  for (const [label, tlds] of byLabel) {
+    if (tlds.size >= BULK_REGISTRATION_MIN_TLDS) {
+      events += 1;
+      bulkRegistrations.push({ label, domains: tlds.size });
+    } else {
+      events += tlds.size;
+    }
+  }
+  bulkRegistrations.sort((a, b) => b.domains - a.domains || a.label.localeCompare(b.label));
+  return { events, bulkRegistrations };
 }
 
 /**

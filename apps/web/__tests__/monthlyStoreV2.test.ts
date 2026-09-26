@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { LEXICAL_MATCHER_VERSION } from "@askarthur/shopfront-glue";
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 import { stockStatus, type StockDns } from "@/lib/clone-watch/clone-metrics";
 import { monthWindow, priorWindow } from "@/lib/clone-watch/month-window";
@@ -252,7 +253,9 @@ describe("buildTrendRows — v325 stock columns", () => {
       is_au: true,
       active_stock_eom: 0,
       coverage_full_month: true,
-      matcher_version: "v4",
+      matcher_version: LEXICAL_MATCHER_VERSION,
+      // watched and not targeted: a MEASURED zero, not NULL (#1084)
+      targeting_events: 0,
       // a squat from an EARLIER month taken down in August
       taken_down_in_month: 1,
     });
@@ -274,7 +277,7 @@ describe("buildTrendRows — v325 stock columns", () => {
     );
     const k = t.brandRows[0];
     expect(k.new_registered).toBe(3);
-    expect(k.matcher_version).toBe("v4");
+    expect(k.matcher_version).toBe(LEXICAL_MATCHER_VERSION);
     expect(k.classifier_version).toBe("jev-1.13.0+claude-haiku-4-5"); // a swap month shows both
     expect(k.swept_domains).toBe(2_100_000);
     expect(k.coverage_full_month).toBeNull(); // coverage unreadable ≠ not covered

@@ -38,6 +38,7 @@
 import punycode from "node:punycode";
 
 import { AU_BRAND_WATCHLIST, type BrandEntry } from "./au-brand-watchlist";
+import { SHORT_BRAND_NEIGHBOUR_WORDS } from "./short-brand-neighbour-words";
 
 /**
  * The matcher's methodology version, stamped on every monthly brand-store row
@@ -48,8 +49,13 @@ import { AU_BRAND_WATCHLIST, type BrandEntry } from "./au-brand-watchlist";
  * v4 = #1082 (gated confusable rule + 5-char Levenshtein neighbourhood) and
  * #1085 (separator strip before the contiguity check); June–August 2026 were
  * re-classified under v4 on 2026-09-04, so the v325 backfill stamps them 'v4'.
+ * v5 = #1150: two recovery paths for the 5-char neighbourhood v4 gated shut
+ * (homoglyph substitution; `openShortNeighbourhood` brands), both floored by
+ * the neighbour-word denylist. Strictly additive: every v4 match is a v5 match.
+ * The same version also carries #1084's bulk-registration fold in the monthly
+ * store (`targeting_events`), so a v4 month and a v5 month are never compared.
  */
-export const LEXICAL_MATCHER_VERSION = "v4";
+export const LEXICAL_MATCHER_VERSION = "v5";
 
 export type SignalType = "confusable" | "substring" | "levenshtein";
 
@@ -306,21 +312,36 @@ export function lexicalMatch(
         brand.length >= MIN_BRAND_LEN_FOR_UNGATED_LEVENSHTEIN ||
         matchPrimary.replace(/[-_]/g, "").includes(brand) ||
         hasScamContextOutsidePrimary(decodedDomain, matchPrimary);
-      if (dist > 0 && dist <= LEVENSHTEIN_THRESHOLD && shortBrandTrusted) {
+      // v5 (#1150): the v4 gate above is left byte-identical, so every v4
+      // match survives. What it gated shut is re-opened on two narrow paths,
+      // only when v4 said no — see `shortBrandRecovery`.
+      const recovery =
+        dist === 1 && !shortBrandTrusted
+          ? shortBrandRecovery(matchPrimary, brand, entry)
+          : null;
+      if (
+        dist > 0 &&
+        dist <= LEVENSHTEIN_THRESHOLD &&
+        (shortBrandTrusted || recovery)
+      ) {
         const score = 1 - dist / Math.max(matchPrimary.length, brand.length);
+        const evidence: Record<string, string | number> = wasIdnDecoded
+          ? {
+              input_label: primary,
+              idn_decoded: matchPrimary,
+              brand,
+              edit_distance: dist,
+            }
+          : { input_label: primary, brand, edit_distance: dist };
+        // Which v5 path admitted it — lets a re-triage or an audit select
+        // exactly the rows v4 would not have produced.
+        if (recovery) evidence.short_brand_gate = recovery;
         best = pickBetter(best, {
           brand: entry.brand,
           legitimate_domain: entry.legitimate_domains[0] ?? "",
           score: Math.min(MAX_MATCH_SCORE, Math.max(0.55, score)),
           signal_type: "levenshtein",
-          evidence: wasIdnDecoded
-            ? {
-                input_label: primary,
-                idn_decoded: matchPrimary,
-                brand,
-                edit_distance: dist,
-              }
-            : { input_label: primary, brand, edit_distance: dist },
+          evidence,
         });
       }
     }
@@ -350,6 +371,69 @@ export function decodeIdnLabel(label: string): string {
   } catch {
     return label;
   }
+}
+
+/**
+ * The primary label as the matcher compares it — IDN-decoded, then
+ * confusable-folded. Two candidates with the same key are the same NAME on
+ * different TLDs (`gonds.co`, `gonds.online`, …); the monthly cohort folds such
+ * a bulk registration into one targeting event (#1084, apps/web clone-cohort.ts).
+ */
+export function candidateLabelKey(domain: string): string {
+  const primary = domain.toLowerCase().trim().split(".")[0] ?? "";
+  return normaliseConfusables(decodeIdnLabel(primary));
+}
+
+// ── v5 short-brand recovery (#1150) ─────────────────────────────────────────
+//
+// MEASURED on 90 days of the raw whoisds feed (2026-06-29 → 09-26, 6.64M names)
+// and the alert cohort, not reasoned about. v4 gated the 5-char 1-edit
+// neighbourhood and lost 9 CONFIRMED threats: appie.{bond,beer,autos,mom,
+// beauty}, appve.vu, bonos.buzz, bnds.cl, woles.net.
+//
+// The obvious fix (#1083: "the false positives are ordinary words, so reject
+// words and re-open the rest") is WRONG in the data. Only 152 of the 478
+// short-brand labels v4 dropped are dictionary words; the rest are brandables
+// and foreign words (xbank, dmart, medex, doula, mocca, iioet, vinet). A word
+// denylist alone re-admits 326 of them (~114 a month) at a 2.8% threat rate —
+// against 7-9% for what v4 keeps. So the denylist is kept as the FLOOR, and
+// admission needs one of two positive reasons:
+//
+//   * homoglyph — a single visual-confusable substitution (l→i, o→0, e→3, …).
+//     Brand-agnostic: `appie` for apple, and #1083's b0nds / c0les / sh3in.
+//   * open_neighbourhood — the brand entry opts in (`openShortNeighbourhood`),
+//     for brands whose short neighbourhood produced confirmed threats. Any
+//     non-word 1-edit label then matches (bonos, bnds, woles, appve).
+//
+// Together: 9/9 recovered, 33 domains added to the 90-day cohort (9 of them
+// confirmed threats — 27%, against 8.9% for what v4 matches), 48 on 90 days of
+// the raw feed (~16 a month), zero dictionary words re-admitted, zero v4
+// matches lost.
+
+/** Brand char → label char. Only pairs a reader's eye substitutes. */
+const HOMOGLYPH_SUBSTITUTIONS = new Set([
+  "l>i", "i>l", "l>1", "i>1", "o>0", "e>3", "a>4", "s>5", "g>9", "b>8", "t>7", "z>2",
+]);
+
+type ShortBrandGate = "homoglyph" | "open_neighbourhood";
+
+function shortBrandRecovery(
+  label: string,
+  brand: string,
+  entry: BrandEntry,
+): ShortBrandGate | null {
+  // The precision floor, checked first: an ordinary word never matches on
+  // either path (bonus, bands, mart, bank, stage, apply, bondi, gonds).
+  if (SHORT_BRAND_NEIGHBOUR_WORDS.has(label)) return null;
+  if (label.length === brand.length) {
+    for (let i = 0; i < label.length; i++) {
+      if (label[i] !== brand[i]) {
+        if (HOMOGLYPH_SUBSTITUTIONS.has(`${brand[i]}>${label[i]}`)) return "homoglyph";
+        break;
+      }
+    }
+  }
+  return entry.openShortNeighbourhood ? "open_neighbourhood" : null;
 }
 
 function pickBetter(a: MatchResult | null, b: MatchResult): MatchResult {

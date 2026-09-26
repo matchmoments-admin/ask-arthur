@@ -494,12 +494,13 @@ export async function readFrozenMonths(
     period_month: string;
     brand: string;
     clones: number | null;
+    targeting_events?: number | null;
     matcher_version: string | null;
     swept_domains: number | string | null;
   }>((from, to) =>
     sb
       .from("clone_watch_monthly_brand_stats")
-      .select("period_month, brand, clones, matcher_version, swept_domains")
+      .select("period_month, brand, clones, targeting_events, matcher_version, swept_domains")
       .in("period_month", periodMonths as string[])
       .not("frozen_at", "is", null)
       .order("period_month", { ascending: true })
@@ -509,6 +510,7 @@ export async function readFrozenMonths(
         period_month: string;
         brand: string;
         clones: number | null;
+        targeting_events?: number | null;
         matcher_version: string | null;
         swept_domains: number | string | null;
       }> | null;
@@ -532,27 +534,44 @@ export function foldFrozenMonths(
     period_month: string;
     brand: string;
     clones: number | null;
+    targeting_events?: number | null;
     matcher_version: string | null;
     swept_domains: number | string | null;
   }>,
 ): Map<string, FrozenMonth> {
   const out = new Map<string, FrozenMonth>();
+  const eventsMissing = new Map<string, boolean>();
   for (const r of rows) {
     const month = r.period_month.slice(0, 10);
     let m = out.get(month);
     if (!m) {
-      m = { byBrand: new Map(), total: 0, brands: 0, matcherVersion: null, sweptDomains: null };
+      m = {
+        byBrand: new Map(),
+        total: 0,
+        brands: 0,
+        matcherVersion: null,
+        sweptDomains: null,
+        eventsByBrand: new Map(),
+      };
       out.set(month, m);
+      eventsMissing.set(month, false);
     }
     const n = Number(r.clones ?? 0);
     const brand = r.brand.trim().toLowerCase();
     m.byBrand.set(brand, (m.byBrand.get(brand) ?? 0) + n);
+    // #1084 (v333): ONE row without targeting_events makes the whole month's
+    // event map unknown — a partial map would read the missing brands as 0.
+    if (r.targeting_events == null) eventsMissing.set(month, true);
+    else m.eventsByBrand?.set(brand, (m.eventsByBrand.get(brand) ?? 0) + Number(r.targeting_events));
     m.total += n;
     if (n > 0) m.brands += 1;
     // One value per month by construction (the writer stamps every row).
     if (r.matcher_version && !m.matcherVersion) m.matcherVersion = r.matcher_version;
     const swept = r.swept_domains == null ? null : Number(r.swept_domains);
     if (swept != null && Number.isFinite(swept) && m.sweptDomains == null) m.sweptDomains = swept;
+  }
+  for (const [month, missing] of eventsMissing) {
+    if (missing) out.get(month)!.eventsByBrand = null;
   }
   return out;
 }

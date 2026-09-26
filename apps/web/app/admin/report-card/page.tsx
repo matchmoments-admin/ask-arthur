@@ -482,7 +482,7 @@ function SlideAuBrands({ data, page }: SlideProps) {
         <span className="r">PER BRAND · {period}</span>
       </div>
       <h2 className="h2">The Australian brands most impersonated</h2>
-      <div className="subhead">Copycat domains detected per brand.</div>
+      <div className="subhead">Copycat domains detected per brand. One name registered across 4+ web endings counts once.</div>
       <div className="rows">
         {data.topAuBrands.map((b, i) => (
           <div className="row" key={b.brand}>

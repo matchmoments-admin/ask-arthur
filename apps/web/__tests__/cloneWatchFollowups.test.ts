@@ -44,6 +44,8 @@ describe("parseSecurityTxtContacts", () => {
 describe("buildInternalDigestHtml", () => {
   const metrics = (over: Partial<CloneBrandMetrics>): CloneBrandMetrics => ({
     detected: over.detected ?? 1,
+    targetingEvents: over.targetingEvents ?? over.detected ?? 1,
+    bulkRegistrations: [],
     netcraftReported: over.netcraftReported ?? 0,
     takenDown: over.takenDown ?? 0,
     declined: over.declined ?? 0,
@@ -143,6 +145,8 @@ describe("buildInternalDigestHtml", () => {
 describe("buildRegistrarRollup", () => {
   const m = (byRegistrar: Record<string, number>, domains: CloneBrandMetrics["domains"]): CloneBrandMetrics => ({
     detected: Object.values(byRegistrar).reduce((a, b) => a + b, 0),
+    targetingEvents: Object.values(byRegistrar).reduce((a, b) => a + b, 0),
+    bulkRegistrations: [],
     netcraftReported: 0,
     takenDown: 0,
     declined: 0,

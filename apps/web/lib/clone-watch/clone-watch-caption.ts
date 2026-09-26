@@ -278,6 +278,10 @@ export function generateCloneWatchCaption(
   const firstComment = [
     "Check any link, text or number yourself → https://askarthur.au (free, no signup).",
     `${reading.label} → https://askarthur.au/blog/${reading.slug}`,
+    // Matcher v5 (#1084): the per-brand numbers above are targeting events. In
+    // the comment, not the body — the body sits at the LinkedIn cap in the
+    // worst case (cloneWatchCaption.test.ts "fits, with the disclosure intact").
+    "Per brand, one name bulk-registered across 4+ web endings in a month counts once.",
     methodUrl ? `How we count these → ${methodUrl}` : "",
     "Targeted brand and want your full clone list? Partner with us → https://askarthur.au/contact",
   ]
