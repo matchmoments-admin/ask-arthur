@@ -5,11 +5,13 @@ import {
   buildClassifierCaveat,
   buildTldLine,
   buildTrendDisclosure,
-  lookalikeDomains,
+  perBrandCount,
+  perBrandUnitNoun,
 } from "@/lib/clone-watch/targeting-copy";
 import { buildOutcomesBlock } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { pickFurtherReading } from "@/lib/clone-watch/further-reading";
+import { BULK_COUNTING_RULE } from "@/lib/clone-watch/clone-cohort";
 
 /**
  * Deterministic evidence-first LinkedIn caption for the monthly Clone Watch
@@ -133,8 +135,8 @@ export function generateCloneWatchCaption(
     const restClause = rest.length ? `, with ${joinAnd(rest)} close behind` : "";
     findings.push(
       fundIsLead
-        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${lookalikeDomains(lead.n)})${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
-        : `${lead.name} was the most-copied Australian brand (${lookalikeDomains(lead.n)})${restClause}.`,
+        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${perBrandCount(lead.n, card.perBrandUnit)})${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
+        : `${lead.name} was the most-copied Australian brand (${perBrandCount(lead.n, card.perBrandUnit)})${restClause}.`,
     );
   }
 
@@ -153,10 +155,10 @@ export function generateCloneWatchCaption(
   if (sp.kind === "mover" && spName && !spotlightIsLead) {
     // Worded by trend-copy.ts moverCopy — the one home shared with the
     // carousel's spotlight slide (it also holds the no-actor rule).
-    findings.push(moverCopy(spName, sp).sentence);
+    findings.push(moverCopy(spName, sp, perBrandUnitNoun(card.perBrandUnit)).sentence);
   } else if (sp.kind === "new_entrant" && spName && !spotlightIsLead) {
     findings.push(
-      `${spName} appeared on the map for the first time (${lookalikeDomains(sp.clones)}) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
+      `${spName} appeared on the map for the first time (${perBrandCount(sp.clones, card.perBrandUnit)}) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
     );
   } else if (sp.kind === "super_fund" && spName && !fundIsLead) {
     findings.push(
@@ -281,7 +283,8 @@ export function generateCloneWatchCaption(
     // Matcher v5 (#1084): the per-brand numbers above are targeting events. In
     // the comment, not the body — the body sits at the LinkedIn cap in the
     // worst case (cloneWatchCaption.test.ts "fits, with the disclosure intact").
-    "Per brand, one name bulk-registered across 4+ web endings in a month counts once.",
+    // Only for a targeting-events edition — a pre-v5 edition counted domains.
+    card.perBrandUnit === "targeting_events" ? BULK_COUNTING_RULE : "",
     methodUrl ? `How we count these → ${methodUrl}` : "",
     "Targeted brand and want your full clone list? Partner with us → https://askarthur.au/contact",
   ]

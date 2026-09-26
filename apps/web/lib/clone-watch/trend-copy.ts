@@ -134,7 +134,16 @@ export interface MoverCopy {
   lead: string;
 }
 
-export function moverCopy(name: string, m: { priorClones: number; clones: number }): MoverCopy {
+export function moverCopy(
+  name: string,
+  m: { priorClones: number; clones: number },
+  /**
+   * The per-brand noun for the card's period — `perBrandUnitNoun(card.perBrandUnit)`
+   * (targeting-copy.ts): from matcher v5 the mover's numbers are targeting
+   * events, so they may not be called "lookalike domains" (#1262, D1).
+   */
+  unitNoun: string,
+): MoverCopy {
   const verb: MoverCopy["verb"] =
     m.priorClones > 0 && m.clones > m.priorClones * 2
       ? "more than doubled"
@@ -146,7 +155,7 @@ export function moverCopy(name: string, m: { priorClones: number; clones: number
     verb,
     // NOT "one actor registering in bulk" (targeting-copy.ts rule 3): nothing
     // in a month-over-month count says how many people are behind it.
-    sentence: `${name} was the month's sharpest riser among ${scope}: its lookalike domains ${verb}, from ${m.priorClones} last month to ${m.clones}. A jump that size is worth a look: it is registration activity concentrating on one brand rather than spreading evenly.`,
+    sentence: `${name} was the month's sharpest riser among ${scope}: its ${unitNoun} ${verb}, from ${m.priorClones} last month to ${m.clones}. A jump that size is worth a look: it is registration activity concentrating on one brand rather than spreading evenly.`,
     lead: `Up from ${m.priorClones} last month to ${m.clones} — the sharpest single-brand rise among ${scope}.`,
   };
 }

@@ -7,25 +7,26 @@
 // while non-word squats (appie, bonos, bnds, b0nds) are recovered (#1150).
 
 /** The 5-char tokens this list was generated for. The covered-token guard in
- *  lexical-match.test.ts fails when the watchlist gains one that is not here. */
+ *  lexical-match-v5.test.ts fails when the watchlist gains one that is not here. */
 export const NEIGHBOUR_WORDS_COVERED_TOKENS: readonly string[] = ["aesop","ahpra","apple","bonds","coles","fedex","hesta","iinet","kmart","kogan","mecca","moula","mygov","nbnco","optus","pimco","reece","sapol","shein","stake","ubank","wotif"];
 
 export const SHORT_BRAND_NEIGHBOUR_WORDS: ReadonlySet<string> = new Set([
-  "ahora", "ahura", "ample", "apples", "apply", "asop", "bands", "bank", "becca", "bends",
-  "binds", "blonds", "bods", "bogan", "boids", "bolds", "boles", "bond", "bondi", "boneds",
-  "bones", "bongs", "bonis", "bonks", "bons", "bonus", "bonys", "boods", "bords", "bouds",
-  "bounds", "boyds", "bunds", "capple", "cobles", "cocles", "codes", "coes", "cokes", "colas",
-  "colds", "cole", "coleus", "coley", "colis", "colks", "colls", "colps", "cols", "colts",
-  "colys", "comes", "conds", "cones", "copes", "cores", "cotes", "coues", "coves", "cowes",
-  "cowles", "cozes", "dapple", "doles", "ecca", "ecoles", "esta", "fede", "foles", "fonds",
-  "gonds", "greece", "hasta", "hein", "hest", "hests", "hogan", "holes", "hosta", "innet",
-  "kagan", "koban", "koga", "kokan", "koran", "koyan", "linet", "logan", "mart", "meccan",
-  "meccas", "mecha", "meece", "mobula", "mola", "moles", "mopla", "morula", "motif", "moul",
-  "mould", "moule", "mouls", "mouly", "mouna", "octus", "oles", "opts", "opus", "otus",
-  "pico", "pisco", "poles", "ponds", "recce", "reese", "reeve", "rhein", "rogan", "roles",
-  "ronds", "sake", "salol", "sapo", "sapor", "sapos", "seein", "shake", "shean", "sheen",
-  "sheik", "shen", "shin", "skein", "slake", "smart", "snake", "soles", "sonds", "spake",
-  "stace", "stade", "stage", "staked", "staker", "stakes", "stale", "stane", "stare", "state",
-  "stave", "stein", "stoke", "strake", "take", "testa", "toles", "unbank", "upbank", "vesta",
-  "voles", "whein", "yonds", "zogan",
+  "ahora", "ahura", "ample", "appele", "applen", "apples", "applet", "appli", "apply", "asop",
+  "bands", "bank", "becca", "bends", "binds", "blonds", "bods", "bogan", "boids", "bolds",
+  "boles", "bond", "bonde", "bondi", "bondo", "bondu", "bondy", "boneds", "bones", "bongs",
+  "bonis", "bonks", "bons", "bonus", "bonys", "boods", "bords", "bouds", "bounds", "boyds",
+  "bunds", "capple", "cobles", "cocles", "codes", "coes", "cokes", "colas", "colds", "cole",
+  "coleus", "coley", "colis", "colks", "colls", "colps", "cols", "colts", "colys", "comes",
+  "conds", "cones", "copes", "cores", "cotes", "coues", "coves", "cowes", "cowles", "cozes",
+  "dapple", "doles", "ecca", "ecoles", "esta", "fede", "foles", "fonds", "gonds", "greece",
+  "hasta", "hein", "hest", "hests", "hogan", "holes", "hosta", "innet", "kagan", "koban",
+  "koga", "kokan", "koran", "koyan", "linet", "logan", "mart", "meccan", "meccas", "mecha",
+  "meece", "mobula", "mola", "moles", "mopla", "morula", "motif", "moul", "mould", "moule",
+  "mouls", "mouly", "mouna", "octus", "oles", "opts", "opus", "otus", "pico", "pisco",
+  "poles", "ponds", "recce", "reese", "reeve", "rhein", "rogan", "roles", "ronds", "sake",
+  "salol", "sapo", "sapor", "sapos", "seein", "shake", "shean", "sheen", "sheik", "shen",
+  "shin", "skein", "slake", "smart", "snake", "soles", "sonds", "spake", "stace", "stade",
+  "stage", "staked", "staker", "stakes", "stale", "stane", "stare", "state", "stave", "stein",
+  "stoke", "strake", "take", "testa", "toles", "unbank", "upbank", "vesta", "voles", "whein",
+  "yonds", "zogan",
 ]);

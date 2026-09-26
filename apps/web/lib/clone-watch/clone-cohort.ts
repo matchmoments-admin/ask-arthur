@@ -31,7 +31,7 @@
  * job — and that inverted dependency is why the two SELECT lists could drift in
  * the first place: the shape had two owners and no home.
  */
-import { candidateLabelKey } from "@askarthur/shopfront-glue";
+import { MATCHER_V5_FROM, candidateLabelKey } from "@askarthur/shopfront-glue";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 
 /**
@@ -275,6 +275,25 @@ export function withholdAuditVerdict<
  * registrant.
  */
 export const BULK_REGISTRATION_MIN_TLDS = 4;
+
+/**
+ * Whether a period's PER-BRAND numbers (ranking, spotlight, brand trend) are
+ * targeting events rather than domains. Tied to the matcher cut-over, not to
+ * the code in force: a month ingested under v4 keeps domains even when it is
+ * re-folded by v5 code (#1262 review, D2).
+ */
+export function periodCountsTargetingEvents(periodMonth: string): boolean {
+  return periodMonth.slice(0, 10) >= MATCHER_V5_FROM;
+}
+
+// The per-brand UNIT LABEL ("lookalikes (bulk registrations counted once)" vs
+// "lookalike domains") lives with every other count label in targeting-copy.ts
+// (`perBrandUnitLabel`) — one wording home (#1286). This Module owns the rule
+// and the period that switches it on, not the words.
+
+/** The counting rule, in reader words — one home for the caption, the public
+ *  edition page and the admin slides (#1262 review, D1). */
+export const BULK_COUNTING_RULE = `Per brand, one name bulk-registered across ${BULK_REGISTRATION_MIN_TLDS}+ web endings in a month counts once.`;
 
 export interface TargetingEvents {
   /** Distinct candidate domains, with each bulk registration counted once. */

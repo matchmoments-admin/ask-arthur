@@ -17,13 +17,16 @@ import { moverCopy } from "@/lib/clone-watch/trend-copy";
 import { monitoredBrandsPhrase } from "@/lib/clone-watch/brand-coverage";
 import {
   buildClassifierCaveat,
-  LOOKALIKE_DOMAINS_UNIT,
+  PER_BRAND_UNIT_EVENTS as PER_BRAND_UNIT_SHORT,
+  perBrandUnitLabel,
+  perBrandUnitNoun,
   tacticLabel,
 } from "@/lib/clone-watch/targeting-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
 import { getPinnedCard } from "@/lib/clone-watch/report-summary";
 import { monthWindow } from "@/lib/clone-watch/month-window";
+import { BULK_COUNTING_RULE } from "@/lib/clone-watch/clone-cohort";
 
 /** The card persisted for `month`, or null — never throws, so the page falls
  *  through to a live computation rather than erroring on a missing pin.
@@ -482,7 +485,11 @@ function SlideAuBrands({ data, page }: SlideProps) {
         <span className="r">PER BRAND · {period}</span>
       </div>
       <h2 className="h2">The Australian brands most impersonated</h2>
-      <div className="subhead">Copycat domains detected per brand. One name registered across 4+ web endings counts once.</div>
+      <div className="subhead">
+        {data.perBrandUnit === "targeting_events"
+          ? `Lookalikes detected per brand. ${BULK_COUNTING_RULE}`
+          : "Copycat domains detected per brand."}
+      </div>
       <div className="rows">
         {data.topAuBrands.map((b, i) => (
           <div className="row" key={b.brand}>
@@ -493,7 +500,7 @@ function SlideAuBrands({ data, page }: SlideProps) {
         ))}
       </div>
       <div className="foot rule2 bot">
-        <div className="reg">Ranked by {LOOKALIKE_DOMAINS_UNIT} detected in {data.periodLabel}. Suspected impersonation — detection does not confirm intent.</div>
+        <div className="reg">Ranked by {perBrandUnitLabel(data.perBrandUnit)} detected in {data.periodLabel}. Suspected impersonation — detection does not confirm intent.</div>
         <Pg n={page} />
       </div>
     </section>
@@ -529,7 +536,7 @@ function SlideSuperFund({ data, page }: SlideProps) {
   // The mover's verb and lead come from trend-copy.ts moverCopy, the one home
   // shared with the caption. This slide used to build its own: "more than
   // {doubled|jumped}" printed "more than jumped" for any rise short of 2×.
-  const mover = sp.kind === "mover" ? moverCopy(name, sp) : null;
+  const mover = sp.kind === "mover" ? moverCopy(name, sp, perBrandUnitNoun(data.perBrandUnit)) : null;
   const heading =
     mover ? (
       <>{name} lookalikes<br />{mover.verb}.</>
@@ -559,12 +566,12 @@ function SlideSuperFund({ data, page }: SlideProps) {
       <h2 className={`h2b${isFund ? " sf" : ""}`}>{heading}</h2>
       <div className="spotstat">
         <span className="spotnum">{sp.clones}</span>
-        <span className="spotname">{name}<span>{LOOKALIKE_DOMAINS_UNIT} · {data.periodLabel}</span></span>
+        <span className="spotname">{name}<span>{perBrandUnitLabel(data.perBrandUnit)} · {data.periodLabel}</span></span>
       </div>
       <p className="spotlead">{lead}</p>
-      <div className="note">Lookalike domains impersonating {name}; {name} is the targeted party, not the source. Detected, not all confirmed malicious.</div>
+      <div className="note">Lookalikes impersonating {name}; {name} is the targeted party, not the source. Detected, not all confirmed malicious.</div>
       <div className="foot rule2 bot">
-        <div className="reg">Ranked among Australian (.au) brands by {LOOKALIKE_DOMAINS_UNIT} detected in {data.periodLabel}.</div>
+        <div className="reg">Ranked among Australian (.au) brands by {perBrandUnitLabel(data.perBrandUnit)} detected in {data.periodLabel}.</div>
         <Pg n={page} />
       </div>
     </section>
@@ -606,7 +613,10 @@ function SlideGlobal({ data, page }: SlideProps) {
         <span className="r">GLOBAL BRANDS · {period}</span>
       </div>
       <h2 className="h2">Global brands, aimed at Australians</h2>
-      <div className="subhead">International brands cloned to target AU users, {data.periodLabel}.</div>
+      <div className="subhead">
+        International brands cloned to target AU users, {data.periodLabel}
+        {data.perBrandUnit === "targeting_events" ? ` — ${PER_BRAND_UNIT_SHORT}.` : "."}
+      </div>
       {hasGlobals ? (
         <div className="rows">
           {data.globalBrands.map((b, i) => (

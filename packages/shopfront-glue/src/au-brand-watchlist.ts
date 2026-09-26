@@ -46,7 +46,7 @@ export interface BrandEntry {
   // 1-edit label that is not an ordinary word matches (short-brand-neighbour-
   // words.ts is the floor). Set it ONLY on evidence — a confirmed threat in the
   // brand's gated neighbourhood — and re-measure with the #1150 harness; each
-  // brand costs ~3-9 alerts a month (apple 26, bonds 8 per 90 days of
+  // brand costs ~2-8 alerts a month (apple 24, bonds 6 per 90 days of
   // the raw feed). No effect on a brand whose tokens are all ≥6 chars.
   openShortNeighbourhood?: true;
 }

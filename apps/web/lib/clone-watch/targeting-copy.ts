@@ -43,10 +43,13 @@ import { methodChangedBrandsClause } from "@/lib/clone-watch/trend-copy";
  * retyped on eight surfaces. Print a count through `lookalikeDomains(n)`, a bare
  * unit through `LOOKALIKE_DOMAINS_UNIT`.
  *
- * FOR #1262 (matcher v5, unmerged at the time of writing): its
- * `perBrandUnitLabel(unit)` prints "lookalikes (bulk registrations counted
- * once)" for a targeting-events month. It should absorb this function — take
- * the card's unit here — rather than add a second label home beside it.
+ * From matcher v5 (#1262) a PER-BRAND number (ranking, spotlight, super fund,
+ * global brands, the mover) is TARGETING EVENTS — a bulk registration of one
+ * name counted once — so it may only be called "lookalike domains" for a
+ * pre-v5 period. Per-brand numbers therefore print through the period-aware
+ * `perBrandUnitLabel` / `perBrandUnitNoun` / `perBrandCount` below, whose
+ * pre-v5 branch IS this unit. A month's TOTAL (and any count that is genuinely
+ * per-domain) stays on `lookalikeDomains`. One label home, both units.
  */
 export const LOOKALIKE_DOMAINS_UNIT = "lookalike domains";
 
@@ -58,6 +61,44 @@ export function lookalikeDomainsNoun(n: number): string {
 /** "1 lookalike domain" / "1,032 lookalike domains". */
 export function lookalikeDomains(n: number): string {
   return `${n.toLocaleString("en-AU")} ${lookalikeDomainsNoun(n)}`;
+}
+
+/**
+ * The unit a card's per-brand numbers are in. Decided by the PERIOD (the v5
+ * cut-over, `periodCountsTargetingEvents` in clone-cohort.ts), never by the
+ * code in force. `undefined` = a card pinned before the field existed, i.e. a
+ * pre-v5 month, i.e. domains.
+ */
+export type PerBrandUnit = "targeting_events" | "domains";
+
+/** The label beside a per-brand number from a targeting-events month. */
+export const PER_BRAND_UNIT_EVENTS = "lookalikes (bulk registrations counted once)";
+
+/**
+ * The label for a per-brand number, by the unit the card says it is in — for
+ * slide footers, stat labels and the edition page. The ONE place a per-brand
+ * count may be called "lookalike domains", and only for a pre-v5 period, when
+ * it was domains (pinned by cloneWatchCountLabels.test.ts). Pass `n` to agree
+ * the pre-v5 noun with a printed number.
+ */
+export function perBrandUnitLabel(unit: PerBrandUnit | undefined, n?: number): string {
+  if (unit === "targeting_events") return PER_BRAND_UNIT_EVENTS;
+  return n === undefined ? LOOKALIKE_DOMAINS_UNIT : lookalikeDomainsNoun(n);
+}
+
+/**
+ * The short per-brand noun, for running prose where the counting rule is stated
+ * elsewhere (the caption's first comment, the edition's counting-rule line):
+ * "lookalikes" for a targeting-events month, "lookalike domains" before v5.
+ */
+export function perBrandUnitNoun(unit: PerBrandUnit | undefined): string {
+  return unit === "targeting_events" ? "lookalikes" : LOOKALIKE_DOMAINS_UNIT;
+}
+
+/** A per-brand count in prose: "64 lookalikes" (v5) / "64 lookalike domains" (pre-v5). */
+export function perBrandCount(n: number, unit: PerBrandUnit | undefined): string {
+  if (unit !== "targeting_events") return lookalikeDomains(n);
+  return `${n.toLocaleString("en-AU")} ${n === 1 ? "lookalike" : "lookalikes"}`;
 }
 
 /** Small numbers read as words in prose; `top` is capped at three here. */

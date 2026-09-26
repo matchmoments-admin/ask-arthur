@@ -34,9 +34,16 @@ import {
  *                      `|| !priorEventsMeasured` from classifyTrend's input →
  *                      bonds reads claimable against a v4 month, red.
  *   B6 trend row     — drop `targeting_events` from buildTrendRows → undefined.
+ *   D2 period stamp  — (#1262 review) each of: buildTrendRows stamps "v5"
+ *                      instead of matcherVersionForPeriod → September red;
+ *                      writes events regardless of period → September red;
+ *                      the card's matcher from the code → the September
+ *                      re-publish reads methodChanged, red; the card's unit
+ *                      ignores the period → September ranks 1 not 9, red.
  */
 
-const AUG = "2026-08";
+// A v5 month (the fold starts at the matcher cut-over, MATCHER_V5_FROM).
+const AUG = "2026-11";
 
 function row(brand: string, domain: string, over: Partial<CloneAlertRow> = {}): CloneAlertRow {
   return {
@@ -51,7 +58,7 @@ function row(brand: string, domain: string, over: Partial<CloneAlertRow> = {}): 
     lifecycle_state: "declined",
     netcraft_declined_at: null,
     weaponised_at: null,
-    first_seen_at: "2026-08-24T00:00:00Z",
+    first_seen_at: "2026-11-24T00:00:00Z",
     triage_status: null,
     ...over,
   } as CloneAlertRow;
@@ -142,16 +149,16 @@ describe("B3 — every domain is still an alert and still counted per domain", (
 });
 
 describe("B4 — the spotlight and the ranking count a bulk registration once", () => {
-  // July (v5, published): both brands 20. August: Bonds 40 distinct + gonds × 9
-  // = 49 domains / 41 events; Kmart 45 distinct. By domains Bonds is the
-  // sharpest riser (+29 vs +25) — which is exactly the August 2026 story. By
-  // targeting events it is Kmart (+25 vs +21).
+  // October (v5, published): both brands 20. November: Bonds 40 distinct +
+  // gonds × 9 = 49 domains / 41 events; Kmart 45 distinct. By domains Bonds is
+  // the sharpest riser (+29 vs +25) — the August 2026 story. By targeting
+  // events it is Kmart (+25 vs +21).
   const card = () =>
     buildReportCard(
       inputs({
         rows: [...gonds(), ...distinct("bonds.com.au", 40, "b"), ...distinct("kmart.com.au", 45, "k")],
         priorStore: new Map([
-          ["2026-07-01", frozen({ "bonds.com.au": 20, "kmart.com.au": 20 }, { "bonds.com.au": 20, "kmart.com.au": 20 })],
+          ["2026-10-01", frozen({ "bonds.com.au": 20, "kmart.com.au": 20 }, { "bonds.com.au": 20, "kmart.com.au": 20 })],
         ]),
         sweptDomains: 2_100_000,
       }),
@@ -184,7 +191,7 @@ describe("B5 — NULL is not 0: a month frozen without events is not compared", 
     const c = buildReportCard(
       inputs({
         rows: distinct("bonds.com.au", 60, "b"),
-        priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 20 }, null)]]),
+        priorStore: new Map([["2026-10-01", frozen({ "bonds.com.au": 20 }, null)]]),
       }),
     );
     expect(c.brandTrends.claimable).toEqual([]);
@@ -196,5 +203,47 @@ describe("B6 — the store row carries targeting_events beside clones", () => {
   it("clones = domains, targeting_events = events", () => {
     const t = buildTrendRows({ window: monthWindow(AUG), rows: [...gonds(), ...distinct("bonds.com.au", 3, "d")] });
     expect(t.brandRows[0]).toMatchObject({ brand: "bonds.com.au", clones: 12, targeting_events: 4 });
+  });
+});
+
+describe("D2 — the PERIOD decides the matcher stamp and the unit, not the code in force", () => {
+  // A re-publish of a v4-ingested month after the v5 merge must not relabel it
+  // v5 nor give it targeting events — that would switch off the MoM suppression.
+  const sep = () =>
+    GONDS_TLDS.map((t) => row("bonds.com.au", `gonds.${t}`, { first_seen_at: "2026-09-20T00:00:00Z" }));
+
+  it("buildTrendRows: September (pre-cut-over) → v4, targeting_events NULL", () => {
+    const t = buildTrendRows({ window: monthWindow("2026-09"), rows: sep() });
+    expect(t.brandRows[0]).toMatchObject({ clones: 9, targeting_events: null, matcher_version: "v4" });
+  });
+
+  it("buildTrendRows: October (the cut-over month) → v5, targeting_events measured", () => {
+    const t = buildTrendRows({ window: monthWindow("2026-10"), rows: gonds() });
+    expect(t.brandRows[0]).toMatchObject({ clones: 9, targeting_events: 1, matcher_version: "v5" });
+  });
+
+  it("re-publishing September against a v4 August: comparable, per-brand unit stays domains", () => {
+    const c = buildReportCard({
+      ...inputs(),
+      window: monthWindow("2026-09"),
+      priorWindow: priorWindow(monthWindow("2026-09").startIso),
+      rows: sep(),
+      priorStore: new Map([["2026-08-01", frozen({ "bonds.com.au": 5 }, null, "v4")]]),
+    });
+    expect(c.mom.methodChanged).toBe(false);
+    expect(c.perBrandUnit).toBe("domains");
+    expect(c.topAuBrands[0]).toEqual({ brand: "bonds.com.au", clones: 9 });
+  });
+
+  it("October against a v4 September: the method change suppresses the delta", () => {
+    const c = buildReportCard({
+      ...inputs(),
+      window: monthWindow("2026-10"),
+      priorWindow: priorWindow(monthWindow("2026-10").startIso),
+      rows: gonds(),
+      priorStore: new Map([["2026-09-01", frozen({ "bonds.com.au": 9 }, null, "v4")]]),
+    });
+    expect(c.mom.methodChanged).toBe(true);
+    expect(c.perBrandUnit).toBe("targeting_events");
   });
 });
