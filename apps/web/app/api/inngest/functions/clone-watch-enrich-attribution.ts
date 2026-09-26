@@ -189,24 +189,50 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         const unscannedCutoff = new Date(
           Date.now() - UNSCANNED_GRACE_HOURS * 60 * 60 * 1000,
         ).toISOString();
-        const { data, error } = await sb
-          .from("shopfront_clone_alerts")
-          .select("id, candidate_domain, urlscan_evidence")
-          .eq("source", "nrd")
-          .or(
-            `urlscan_scanned_at.not.is.null,first_seen_at.lt.${unscannedCutoff}`,
-          )
-          .is("attribution", null)
-          .gte("first_seen_at", since)
-          .order("first_seen_at", { ascending: false })
-          .limit(ENRICH_RUN_CAP);
+        // OLDEST first (#1231; was newest-first). The window is 35 days, and
+        // a newest-first worklist held at its cap never reaches the tail:
+        // measured 2026-09-26, a 94-row backlog dated 08-22..08-30 was about
+        // to age out unenriched, as 598 rows already had over 90 days. At a
+        // cap of 60 against ~25/day inflow, oldest-first drains the tail in
+        // days and then keeps up, so no row can age out while waiting.
+        //
+        // The backlog count repeats the worklist's filters (a shared filter
+        // seam trips supabase-js's type-level parser — TS2589); keep the two
+        // in step.
+        const eligibleOr = `urlscan_scanned_at.not.is.null,first_seen_at.lt.${unscannedCutoff}`;
+        const [{ data, error }, backlogRes] = await Promise.all([
+          sb
+            .from("shopfront_clone_alerts")
+            .select("id, candidate_domain, urlscan_evidence")
+            .eq("source", "nrd")
+            .or(eligibleOr)
+            .is("attribution", null)
+            .gte("first_seen_at", since)
+            .order("first_seen_at", { ascending: true })
+            .limit(ENRICH_RUN_CAP),
+          sb
+            .from("shopfront_clone_alerts")
+            .select("id", { count: "exact", head: true })
+            .eq("source", "nrd")
+            .or(eligibleOr)
+            .is("attribution", null)
+            .gte("first_seen_at", since),
+        ]);
         if (error) {
           logger.error("clone-watch enrich: select failed", {
             error: error.message,
           });
-          return { braked: false as const, rows: [] as PendingAlert[] };
+          return { braked: false as const, rows: [] as PendingAlert[], backlog: null };
         }
-        return { braked: false as const, rows: (data ?? []) as PendingAlert[] };
+        // A failed head count returns count=null AND error=null (204): null
+        // is "unknown", never 0 (head-count-failures-carry-no-error).
+        const backlog =
+          typeof backlogRes.count === "number" ? backlogRes.count : null;
+        return {
+          braked: false as const,
+          rows: (data ?? []) as PendingAlert[],
+          backlog,
+        };
       });
       if (selected.braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
@@ -461,6 +487,10 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
           ...(pending.length === 0 ? { reason: "nothing_pending" as const } : {}),
           pending: pending.length,
           enriched,
+          // #1231: the cap and the backlog it leaves (null = count failed).
+          cap: ENRICH_RUN_CAP,
+          cap_reached: pending.length >= ENRICH_RUN_CAP,
+          backlog: "backlog" in selected ? (selected.backlog ?? null) : null,
           backfilled: backfill.written,
           kit_pivoted: kitPivots.written,
         }),

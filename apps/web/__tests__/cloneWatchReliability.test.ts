@@ -33,6 +33,7 @@ vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
 vi.mock("@/lib/cost-telemetry", () => ({ logCost: mocks.log, logCostAsync: mocks.log }));
 
 import { cloneWatchUrlscanRetrieve } from "@/app/api/inngest/functions/clone-watch-urlscan-retrieve";
+import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { cloneWatchLifecycleRecheck } from "@/app/api/inngest/functions/clone-watch-lifecycle-recheck";
 import { cloneWatchUrlscanSubmit } from "@/app/api/inngest/functions/clone-watch-urlscan-submit";
 import { loadCardInputs } from "@/lib/clone-watch/report-card-data";
@@ -64,6 +65,39 @@ describe("worker recovery", () => {
     await invoke(cloneWatchUrlscanRetrieve);
     expect(mocks.send).toHaveBeenCalledWith([expect.objectContaining({ data: expect.objectContaining({ alertId: 7 }) })]);
     expect(mocks.from).toHaveBeenCalledTimes(3); // read event, stamp event, outcome probe
+  });
+  // #1231: retrieve runs at width 3 — the first 429 must stop every worker
+  // (the quota is key-wide), and every row not read counts as not-our-signal.
+  it("stops all retrieve workers on the first 429 and counts every unread row", async () => {
+    const pending = Array.from({ length: 12 }, (_, i) => ({
+      id: i + 1, candidate_url: `https://c${i}.example`, candidate_domain: `c${i}.example`,
+      urlscan_uuid: `u${i}`, urlscan_evidence: null,
+    }));
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === "list_clone_alerts_pending_urlscan_retrieve"
+        ? { data: pending, error: null }
+        : { data: null, error: null },
+    );
+    const retrieve = vi.mocked(retrieveURLScanDetailed);
+    retrieve.mockReset();
+    let calls = 0;
+    retrieve.mockImplementation(async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 1));
+      return { kind: "quota_exhausted" } as never;
+    });
+    await invoke(cloneWatchUrlscanRetrieve);
+    expect(calls).toBeLessThanOrEqual(3); // only the rows already in flight
+    const outcome = mocks.log.mock.calls
+      .map((c) => c[0] as { operation?: string; metadata?: Record<string, unknown> })
+      .find((r) => r.metadata && "skipped_not_our_signal" in r.metadata);
+    expect(outcome?.metadata).toMatchObject({
+      classified: 0,
+      skipped_not_our_signal: 12,
+      quota_exhausted: true,
+      cap: 100,
+      cap_reached: false,
+    });
   });
   it("fails visibly on a broken retrieval worklist", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "DB unavailable" } });

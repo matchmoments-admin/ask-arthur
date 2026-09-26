@@ -27,7 +27,12 @@ export const urlscanEnrichment = inngest.createFunction(
     rateLimit: { limit: 1, period: "10m" },
     throttle: { limit: 50, period: "1h", key: "urlscan-submissions" },
   },
-  { cron: "30 */8 * * *" }, // Every 8h (was 4h), 30 min after entity enrichment. Pending-status queue is self-draining + capped per run — wider cadence only adds enrichment lag.
+  // 03:00 / 15:00 / 21:00 — three runs a day as before (was `30 */8`), moved
+  // OFF the clone-watch recheck's :30 hours: both submit UNLISTED scans, and a
+  // 90-scan recheck at 00:30 plus this lane's 20 breached urlscan's 100/hour
+  // (#1231). Each slot sits >2h from a recheck batch and the 09:00 submit.
+  // Pending-status queue is self-draining + capped per run.
+  { cron: "0 3,15,21 * * *" },
   withAxiomLogging(
     { fnId: "pipeline-urlscan-enrichment" },
     async ({ step }) => {

@@ -191,6 +191,12 @@ export interface LaneOutcome {
     dormant_dead?: number | null;
     /** Candidates the wall-clock budget stopped before; they re-present. */
     unreached?: number;
+    /** #1231 — the per-run cap, and whether this run was held by it. Absent
+     *  on quiet runs and rows written before 2026-09-26. */
+    cap?: number;
+    cap_reached?: boolean;
+    /** Rows due in total (v328 window count). null = not returned. */
+    due_total?: number | null;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";
@@ -206,10 +212,21 @@ export interface LaneOutcome {
     dormant_retired: number;
     /** Candidates the wall-clock budget stopped before (2026-09-24). */
     unreached?: number;
+    /** #1231 — the per-run cap, and whether this run was held by it. Absent
+     *  on quiet runs and rows written before 2026-09-26. */
+    cap?: number;
+    cap_reached?: boolean;
   };
   "shopfront-clone-urlscan-retrieve": {
     classified: number;
     still_pending: number;
+    /** Rows the wall-clock budget left for the next tick (#1231). null =
+     *  replayed from before the field existed. */
+    unreached?: number | null;
+    /** #1231 — the per-run cap, and whether this run was held by it. Absent
+     *  on quiet runs and rows written before 2026-09-26. */
+    cap?: number;
+    cap_reached?: boolean;
     /** null = the probe itself failed; 0 = genuinely none outstanding. */
     unnotified_weaponised: number | null;
   };
@@ -227,10 +244,18 @@ export interface LaneOutcome {
     marked: number;
     deferred: number;
     dead: number;
+    /** #1231 — the per-run cap, and whether this run was held by it. Absent
+     *  on quiet runs and rows written before 2026-09-26. */
+    cap?: number;
+    cap_reached?: boolean;
   };
   "shopfront-clone-netcraft-reconcile": {
     reason?: "nothing_pending";
     uuids: number;
+    /** #1231 — the per-run cap, and whether this run was held by it. Absent
+     *  on quiet runs and rows written before 2026-09-26. */
+    cap?: number;
+    cap_reached?: boolean;
   };
   "shopfront-nrd-daily-ingest": {
     domains_scanned: number;
@@ -258,6 +283,12 @@ export interface LaneOutcome {
     reason?: "nothing_pending";
     pending: number;
     enriched: number;
+    /** #1231 — the per-run cap, and whether this run was held by it. Absent
+     *  on quiet runs and rows written before 2026-09-26. */
+    cap?: number;
+    cap_reached?: boolean;
+    /** Rows eligible in the 35-day window (head count). null = count failed. */
+    backlog?: number | null;
   };
   "shopfront-clone-notify-brand-prepare": {
     reason?: "no_unbatched_rows";

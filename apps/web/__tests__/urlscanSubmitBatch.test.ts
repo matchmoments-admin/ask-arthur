@@ -80,4 +80,75 @@ describe("submitCandidateBatch", () => {
     expect(t.unreached).toBe(3);
     expect(t.attemptedIds).toEqual([1, 2]);
   });
+
+  // #1231 — the recheck lane submits at width 3 to fit 90 rows in its budget.
+  it("honours the concurrency width and still tallies every row once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const submitOne = vi.fn(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 2));
+      inFlight--;
+      return out("submitted");
+    });
+    const t = await submitCandidateBatch(rows(10), open, { submitOne, concurrency: 3 });
+    expect(peak).toBe(3);
+    expect(t.submitted).toBe(10);
+    expect([...t.attemptedIds].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(t.unreached).toBe(0);
+  });
+
+  it("defaults to sequential (the daily submit lane is unchanged)", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const submitOne = async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return out("submitted");
+    };
+    await submitCandidateBatch(rows(4), open, { submitOne });
+    expect(peak).toBe(1);
+  });
+
+  it("an expired budget leaves the rest unreached at any width", async () => {
+    let calls = 0;
+    const budget = { expired: () => calls >= 4 };
+    const t = await submitCandidateBatch(rows(10), budget, {
+      concurrency: 3,
+      submitOne: async () => {
+        calls++;
+        return out("submitted");
+      },
+    });
+    expect(t.submitted + t.unreached).toBe(10);
+    expect(t.unreached).toBeGreaterThanOrEqual(5);
+  });
+
+  it("paces submit STARTS across workers (urlscan's 60/min unlisted cap)", async () => {
+    vi.useFakeTimers({ now: 0 });
+    try {
+      const starts: number[] = [];
+      const run = submitCandidateBatch(rows(6), open, {
+        concurrency: 3,
+        minStartIntervalMs: 1_100,
+        submitOne: async () => {
+          starts.push(Date.now());
+          return out("submitted");
+        },
+      });
+      await vi.runAllTimersAsync();
+      const t = await run;
+      expect(t.submitted).toBe(6);
+      const sorted = [...starts].sort((x, y) => x - y);
+      expect(sorted[0]).toBe(0);
+      for (let k = 1; k < sorted.length; k++) {
+        expect(sorted[k]! - sorted[k - 1]!).toBeGreaterThanOrEqual(1_100);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { mapWithConcurrency } from "@askarthur/utils/concurrency";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import {
   CLONE_WATCH_WEAPONISED_EVENT,
@@ -36,7 +37,15 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  *     the retrieve-pending RPC drops it once the streak hits MAX_FAILURE_STREAK)
  */
 
-const RETRIEVE_BATCH_LIMIT = 40;
+// Per run × 5 runs/day = 500/day, sized to demand (#1231): the recheck lane
+// submits up to 90 × 4 and the daily submit lane 75, ~435/day; at 40 the cap
+// bound 10 of 12 runs (2026-09-23..25). Retrieve quota is 120/min, 5,000/h,
+// 10,000/day (/user/quotas, 2026-09-26) — nowhere near.
+export const RETRIEVE_BATCH_LIMIT = 100;
+// GETs in flight inside the batch step: ~1–2 s per row (GET + persist RPC), so
+// width 3 peaks near 120/min only if every row answered instantly — and the
+// first 429 stops every worker (the key-wide quota is exhausted for all).
+const RETRIEVE_CONCURRENCY = 3;
 const MIN_AGE_MINUTES = 10; // give urlscan time to finish before first poll
 const MAX_FAILURE_STREAK = 3;
 // Consecutive OUR-fault retrieval misses (5xx / timeout / parse) before one is
@@ -118,7 +127,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       // tick. Weaponisation is emitted from persisted state (durable emit step
       // below), not an array, so an interrupted batch can't drop the event.
       // A wall-clock guard breaks the loop before the 10m finish budget so
-      // worst-case external latency (40 rows × urlscan GET) can't force a
+      // worst-case external latency (a full batch of urlscan GETs) can't force a
       // full-batch replay — leftovers drain next tick (worklist is idempotent).
       // In-step budget (budgetedStep): the loop runs INSIDE one step and never
       // awaits step.run, so its clock must start at step entry. The previous
@@ -139,8 +148,12 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
           let skippedNotOurSignal = 0;
           let quotaExhausted = false;
 
-          for (const [idx, row] of pending.entries()) {
-            if (budget.expired()) break;
+          // Rows no worker picked up (budget expiry or a 429 stop). A 429'd
+          // row itself is counted separately below.
+          let started = 0;
+          await mapWithConcurrency(pending, RETRIEVE_CONCURRENCY, async (row) => {
+            if (budget.expired() || quotaExhausted) return;
+            started++;
             try {
               const reputation = reputationFromEvidence(row.urlscan_evidence);
               const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);
@@ -156,13 +169,13 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
               // A 429 is global to the API key, so the rest of the batch would 429
               // too — stop, don't burn the remaining rows on calls we know will fail.
               if (retrieval.kind === "quota_exhausted") {
-                skippedNotOurSignal += pending.length - idx;
+                skippedNotOurSignal++;
                 quotaExhausted = true;
-                break;
+                return;
               }
 
               // A transient miss leaves the verdict alone but MUST still be stamped.
-              // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT 40 and is
+              // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT RETRIEVE_BATCH_LIMIT and was
               // saturated on ~45% of runs, so a uuid that deterministically returns
               // `transient` would keep its oldest submitted_at and re-present at the
               // head forever, starving everything behind it — an unbounded skip is
@@ -184,7 +197,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                     `record_clone_alert_urlscan_transient_miss failed for alert ${row.id}: ${miss.error.message}`,
                   );
                 }
-                continue;
+                return;
               }
 
               const result =
@@ -214,7 +227,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                   );
                 }
                 classified++;
-                continue;
+                return;
               }
 
               // Render not ready. If reputation is decisive, classify now and stop
@@ -238,7 +251,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                 }
                 classified++;
                 reputationFallback++;
-                continue;
+                return;
               }
 
               const persisted = await sb.rpc("persist_clone_alert_urlscan", {
@@ -264,7 +277,13 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                 error: err instanceof Error ? err.message : String(err),
               });
             }
-          }
+          });
+          // Rows a 429 stopped before any worker reached them — same quota
+          // wall, not evidence about the URL.
+          if (quotaExhausted) skippedNotOurSignal += pending.length - started;
+          // Rows the wall-clock budget left for the next tick (0 on a 429
+          // stop — those are counted above).
+          const unreached = quotaExhausted ? 0 : pending.length - started;
 
           return {
             classified,
@@ -272,6 +291,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             reputationFallback,
             skippedNotOurSignal,
             quotaExhausted,
+            unreached,
           };
         },
       );
@@ -283,6 +303,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         skippedNotOurSignal,
         quotaExhausted,
       } = batch;
+      // A run memoised before this field existed replays without it.
+      const unreached = "unreached" in batch ? batch.unreached : null;
 
       // Durable weaponised.v1 emission (the escalation seam — notify-weaponised +
       // enforcement-plan consume it). Driven from PERSISTED state, not the batch's
@@ -428,6 +450,10 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             quota_exhausted: quotaExhausted,
             // null = the probe itself failed; 0 = genuinely none outstanding.
             unnotified_weaponised: unnotified,
+            // #1231: a full worklist means rows were left for the next tick.
+            cap: RETRIEVE_BATCH_LIMIT,
+            cap_reached: pending.length >= RETRIEVE_BATCH_LIMIT,
+            unreached,
           },
         );
       });

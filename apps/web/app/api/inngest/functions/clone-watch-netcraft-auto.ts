@@ -105,7 +105,10 @@ const RESUBMIT_BRAKE = LANES["shopfront-clone-netcraft-auto/resubmit"].brake;
 // an unreadable brake counts as engaged, because this Lane reports third-party
 // URLs to an external vendor in Ask Arthur's name.
 const AUTO_BRAKE = LANES["shopfront-clone-netcraft-auto/auto"].brake;
-const RESUBMIT_DEFAULT_CAP = 10;
+// 15 (was 10, #1231): 10/10 on 2026-09-23 and -24 with 25 and 17 candidates.
+// A precision cap (each report goes out in Ask Arthur's name), not a quota —
+// NETCRAFT_RESUBMIT_DAILY_CAP overrides.
+const RESUBMIT_DEFAULT_CAP = 15;
 const RESUBMIT_MIN_AGE_DAYS = 30; // matches the issue reporter's window
 const RESUBMIT_COOLDOWN_DAYS = 14;
 const RESUBMIT_MAX_PER_ALERT = 3;
@@ -629,6 +632,9 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             deferred,
             budget,
             marked,
+            // #1231: held by the day's budget with live rows left over.
+            cap: resubmitCap(),
+            cap_reached: liveAll.length > budget,
             netcraft_uuid: result.uuid,
             brands: [
               ...new Set(

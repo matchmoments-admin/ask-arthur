@@ -7,6 +7,7 @@
 // the pure urlscan-classify module. Each caller wraps it in its own step.run.
 
 import { submitURLScanWithDetails } from "@askarthur/scam-engine/urlscan";
+import { mapWithConcurrency } from "@askarthur/utils/concurrency";
 import { checkURLReputation } from "@askarthur/scam-engine";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { submitPrecheck } from "@/lib/clone-watch/liveness";
@@ -206,10 +207,18 @@ export interface SubmitTally {
 }
 
 /**
- * Submit candidates sequentially until `budget.expired()`. Runs INSIDE the
- * caller's single budgeted step — it never awaits step.run per item, so the
- * budget is in-step and a replay cannot reset the tally mid-loop. One row's
- * throw is counted and logged via `onRowError`, never aborts the rest.
+ * Submit candidates until `budget.expired()`, at most `concurrency` in flight
+ * (default 1 — sequential), and — when `minStartIntervalMs` is set — no two
+ * submits STARTED closer together than that, across all workers. Runs INSIDE
+ * the caller's single budgeted step — it never awaits step.run per item, so
+ * the budget is in-step and a replay cannot reset the tally mid-loop. One
+ * row's throw is counted and logged via `onRowError`, never aborts the rest.
+ *
+ * Why pacing and not just width: urlscan's unlisted quota is 60/MINUTE
+ * (/user/quotas, 2026-09-26), and a sequential submit already takes only
+ * ~1.5–2.2 s (measured from urlscan_submitted_at stamps), so width alone
+ * would push ~80 POSTs/min and 429 a quarter of the batch. Width hides each
+ * row's latency; the start interval holds the rate under the cap.
  */
 export async function submitCandidateBatch(
   candidates: readonly CloneCandidate[],
@@ -217,8 +226,20 @@ export async function submitCandidateBatch(
   opts: {
     onRowError?: (id: number, err: unknown) => void;
     submitOne?: (c: CloneCandidate) => Promise<SubmitOutcome>;
+    concurrency?: number;
+    minStartIntervalMs?: number;
+    /** Injectable for tests. */
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
   } = {},
 ): Promise<SubmitTally> {
+  const interval = opts.minStartIntervalMs ?? 0;
+  const sleep =
+    opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.now ?? Date.now;
+  // The next permitted start time, claimed synchronously by each worker
+  // before it sleeps, so two workers can never take the same slot.
+  let nextStart = 0;
   const submitOne = opts.submitOne ?? submitCloneCandidate;
   const tally: SubmitTally = {
     submitted: 0,
@@ -231,8 +252,15 @@ export async function submitCandidateBatch(
     unreached: 0,
   };
   let reached = 0;
-  for (const c of candidates) {
-    if (budget.expired()) break;
+  await mapWithConcurrency(candidates, opts.concurrency ?? 1, async (c) => {
+    if (budget.expired()) return;
+    if (interval > 0) {
+      const t = now();
+      const slot = Math.max(t, nextStart);
+      nextStart = slot + interval;
+      if (slot > t) await sleep(slot - t);
+      if (budget.expired()) return;
+    }
     reached++;
     try {
       const outcome = await submitOne({
@@ -248,7 +276,7 @@ export async function submitCandidateBatch(
           break;
         case "rate_limited":
           tally.rateLimited++;
-          continue; // not attempted: leave it unstamped so it retries first
+          return; // not attempted: leave it unstamped so it retries first
         case "dns_no_host":
           tally.dnsSkipped++;
           break;
@@ -264,7 +292,7 @@ export async function submitCandidateBatch(
       tally.attemptedIds.push(c.id);
       opts.onRowError?.(c.id, err);
     }
-  }
+  });
   tally.unreached = candidates.length - reached;
   return tally;
 }

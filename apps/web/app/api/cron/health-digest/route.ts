@@ -76,6 +76,7 @@ const LANE_PROBLEM_ORDER = [
   "absent",
   "braked",
   "silent_zero",
+  "cap_bound",
 ] as const satisfies readonly LaneProblemKind[];
 const _everyKindListed: Exclude<
   LaneProblemKind,
@@ -146,6 +147,7 @@ function buildMessage(
       brake_unknown: html`❓ <b>Clone-watch brake state unreadable:</b>`,
       quota_exhausted: html`⛔ <b>Clone-watch lane stopped by a vendor quota:</b>`,
       silent_zero: html`🕳️ <b>Clone-watch lane running but doing nothing:</b>`,
+      cap_bound: html`📈 <b>Clone-watch lane held by its own cap (demand outgrew it):</b>`,
     };
     for (const kind of LANE_PROBLEM_ORDER) {
       const group = laneProblems.filter((p) => p.kind === kind);

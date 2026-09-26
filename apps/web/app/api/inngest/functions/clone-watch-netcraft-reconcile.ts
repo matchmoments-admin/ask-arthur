@@ -67,7 +67,10 @@ import { html, joinHtml } from "@askarthur/utils/html";
 // all uuids in ONE budgeted step at FETCH_CONCURRENCY in flight, so the batch
 // size no longer multiplies queue waits; anything the budget can't reach is
 // simply left for the next run.
-const UUID_LIMIT = 24;
+// 40 (was 24, #1231): the 10:00 run hit 24/24 on 2026-09-25 and 23 the day
+// before, with 34 uuids in the 30-day window. 40 × 2 GETs at 4 in flight is
+// ~20 sequential round-trips — still well inside FETCH_WALL_CLOCK_MS.
+export const UUID_LIMIT = 40;
 // v316: one budgeted fetch step replaces a step per uuid, so the per-run batch
 // can double without re-opening the 2026-07-10 timeout: 24 uuids × 2 keyless
 // GETs at 4 in flight ≈ 12 sequential round-trips, well inside the budget.
@@ -281,6 +284,8 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         recordLaneOutcome("shopfront-clone-netcraft-reconcile", groups.length, {
           uuids: groups.length,
           ...counts,
+          cap: UUID_LIMIT,
+          cap_reached: groups.length >= UUID_LIMIT,
         }),
       );
 
