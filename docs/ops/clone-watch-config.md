@@ -1285,18 +1285,27 @@ prefix-and-overlap rule gave 0 of 354.
 
 Per row (planUrlscanRechecks in the lane file):
 
-| DNS read                                                  | urlscan?                  | stamp                                            |
-| --------------------------------------------------------- | ------------------------- | ------------------------------------------------ |
-| unchanged, not floor-due                                  | **no**                    | `recheck_dns_checked_at` only (`dns_unchanged`)  |
-| changed                                                   | yes, ahead of everything  | baseline + both clocks after the attempt         |
-| unknown (SERVFAIL / timeout / refused)                    | yes — the gate fails open | as above; an unknown read keeps the old baseline |
-| no baseline (never rescanned since v334)                  | yes                       | as above                                         |
-| any read, **floor-due** (7 d if < 14 days old, else 30 d) | yes                       | as above                                         |
-| not reached by the DNS phase                              | only if floor-due         | none — it stays due                              |
+| DNS read                                                  | urlscan?                                                                 | stamp                                                                                      |
+| --------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| unchanged, not floor-due                                  | only as **stale fill** (leftover cap slots, oldest urlscan rescan first) | filled: as below (`stale_fill`); otherwise `recheck_dns_checked_at` only (`dns_unchanged`) |
+| changed                                                   | yes, ahead of everything                                                 | baseline + both clocks after the attempt                                                   |
+| unknown (SERVFAIL / timeout / refused)                    | yes — the gate fails open                                                | as above; an unknown read keeps the old baseline                                           |
+| no baseline (never rescanned since v334)                  | yes                                                                      | as above                                                                                   |
+| any read, **floor-due** (7 d if < 14 days old, else 30 d) | yes                                                                      | as above                                                                                   |
+| not reached by the DNS phase                              | only if floor-due                                                        | none — it stays due                                                                        |
 
 Up to 90 urlscan rows/run, as before (changed rows first, then risk order
 with the 20% stale-floor reserve on the URLSCAN clock). Eligible rows past the
 cap are left unstamped (`deferred`) and lead the next run.
+
+**Stale fill** (decision on #1261): cap slots the gate leaves unused go to
+DNS-unchanged rows, oldest `last_rechecked_at` first (NULL first, risk as the
+tiebreak), always after every gate-eligible row. The lane therefore spends the
+same urlscan quota as before v334 (same 90 cap, pacing and cooldown), but the
+quota now rotates through the pool oldest-first instead of risk-first — so a
+flip that does NOT move DNS is found no later than today, and in practice
+sooner. `stale_fill` counts them; `dns_unchanged` counts only the unchanged rows
+actually skipped.
 
 **Two clocks.** `last_rechecked_at` / `recheck_count` stay the URLSCAN recheck
 clock (the floor, the v317 weekly tier and the dead-domain cadence key on
@@ -1310,19 +1319,19 @@ at the DNS cadence.
 
 **Reading a run** (Outcome Row metadata): `dns_checked`, `dns_unchanged`
 (urlscan calls saved), `dns_changed`, `dns_unknown`, `dns_no_baseline`,
-`floor_due`, `deferred`, `dns_unreached`, `dns_ms` (the DNS phase's wall
+`floor_due`, `deferred`, `stale_fill`, `dns_unreached`, `dns_ms` (the DNS phase's wall
 clock — raise `RECHECK_DNS.limit` from this, the cadence wants ~1,000/run).
 `due_total` is now "due for a recheck of either kind". Expect
 `dns_no_baseline` ≈ the whole slice for the first ~5–6 days after deploy
 (every row needs one rescan to set its baseline — the lane behaves as before
-meanwhile), then `dns_unchanged` to dominate.
+meanwhile), then `dns_unchanged` + `stale_fill` to dominate, with `submitted` staying near 90.
 
 ```sql
 -- DNS gate health, last 3 days
 SELECT created_at, metadata->>'dns_checked' checked, metadata->>'dns_unchanged' unchanged,
        metadata->>'dns_changed' changed, metadata->>'dns_unknown' unknown,
        metadata->>'dns_no_baseline' no_baseline, metadata->>'floor_due' floor_due,
-       metadata->>'submitted' submitted, metadata->>'deferred' deferred,
+       metadata->>'submitted' submitted, metadata->>'deferred' deferred, metadata->>'stale_fill' stale_fill,
        metadata->>'due_total' due, metadata->>'dns_ms' dns_ms
 FROM cost_telemetry
 WHERE feature = 'shopfront_clone_recheck' AND created_at > now() - interval '3 days'

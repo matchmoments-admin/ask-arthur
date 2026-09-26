@@ -42,6 +42,13 @@ import {
  *     fails the two planner floor cases (they rely on the 7-day floor).
  *   - planUrlscanRechecks: select from one risk-ordered list (no changed-first
  *     tier) → "CHANGED rows win the cap over higher-risk unknown rows" fails.
+ *   - STALE FILL (coordinator decision on #1261): `fillRoom = 0` → "an
+ *     all-unchanged run fills the cap …", "stale fill: oldest urlscan rescan
+ *     first …" and the lane case in cloneWatchReliability fail; ordering the
+ *     fill by risk only (drop the last_rechecked_at key) → "stale fill: oldest
+ *     urlscan rescan first …" fails; `fillRoom = limit` (ignore the cap) →
+ *     "stale fill never displaces a gate-eligible row or exceeds the cap" and
+ *     the no-room case fail.
  *   - readRecheckDns: map a thrown probe to the baseline → "a probe that throws
  *     reads unknown" fails.
  */
@@ -304,13 +311,19 @@ describe("planUrlscanRechecks", () => {
     fingerprint: verdict === "unknown" ? null : "fp",
   });
 
-  it("skips and stamps an unchanged, not-floor-due row", () => {
-    const p = planUrlscanRechecks([row(1)], [read(1, "unchanged")], 90, NOW);
-    expect(p.scan).toEqual([]);
+  it("skips and stamps an unchanged, not-floor-due row when the cap has no room left", () => {
+    const p = planUrlscanRechecks(
+      [row(1), row(2)],
+      [read(1, "unchanged"), read(2, "changed")],
+      1,
+      NOW,
+    );
+    expect(p.scan.map((r) => r.id)).toEqual([2]);
     expect(p.unchangedIds).toEqual([1]);
     expect(p.counts).toMatchObject({
-      dns_checked: 1,
+      dns_checked: 2,
       dns_unchanged: 1,
+      stale_fill: 0,
       floor_due: 0,
       deferred: 0,
     });
@@ -399,20 +412,69 @@ describe("planUrlscanRechecks", () => {
     expect(p.scan).toHaveLength(5);
   });
 
-  it("an all-unchanged run scans nothing and stamps everything it read", () => {
+  it("an all-unchanged run fills the cap with the oldest rescans and stamps the rest", () => {
     const slice = Array.from({ length: 50 }, (_, i) => row(i + 1));
     const p = planUrlscanRechecks(
       slice,
       slice.map((r) => read(r.id, "unchanged")),
-      90,
+      20,
       NOW,
     );
-    expect(p.scan).toEqual([]);
-    expect(p.unchangedIds).toHaveLength(50);
+    expect(p.scan).toHaveLength(20);
+    expect(p.unchangedIds).toHaveLength(30);
     expect(p.counts).toMatchObject({
       dns_checked: 50,
-      dns_unchanged: 50,
+      dns_unchanged: 30,
+      stale_fill: 20,
       deferred: 0,
     });
+    // Scanned and stamped are disjoint and together cover every unchanged row.
+    const scanned = new Set(p.scan.map((r) => r.id));
+    expect(p.unchangedIds.some((id) => scanned.has(id))).toBe(false);
+  });
+
+  // Stale fill (coordinator decision on #1261): leftover cap slots go to the
+  // DNS-unchanged rows with the OLDEST urlscan rescan (NULL first), risk as the
+  // tiebreak — never ahead of a gate-eligible row, never past the cap.
+  it("stale fill: oldest urlscan rescan first, risk breaks ties, after every eligible row", () => {
+    const slice = [
+      row(1, { last_rechecked_at: daysAgo(1), risk: 99 }), // fresh, high risk
+      row(2, { last_rechecked_at: daysAgo(5), risk: 1 }), // stalest, low risk
+      row(3, { last_rechecked_at: daysAgo(3), risk: 10 }),
+      row(4, { last_rechecked_at: daysAgo(3), risk: 50 }), // ties 3 on age, wins on risk
+      row(5, { risk: 0 }), // changed — gate-eligible
+    ];
+    const p = planUrlscanRechecks(
+      slice,
+      [
+        read(1, "unchanged"),
+        read(2, "unchanged"),
+        read(3, "unchanged"),
+        read(4, "unchanged"),
+        read(5, "changed"),
+      ],
+      4,
+      NOW,
+    );
+    expect(p.scan.map((r) => r.id)).toEqual([5, 2, 4, 3]);
+    expect(p.unchangedIds).toEqual([1]);
+    expect(p.counts).toMatchObject({ stale_fill: 3, dns_unchanged: 1, dns_changed: 1 });
+  });
+
+  it("stale fill never displaces a gate-eligible row or exceeds the cap", () => {
+    const slice = [
+      row(1, { last_rechecked_at: daysAgo(6) }),
+      row(2),
+      row(3),
+    ];
+    const p = planUrlscanRechecks(
+      slice,
+      [read(1, "unchanged"), read(2, "unknown"), read(3, "no_baseline")],
+      2,
+      NOW,
+    );
+    expect(p.scan.map((r) => r.id).sort()).toEqual([2, 3]);
+    expect(p.unchangedIds).toEqual([1]);
+    expect(p.counts.stale_fill).toBe(0);
   });
 });

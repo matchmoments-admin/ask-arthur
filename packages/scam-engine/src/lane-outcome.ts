@@ -216,6 +216,10 @@ export interface LaneOutcome {
     floor_due?: number;
     /** Eligible for urlscan but past the cap; unstamped, they lead next run. */
     deferred?: number;
+    /** DNS-unchanged rows urlscanned anyway in leftover cap slots, oldest
+     *  urlscan rescan first — keeps DNS-silent flips on a bounded revisit.
+     *  `dns_unchanged` counts only the unchanged rows actually skipped. */
+    stale_fill?: number;
   };
   "shopfront-clone-urlscan-submit": {
     reason?: "no_gated_candidates";

@@ -298,6 +298,9 @@ export interface UrlscanPlan {
     floor_due: number;
     /** Eligible for urlscan but left out by the cap — unstamped, lead next run. */
     deferred: number;
+    /** DNS-unchanged rows urlscanned anyway in leftover cap slots, oldest
+     *  urlscan rescan first. `dns_unchanged` counts only the rows skipped. */
+    stale_fill: number;
   };
 }
 
@@ -313,8 +316,12 @@ export interface UrlscanPlan {
  * before, staleness measured on the URLSCAN clock, so floor-due rows (the
  * urlscan-stalest) keep their reserved share.
  *
+ * Leftover slots are then filled with DNS-unchanged rows, oldest urlscan
+ * rescan first (`stale_fill`), so the lane never spends less urlscan than it
+ * did before v334 and every row keeps a bounded urlscan revisit.
+ *
  * Worklist-gate starvation rule: every row this gate REJECTS (unchanged, not
- * floor-due) is in `unchangedIds` and gets stamped. Eligible rows the cap
+ * floor-due, not filled) is in `unchangedIds` and gets stamped. Eligible rows the cap
  * leaves out are deliberately not stamped — each run scans `limit` of them,
  * so that set drains rather than parking at the head.
  */
@@ -336,6 +343,7 @@ export function planUrlscanRechecks(
     dns_no_baseline: 0,
     floor_due: 0,
     deferred: 0,
+    stale_fill: 0,
   };
   for (const row of slice) {
     const read = byId.get(row.id);
@@ -366,11 +374,32 @@ export function planUrlscanRechecks(
     Math.floor(room * STALE_FLOOR_SHARE),
     urlscanClock,
   );
-  // Changed rows lead the submit order too, so a wall-clock stop falls on the
-  // tail of the no-signal rows, never on a DNS change.
-  const scan = [...first, ...rest];
-  counts.deferred = changed.length + eligible.length - scan.length;
-  return { scan, unchangedIds, counts };
+  // STALE FILL (decision on #1261): slots the gate did not need go to the
+  // DNS-unchanged rows whose last urlscan rescan is OLDEST, so the quota the
+  // lane already spends today keeps rotating urlscan through the whole pool.
+  // Without it a DNS-silent flip (content swapped on the same host) on an
+  // older alert waited for the 30-day floor, worse than today's ~6.6-day mean.
+  // It spends nothing new: the same 90 cap, pacing and cooldown. Filled rows
+  // are scanned rows — they leave unchangedIds and get a fresh baseline.
+  const fillRoom = Math.max(0, limit - first.length - rest.length);
+  const fill = slice
+    .filter((r) => unchangedIds.includes(r.id))
+    .sort((a, b) => {
+      const ta = a.last_rechecked_at ? Date.parse(a.last_rechecked_at) : -Infinity;
+      const tb = b.last_rechecked_at ? Date.parse(b.last_rechecked_at) : -Infinity;
+      if (ta !== tb) return ta - tb; // oldest urlscan rescan first, NULLs first
+      return byRiskDesc(a, b);
+    })
+    .slice(0, fillRoom);
+  const filled = new Set(fill.map((r) => r.id));
+  const stamped = unchangedIds.filter((id) => !filled.has(id));
+  counts.stale_fill = fill.length;
+  counts.dns_unchanged = stamped.length;
+  // Changed rows lead the submit order, the fill trails it, so a wall-clock
+  // stop falls on the no-signal tail, never on a DNS change.
+  const scan = [...first, ...rest, ...fill];
+  counts.deferred = changed.length + eligible.length - first.length - rest.length;
+  return { scan, unchangedIds: stamped, counts };
 }
 
 // inngest-finish-budget: 7 boundaries — check-brake, check-cooldown,
