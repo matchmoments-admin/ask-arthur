@@ -10,6 +10,7 @@ export {
 } from "./canonicalise";
 export {
   LEXICAL_MATCHER_VERSION,
+  candidateLabelKey,
   lexicalMatch,
   type MatchResult,
   type SignalType,

@@ -476,7 +476,7 @@ function SlideAuBrands({ data, page }: SlideProps) {
         <span className="r">PER BRAND · {period}</span>
       </div>
       <h2 className="h2">The Australian brands most impersonated</h2>
-      <div className="subhead">Copycat domains detected per brand.</div>
+      <div className="subhead">Copycat domains detected per brand. One name registered across 4+ web endings counts once.</div>
       <div className="rows">
         {data.topAuBrands.map((b, i) => (
           <div className="row" key={b.brand}>
@@ -487,7 +487,7 @@ function SlideAuBrands({ data, page }: SlideProps) {
         ))}
       </div>
       <div className="foot rule2 bot">
-        <div className="reg">Ranked by lookalike domains detected in {data.periodLabel}. Suspected impersonation — detection does not confirm intent.</div>
+        <div className="reg">Ranked by lookalikes detected in {data.periodLabel}, a bulk registration of one name counted once. Suspected impersonation — detection does not confirm intent.</div>
         <Pg n={page} />
       </div>
     </section>

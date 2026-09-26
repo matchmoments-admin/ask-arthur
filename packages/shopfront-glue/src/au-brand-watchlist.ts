@@ -40,13 +40,23 @@ export interface BrandEntry {
   // not just CT-eligible ones) is the firehose's exclusion list — see
   // getCtMonitorConfig.
   ct?: { keyword: string; tier: "core" | "expanded" };
+  // Matcher v5 (#1150). A FIVE-character token's 1-edit neighbourhood is dense
+  // with brandables and foreign words, so v4 gates it shut and only a
+  // homoglyph substitution re-opens it. `true` re-opens it for this brand: any
+  // 1-edit label that is not an ordinary word matches (short-brand-neighbour-
+  // words.ts is the floor). Set it ONLY on evidence — a confirmed threat in the
+  // brand's gated neighbourhood — and re-measure with the #1150 harness; each
+  // brand costs ~3-9 alerts a month (apple 26, bonds 8, coles 14 per 90 days of
+  // the raw feed). No effect on a brand whose tokens are all ≥6 chars.
+  openShortNeighbourhood?: true;
 }
 
 export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   // Retail — big-box
   { brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] },
   { brand: "Woolworths", legitimate_domains: ["woolworths.com.au"] },
-  { brand: "Coles", legitimate_domains: ["coles.com.au"] },
+  // openShortNeighbourhood: woles.net (weaponised 2026-08-10) — #1150.
+  { brand: "Coles", legitimate_domains: ["coles.com.au"], openShortNeighbourhood: true },
   { brand: "Aldi", legitimate_domains: ["aldi.com.au"] },
   { brand: "IGA", legitimate_domains: ["iga.com.au"] },
   { brand: "Kmart", legitimate_domains: ["kmart.com.au"] },
@@ -112,7 +122,8 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   // Fashion + apparel
   { brand: "Smiggle", legitimate_domains: ["smiggle.com.au"] },
   { brand: "Cotton On", legitimate_domains: ["cottonon.com"] },
-  { brand: "Bonds", legitimate_domains: ["bonds.com.au"] },
+  // openShortNeighbourhood: bonos.buzz + bnds.cl (both weaponised) — #1150.
+  { brand: "Bonds", legitimate_domains: ["bonds.com.au"], openShortNeighbourhood: true },
   { brand: "Country Road", legitimate_domains: ["countryroad.com.au"] },
   { brand: "Witchery", legitimate_domains: ["witchery.com.au"] },
   { brand: "Sportsgirl", legitimate_domains: ["sportsgirl.com.au"] },
@@ -594,7 +605,9 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
 
   // Tech giants — tech-support + account-suspension + verification-code scams
   { brand: "Amazon", legitimate_domains: ["amazon.com.au", "amazon.com"] },
-  { brand: "Apple", legitimate_domains: ["apple.com", "icloud.com"] },
+  // openShortNeighbourhood: appve.vu + appie.* (6 confirmed) and 34 other
+  // confirmed apple lookalikes in 90 days — #1150.
+  { brand: "Apple", legitimate_domains: ["apple.com", "icloud.com"], openShortNeighbourhood: true },
   { brand: "Microsoft", legitimate_domains: ["microsoft.com", "outlook.com", "live.com"] },
   { brand: "Google", legitimate_domains: ["google.com", "google.com.au", "gmail.com"] },
   { brand: "WhatsApp", legitimate_domains: ["whatsapp.com"] },

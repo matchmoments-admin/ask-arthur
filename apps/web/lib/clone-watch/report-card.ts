@@ -324,6 +324,9 @@ export interface BrandTrendRow {
   brand: string;
   is_au: boolean;
   clones: number;
+  /** `clones` with each bulk registration counted once (#1084, v333). A
+   *  zero row is a measured 0 — the brand was watched and not targeted. */
+  targeting_events: number;
   reported_to_netcraft: number;
   likely_phishing: number;
   parked: number;
@@ -468,6 +471,9 @@ export interface FrozenMonth {
   brands: number;
   matcherVersion: string | null;
   sweptDomains: number | null;
+  /** Targeting events per brand (v333 `targeting_events`, matcher v5+).
+   *  null = the month was frozen without them (any v4 month) — NOT zero. */
+  eventsByBrand: Map<string, number> | null;
 }
 
 /** Feed-volume change above which a delta carries a "feed changed" caveat. */
@@ -484,10 +490,21 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   const priorByBrand = aggregateClonesByDomain(priorRows);
   // #1226: last month as PUBLISHED, when it was.
   const priorFrozen = input.priorStore?.get(prevWin.periodMonth) ?? null;
+  // Per-brand comparisons (ranking, spotlight, trend) are in TARGETING EVENTS
+  // since matcher v5 (#1084): a bulk registration of one label across ≥4 TLDs
+  // is one event, so `gonds.*` × 9 cannot make Bonds a riser on its own. The
+  // TOTAL stays in domains (below) — every domain is a real registration, and
+  // the headline is "lookalike domains".
+  //
+  // A frozen month written before v5 has no event counts (`eventsByBrand`
+  // null). Comparing this month's events with its domains would be two units
+  // in one delta, so such a prior is treated as a method change for the brand
+  // comparisons — never read as 0, never back-filled with `clones`.
+  const priorEventsMeasured = !priorFrozen || priorFrozen.eventsByBrand !== null;
   const priorClonesOf = (brand: string): number =>
     priorFrozen
-      ? (priorFrozen.byBrand.get(brand) ?? 0)
-      : (priorByBrand.get(brand)?.detected ?? 0);
+      ? (priorFrozen.eventsByBrand?.get(brand) ?? 0)
+      : (priorByBrand.get(brand)?.targetingEvents ?? 0);
   // The reported month's OWN matcher version: its stamped value when it is
   // already frozen (a re-compute after a later bump must not suppress an
   // edition that was comparable), else the code in force now.
@@ -557,28 +574,30 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   for (const [brand, m] of byBrand) {
     const priorClones = priorClonesOf(brand);
     const v = classifyTrend({
-      currentClones: m.detected,
+      currentClones: m.targetingEvents,
       priorClones,
       currentMonth: periodMonth.slice(0, 7),
       priorMonth: priorPeriod,
       coverage: coverageByBrand.get(brand),
-      methodChanged,
+      methodChanged: methodChanged || !priorEventsMeasured,
     });
     verdicts.push(v);
     verdictByBrand.set(brand, v);
     if (v.kind === "claimable") {
       claimable.push({
         brand,
-        clones: m.detected,
+        clones: m.targetingEvents,
         priorClones,
         delta: v.delta,
         pct: v.pct,
         // Published months only: absent = not watched / not published
         // (v325 writes a zero row for every watched brand), never 0.
         series: [
-          seriesTwoBack ? (seriesTwoBack.byBrand.get(brand) ?? null) : null,
-          priorFrozen ? priorClones : null,
-          m.detected,
+          seriesTwoBack?.eventsByBrand
+            ? (seriesTwoBack.eventsByBrand.get(brand) ?? null)
+            : null,
+          priorFrozen?.eventsByBrand ? priorClones : null,
+          m.targetingEvents,
         ],
       });
     }
@@ -635,7 +654,8 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   const topRegistrars = rollupRegistrars(rawRegistrars).slice(0, 6);
 
   const ranked = [...byBrand.entries()]
-    .map(([brand, m]) => ({ brand, clones: m.detected }))
+    // Ranked by targeting events (#1084) — the spotlight reads this list.
+    .map(([brand, m]) => ({ brand, clones: m.targetingEvents }))
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
   // Super-fund spotlight: the highest-ranked super fund, with its rank among
@@ -792,6 +812,7 @@ export function buildTrendRows(
         brand,
         is_au: isAuBrand(brand),
         clones: m.detected,
+        targeting_events: m.targetingEvents,
         reported_to_netcraft: m.netcraftReported,
         likely_phishing: m.byClassification["likely_phishing"] ?? 0,
         parked: m.byClassification["parked_for_sale"] ?? 0,
@@ -854,6 +875,7 @@ export function buildTrendRows(
       brand,
       is_au: isAuBrand(brand),
       clones: 0,
+      targeting_events: 0,
       reported_to_netcraft: 0,
       likely_phishing: 0,
       parked: 0,

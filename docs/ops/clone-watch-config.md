@@ -700,6 +700,79 @@ prints — LinkedIn caption and `/clone-watch/[period]` alike.
 - **Three months.** `mom.series` / claimable `series` carry the last three
   published months; an unpublished month is null and the line is omitted,
   never shown as 0.
+- **Per-brand unit = targeting events (matcher v5, #1084).** The ranking, the
+  spotlight and each brand's delta count a bulk registration (one label on
+  ≥ 4 TLDs in the month) once; the headline total stays in domains. A prior
+  month frozen without `targeting_events` (every v4 month) reads as a method
+  change for the per-brand comparison — never as 0, never back-filled.
+
+## 7b. Matcher v5 — short-brand recall + bulk registrations (#1150 / #1084, 2026-09-27)
+
+**What changed.** v4 gated the 1-edit neighbourhood of every 5-char token
+and lost nine CONFIRMED threats (appie.{bond,beer,autos,mom,beauty},
+appve.vu, bonos.buzz, bnds.cl, woles.net). v5 re-opens it on two paths,
+only where v4 said no (every v4 match is a v5 match):
+
+- **homoglyph** — one visual-confusable substitution (`HOMOGLYPH_SUBSTITUTIONS`
+  in `lexical-match.ts`), every brand: appie, b0nds, c0les, sh3in.
+- **open_neighbourhood** — brands flagged `openShortNeighbourhood` in
+  `au-brand-watchlist.ts` (Apple, Bonds, Coles): any non-word 1-edit label.
+- **floor** — `SHORT_BRAND_NEIGHBOUR_WORDS` (generated, 164 words) blocks
+  both paths: bonus/bands/gonds/apply/bondi/cowes stay dead.
+
+The admitted row carries `signals[].evidence.short_brand_gate`, so the v5
+additions are selectable:
+
+```sql
+SELECT candidate_domain, inferred_target_domain, s->'evidence'->>'short_brand_gate' AS gate,
+       triage_status, lifecycle_state, urlscan_classification, weaponised_at
+FROM shopfront_clone_alerts, jsonb_array_elements(signals) s
+WHERE s->'evidence' ? 'short_brand_gate'
+ORDER BY first_seen_at DESC;
+```
+
+**Why not the #1083 word denylist alone.** Measured, it is wrong in the
+data: 326 of the 478 labels v4 dropped since June are NOT dictionary words
+(xbank, dmart, medex, doula, iioet), so rejecting only words re-admits ~114
+a month at a 2.8% threat rate (v4's kept matches: 8.9%). v5 adds 33 domains
+to the 90-day cohort (45 since June), 9 of them confirmed threats, ~16 a
+month on the raw feed.
+
+**Opening another brand.** Set `openShortNeighbourhood` only on evidence (a
+confirmed threat in the brand's gated neighbourhood), and re-run the
+harness: export 90 days of distinct `candidate_domain`s + every
+weaponised / taken_down / likely_phishing alert, download the same days of
+the whoisds free file (`computeNrdUrl` — the feed prod saw; the free file
+is the whole input), run `lexicalMatch` from `origin/main` and the branch
+over both, and diff by brand. Check every added or dropped domain against
+`weaponised_at` / `lifecycle_state` / `urlscan_classification` — the v4
+audit stamped every v4 drop `triage_status='fp'` mechanically
+(`[matcher-v4-audit]`), so `fp` on those rows is not a judgment.
+A new 5-char brand or alias makes the covered-token guard red until
+`scripts/gen-short-brand-neighbour-words.ts` is re-run.
+
+**Do NOT use §5's "wipe `source='nrd'` rows + re-fire" verification for
+v5** — it would destroy lifecycle / Netcraft / weaponisation history. The
+harness above is the verification.
+
+**Re-triage after merge (operator; read-only plan, measured 2026-09-27).**
+Matching is decided at ingest. v5 re-admits 45 existing rows first seen
+June–August (June 16, July 20, August 9): 36 carry the v4 audit's mechanical
+`fp` and are dropped by `applyCohortRules`; the other 9 are the confirmed
+threats, already counted. From 2026-09-04 v4 never inserted its gated labels,
+so ~11 September v5 hits (measured on the raw feed) do not exist as rows —
+the ingest has no dated-backfill parameter, and none is proposed.
+
+- June–August are published as v4. Do not restate them: un-fp-ing their 36
+  rows changes nothing until a re-publish, and a re-publish restates
+  editions already read (and re-stamps them `v5`) — not worth 36 rows spread
+  over three months.
+- September freezes as v4 on 1 October (merge after that — see the PR).
+- October is the first v5 month; its edition (1 November) shows no MoM
+  (method changed, #1247), November's is the first comparable one.
+- If a restatement is ever wanted: `triage_status` back to
+  `needs_investigation`, note `[matcher-v5-audit]`, `triage_by` NULL, for the
+  45 rows the §7b SQL selects — then re-publish with an `editorialNote`.
 
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)
 

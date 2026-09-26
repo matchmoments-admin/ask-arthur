@@ -267,6 +267,8 @@ const frozen = (byBrand: Record<string, number>, over: Partial<FrozenMonth> = {}
     brands: [...m.values()].filter((n) => n > 0).length,
     matcherVersion: LEXICAL_MATCHER_VERSION,
     sweptDomains: 2_100_000,
+    // A v5 month with no bulk registrations: events = domains.
+    eventsByBrand: new Map(m),
     ...over,
   };
 };

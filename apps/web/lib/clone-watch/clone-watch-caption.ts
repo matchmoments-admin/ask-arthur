@@ -130,8 +130,8 @@ export function generateCloneWatchCaption(
     const restClause = rest.length ? `, with ${joinAnd(rest)} close behind` : "";
     findings.push(
       fundIsLead
-        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
-        : `${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}.`,
+        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${lead.n} lookalikes)${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
+        : `${lead.name} was the most-copied Australian brand (${lead.n} lookalikes)${restClause}.`,
     );
   }
 
@@ -155,11 +155,11 @@ export function generateCloneWatchCaption(
       // from a volume change alone, which is a weaker basis than the
       // infrastructure fingerprint we already decline to call an actor
       // (campaign-summary.ts, targeting-copy.ts rule 3). Say what we measured.
-      `${spName} was the month's sharpest riser — ${sp.priorClones} lookalike domains last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump that size is worth a look: it is registration activity concentrating on one brand rather than spreading evenly.`,
+      `${spName} was the month's sharpest riser — ${sp.priorClones} lookalikes last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump that size is worth a look: it is registration activity concentrating on one brand rather than spreading evenly.`,
     );
   } else if (sp.kind === "new_entrant" && spName && !spotlightIsLead) {
     findings.push(
-      `${spName} appeared on the map for the first time (${sp.clones} lookalike domains) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
+      `${spName} appeared on the map for the first time (${sp.clones} lookalikes) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
     );
   } else if (sp.kind === "super_fund" && spName && !fundIsLead) {
     findings.push(
@@ -281,6 +281,10 @@ export function generateCloneWatchCaption(
   const firstComment = [
     "Check any link, text or number yourself → https://askarthur.au (free, no signup).",
     `${reading.label} → https://askarthur.au/blog/${reading.slug}`,
+    // Matcher v5 (#1084): the per-brand numbers above are targeting events. In
+    // the comment, not the body — the body sits at the LinkedIn cap in the
+    // worst case (cloneWatchCaption.test.ts "fits, with the disclosure intact").
+    "Per brand, one name bulk-registered across 4+ web endings in a month counts once.",
     methodUrl ? `How we count these → ${methodUrl}` : "",
     "Targeted brand and want your full clone list? Partner with us → https://askarthur.au/contact",
   ]
