@@ -234,7 +234,7 @@ export async function safeFetch(
       const res = await doFetch(current, {
         method,
         headers,
-        body: body as BodyInit | undefined,
+        body: body as RequestInit["body"],
         redirect: "manual",
         signal,
         // `dispatcher` is undici-specific (Node's fetch is undici); not in
