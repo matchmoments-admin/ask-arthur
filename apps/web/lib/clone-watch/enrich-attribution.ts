@@ -52,6 +52,9 @@ export interface CloneAttribution {
     /** #1253 — only on `source: "deferred"`: quota_deferred | http_error |
      *  not_configured. */
     deferralReason?: string;
+    /** #1253 — only on `source: "deferred"` when whoisjson answered: its HTTP
+     *  status (429 = quota, never a strike). */
+    deferralStatus?: number;
     /** #1253 — http_error deferrals this row has had in a row; the re-offer
      *  stops asking at WHOIS_HTTP_ERROR_MAX_DEFERRALS. */
     httpErrorDeferrals?: number;
@@ -108,6 +111,9 @@ export function shapeWhoisSection(
           ...(whois.retryAfter ? { retryAfter: whois.retryAfter } : {}),
           ...(whois.deferralReason
             ? { deferralReason: whois.deferralReason }
+            : {}),
+          ...(whois.deferralStatus !== undefined
+            ? { deferralStatus: whois.deferralStatus }
             : {}),
         }
       : {}),

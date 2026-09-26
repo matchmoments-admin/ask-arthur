@@ -133,6 +133,14 @@ const ENRICH_WALL_CLOCK_MS = 200_000;
  */
 const WHOIS_REOFFER_WALL_CLOCK_MS = 90_000;
 
+/** The re-offer worklist select-pending memoises (#1253). `due` is the
+ *  number of ids returned (capped); null = that select failed. */
+interface ReofferSelection {
+  ids: number[];
+  due: number | null;
+  backlog: number | null;
+}
+
 interface PendingAlert {
   id: number;
   candidate_domain: string;
@@ -140,7 +148,8 @@ interface PendingAlert {
 }
 
 // inngest-finish-budget: 6 boundaries — select-pending, enrich-batch
-// (budgetedStep), whois-reoffer (budgetedStep, #1253), kit-pivots
+// (budgetedStep), whois-reoffer (budgetedStep, #1253 — scheduled only when
+// select-pending found due ids; counted here as the worst case), kit-pivots
 // (budgetedStep), backfill-campaign-keys, log-outcome. Was 64: the 60
 // per-alert `enrich-${id}` steps are folded into ONE bounded-concurrency step
 // (#1229; #1074 named this the largest per-item fan-out in the fleet).
@@ -251,24 +260,66 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         // seam trips supabase-js's type-level parser — TS2589); keep the two
         // in step.
         const eligibleOr = `urlscan_scanned_at.not.is.null,first_seen_at.lt.${unscannedCutoff}`;
-        const [{ data, error }, backlogRes] = await Promise.all([
-          sb
-            .from("shopfront_clone_alerts")
-            .select("id, candidate_domain, urlscan_evidence")
-            .eq("source", "nrd")
-            .or(eligibleOr)
-            .is("attribution", null)
-            .gte("first_seen_at", since)
-            .order("first_seen_at", { ascending: true })
-            .limit(ENRICH_RUN_CAP),
-          sb
-            .from("shopfront_clone_alerts")
-            .select("id", { count: "exact", head: true })
-            .eq("source", "nrd")
-            .or(eligibleOr)
-            .is("attribution", null)
-            .gte("first_seen_at", since),
-        ]);
+        // #1253: the WHOIS re-offer's worklist rides in this same step (was
+        // its own always-scheduled step): up to WHOIS_REOFFER_RUN_CAP due ids
+        // plus the due head count. The whois-reoffer step is then scheduled
+        // ONLY when ids came back — about 23 days a month nothing is due.
+        // The ids are memoised here; the step re-reads the rows by id under
+        // the due predicate, and v336's write re-checks `<= now()`, so a
+        // stale id can never clobber a row pushed forward since.
+        const nowIso = new Date().toISOString();
+        const [{ data, error }, backlogRes, reofferRes, reofferCountRes] =
+          await Promise.all([
+            sb
+              .from("shopfront_clone_alerts")
+              .select("id, candidate_domain, urlscan_evidence")
+              .eq("source", "nrd")
+              .or(eligibleOr)
+              .is("attribution", null)
+              .gte("first_seen_at", since)
+              .order("first_seen_at", { ascending: true })
+              .limit(ENRICH_RUN_CAP),
+            sb
+              .from("shopfront_clone_alerts")
+              .select("id", { count: "exact", head: true })
+              .eq("source", "nrd")
+              .or(eligibleOr)
+              .is("attribution", null)
+              .gte("first_seen_at", since),
+            sb
+              .from("shopfront_clone_alerts")
+              .select("id")
+              .not("attribution_retry_after", "is", null)
+              .lte("attribution_retry_after", nowIso)
+              .order("attribution_retry_after", { ascending: true })
+              .limit(WHOIS_REOFFER_RUN_CAP),
+            sb
+              .from("shopfront_clone_alerts")
+              .select("id", { count: "exact", head: true })
+              .not("attribution_retry_after", "is", null)
+              .lte("attribution_retry_after", nowIso),
+          ]);
+        // A failed head count returns count=null AND error=null (204): null
+        // is "unknown", never 0 (head-count-failures-carry-no-error).
+        const reoffer: ReofferSelection = reofferRes.error
+          ? { ids: [], due: null, backlog: null }
+          : {
+              ids: ((reofferRes.data ?? []) as Array<{ id: number }>).map(
+                (r) => r.id,
+              ),
+              due: (reofferRes.data ?? []).length,
+              backlog:
+                typeof reofferCountRes.count === "number"
+                  ? reofferCountRes.count
+                  : null,
+            };
+        if (reofferRes.error) {
+          // Recorded as whois_reoffer_due = null; lane health pages when that
+          // repeats (laneHealth.ts), so a broken select cannot hide.
+          logger.warn("clone-watch enrich: whois re-offer select failed", {
+            error: reofferRes.error.message,
+          });
+        }
         if (error) {
           logger.error("clone-watch enrich: select failed", {
             error: error.message,
@@ -277,16 +328,16 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
             braked: false as const,
             rows: [] as PendingAlert[],
             backlog: null,
+            reoffer,
           };
         }
-        // A failed head count returns count=null AND error=null (204): null
-        // is "unknown", never 0 (head-count-failures-carry-no-error).
         const backlog =
           typeof backlogRes.count === "number" ? backlogRes.count : null;
         return {
           braked: false as const,
           rows: (data ?? []) as PendingAlert[],
           backlog,
+          reoffer,
         };
       });
       if (selected.braked) {
@@ -439,78 +490,74 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // (whois-reoffer.ts). The monthly guard is respected by construction:
       // lookupWhois checks it before any request, and a guarded re-ask comes
       // back deferred to the 1st of next month.
-      const reoffer: WhoisReofferOutcome & {
-        backlog: number | null;
-        selectFailed?: boolean;
-      } = await budgetedStep(
-        step,
-        "whois-reoffer",
-        WHOIS_REOFFER_WALL_CLOCK_MS,
-        async (budget) => {
-          const sb = createServiceClient();
-          if (!sb) return { ...NO_REOFFER, backlog: null };
-          const nowIso = new Date().toISOString();
-          const [{ data, error }, backlogRes] = await Promise.all([
-            sb
-              .from("shopfront_clone_alerts")
-              .select("id, candidate_domain, attribution")
-              .not("attribution_retry_after", "is", null)
-              .lte("attribution_retry_after", nowIso)
-              .order("attribution_retry_after", { ascending: true })
-              .limit(WHOIS_REOFFER_RUN_CAP),
-            sb
-              .from("shopfront_clone_alerts")
-              .select("id", { count: "exact", head: true })
-              .not("attribution_retry_after", "is", null)
-              .lte("attribution_retry_after", nowIso),
-          ]);
-          // A failed head count returns count=null AND error=null (204).
-          const backlog =
-            typeof backlogRes.count === "number" ? backlogRes.count : null;
-          if (error) {
-            // Not thrown: a re-offer that cannot read its worklist must not
-            // cost the kit pivots and the Outcome Row. The Outcome Row
-            // records whois_reoffer_due = null (unknown, never 0).
-            logger.warn("clone-watch enrich: whois re-offer select failed", {
-              error: error.message,
-            });
-            return { ...NO_REOFFER, backlog, selectFailed: true };
-          }
-          const rows = (data ?? []) as ReofferRow[];
-          if (rows.length === 0) return { ...NO_REOFFER, backlog };
-          const outcome = await runWhoisReoffer({
-            rows,
-            budget,
-            lookup: (domain) =>
-              lookupDomainRegistration(domain, { priority: "batch" }),
-            flush: async (writes) => {
-              const { data: n, error: wErr } = await sb.rpc(
-                "apply_clone_alert_whois_reoffers",
-                { p_rows: writes },
-              );
-              if (wErr) return { error: wErr.message };
-              return { written: typeof n === "number" ? n : 0 };
-            },
-            campaignKey: featureFlags.cloneCampaigns
-              ? (d) => campaignKeyFromDossier(d as DossierShape)
-              : undefined,
-            onFlushError: (alertIds, message) =>
-              logger.error("clone-watch enrich: whois re-offer write failed", {
-                alertIds,
-                error: message,
-              }),
-            concurrency: ENRICH_CONCURRENCY,
-            minStartIntervalMs: ENRICH_MIN_START_INTERVAL_MS,
-            flushEvery: ENRICH_FLUSH_EVERY,
-          });
-          return { ...outcome, backlog };
-        },
-      );
-      if (reoffer.due > 0 && reoffer.reoffered === 0) {
+      //
+      // Scheduled ONLY when select-pending returned due ids (memoised, so the
+      // skip is replay-stable): a quiet day costs no step.
+      const reofferSel: ReofferSelection =
+        "reoffer" in selected && selected.reoffer
+          ? selected.reoffer
+          : { ids: [], due: null, backlog: null };
+      const reoffer: WhoisReofferOutcome =
+        reofferSel.ids.length === 0
+          ? { ...NO_REOFFER }
+          : await budgetedStep(
+              step,
+              "whois-reoffer",
+              WHOIS_REOFFER_WALL_CLOCK_MS,
+              async (budget) => {
+                const sb = createServiceClient();
+                if (!sb) return { ...NO_REOFFER };
+                // Re-read the memoised ids under the due predicate: a retry of
+                // this step skips rows its first attempt already moved.
+                const { data, error } = await sb
+                  .from("shopfront_clone_alerts")
+                  .select("id, candidate_domain, attribution")
+                  .in("id", reofferSel.ids)
+                  .not("attribution_retry_after", "is", null)
+                  .lte("attribution_retry_after", new Date().toISOString())
+                  .order("attribution_retry_after", { ascending: true });
+                if (error) {
+                  // Thrown, like enrich-batch's read-back: the step's retry is
+                  // the right answer to a DB blip.
+                  throw new Error(
+                    `clone-watch enrich: whois re-offer read failed: ${error.message}`,
+                  );
+                }
+                const rows = (data ?? []) as ReofferRow[];
+                if (rows.length === 0) return { ...NO_REOFFER };
+                return runWhoisReoffer({
+                  rows,
+                  budget,
+                  lookup: (domain) =>
+                    lookupDomainRegistration(domain, { priority: "batch" }),
+                  flush: async (writes) => {
+                    const { data: n, error: wErr } = await sb.rpc(
+                      "apply_clone_alert_whois_reoffers",
+                      { p_rows: writes },
+                    );
+                    if (wErr) return { error: wErr.message };
+                    return { written: typeof n === "number" ? n : 0 };
+                  },
+                  campaignKey: featureFlags.cloneCampaigns
+                    ? (d) => campaignKeyFromDossier(d as DossierShape)
+                    : undefined,
+                  onFlushError: (alertIds, message) =>
+                    logger.error(
+                      "clone-watch enrich: whois re-offer write failed",
+                      { alertIds, error: message },
+                    ),
+                  concurrency: ENRICH_CONCURRENCY,
+                  minStartIntervalMs: ENRICH_MIN_START_INTERVAL_MS,
+                  flushEvery: ENRICH_FLUSH_EVERY,
+                });
+              },
+            );
+      if (reofferSel.ids.length > 0 && reoffer.reoffered === 0) {
         // The silent-zero shape (laneHealth.ts) — logged at warn so it ships
         // to Axiom unsampled on the run it happens.
         logger.warn("clone-watch enrich: whois re-offer due but none started", {
           ...reoffer,
+          due: reofferSel.due,
         });
       }
 
@@ -724,8 +771,8 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
           backlog: "backlog" in selected ? (selected.backlog ?? null) : null,
           // #1253: deferred WHOIS, and the re-offer that answers it.
           whois_deferred: enrich.whoisDeferred,
-          whois_reoffer_due: reoffer.selectFailed ? null : reoffer.due,
-          whois_reoffer_backlog: reoffer.backlog,
+          whois_reoffer_due: reofferSel.due,
+          whois_reoffer_backlog: reofferSel.backlog,
           whois_reoffered: reoffer.reoffered,
           whois_resolved: reoffer.resolved,
           whois_redeferred: reoffer.redeferred,

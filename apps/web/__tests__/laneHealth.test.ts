@@ -372,9 +372,18 @@ describe("classifyLaneHealth", () => {
       expect(kinds(rows)).toEqual(["clone-watch-enrich-attribution:silent_zero"]);
     });
 
-    it("a working re-offer, or an unknown due count (null), does not page", () => {
+    it("a working re-offer, or nothing due, does not page", () => {
       expect(kinds(withEnrich([reofferRow(1, 20, 20), reofferRow(25, 20, 20)]))).toEqual([]);
-      expect(kinds(withEnrich([reofferRow(1, null, 0), reofferRow(25, null, 0)]))).toEqual([]);
+      expect(kinds(withEnrich([reofferRow(1, 0, 0), reofferRow(25, 0, 0)]))).toEqual([]);
+    });
+
+    // Go-red (2026-09-27): drop the `whois_reoffer_due === null` disjunct →
+    // "a due select that keeps failing" is silent.
+    it("a due select that keeps failing (null, 2 runs) is silent_zero; one failure is not", () => {
+      expect(kinds(withEnrich([reofferRow(1, null, 0), reofferRow(25, null, 0)]))).toEqual([
+        "clone-watch-enrich-attribution:silent_zero",
+      ]);
+      expect(kinds(withEnrich([reofferRow(1, null, 0), reofferRow(25, 0, 0)]))).toEqual([]);
     });
 
     it("silent_zero outranks cap_bound (a capped retrieve holding an unnotified weaponised alert)", () => {

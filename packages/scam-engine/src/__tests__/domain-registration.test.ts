@@ -136,6 +136,24 @@ describe("lookupDomainRegistration", () => {
     },
   );
 
+  // #1259 review. Go-red (2026-09-27): drop the deferralStatus spread in
+  // fromWhois → this fails (undefined), and the re-offer could no longer tell
+  // a 429 from another status.
+  it("carries the vendor HTTP status through as deferralStatus", async () => {
+    lookupWhois.mockResolvedValue({
+      ...WHOIS,
+      registrar: null,
+      deferral: {
+        reason: "quota_deferred",
+        retryAfter: "2026-10-01T00:00:00.000Z",
+        status: 429,
+      },
+    });
+    const r = await lookupDomainRegistration("x.shop");
+    expect(r.source).toBe("deferred");
+    expect(r.deferralStatus).toBe(429);
+  });
+
   it("a served whoisjson answer with no registrar stays 'whoisjson' (final)", async () => {
     lookupWhois.mockResolvedValue({ ...WHOIS, registrar: null });
     const r = await lookupDomainRegistration("x.shop");

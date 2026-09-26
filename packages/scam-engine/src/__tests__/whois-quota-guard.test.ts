@@ -27,6 +27,7 @@ import {
   __resetWhoisQuotaCacheForTests,
   lookupWhois,
   startOfNextMonthUtc,
+  whoisScamUrlColumns,
 } from "../whois";
 
 const fetchMock = vi.fn(async () => ({
@@ -120,12 +121,12 @@ describe("lookupWhois deferral (#1253)", () => {
     }
   });
 
-  it("non-200 → http_error with status, retry in 24h", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 429 } as never);
+  it("non-200 (not 429) → http_error with status, retry in 24h", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503 } as never);
     const before = Date.now();
     const r = await lookupWhois("x.shop", { priority: "batch" });
     expect(r.deferral?.reason).toBe("http_error");
-    expect(r.deferral?.status).toBe(429);
+    expect(r.deferral?.status).toBe(503);
     const at = new Date(r.deferral!.retryAfter).getTime();
     expect(at - before).toBeGreaterThanOrEqual(WHOIS_HTTP_RETRY_MS - 1000);
     expect(at - before).toBeLessThanOrEqual(WHOIS_HTTP_RETRY_MS + 5000);
@@ -138,11 +139,38 @@ describe("lookupWhois deferral (#1253)", () => {
     expect(r.deferral?.status).toBeUndefined();
   });
 
-  it("no key → not_configured, no request", async () => {
-    delete process.env.WHOIS_API_KEY;
-    const r = await lookupWhois("x.shop", { priority: "batch" });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(r.deferral?.reason).toBe("not_configured");
+  // #1259 review. Go-red (2026-09-27): map every non-200 to http_error
+  // again → this fails (reason http_error, retry +24h).
+  it("a whoisjson 429 is quota, not a failure → quota_deferred to the 1st, status kept", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-24T13:30:00Z"), toFake: ["Date"] });
+    try {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 429 } as never);
+      const r = await lookupWhois("x.shop", { priority: "batch" });
+      expect(r.deferral).toEqual({
+        reason: "quota_deferred",
+        retryAfter: "2026-10-01T00:00:00.000Z",
+        status: 429,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // #1259 review. Go-red (2026-09-27): give not_configured the +24h retry
+  // again → this fails (daily churn on a missing key).
+  it("no key → not_configured, no request, retry on the 1st (not daily)", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-24T13:30:00Z"), toFake: ["Date"] });
+    try {
+      delete process.env.WHOIS_API_KEY;
+      const r = await lookupWhois("x.shop", { priority: "batch" });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(r.deferral).toEqual({
+        reason: "not_configured",
+        retryAfter: "2026-10-01T00:00:00.000Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a served 200 carries NO deferral, even with no registrar — that answer is final", async () => {
@@ -156,5 +184,40 @@ describe("lookupWhois deferral (#1253)", () => {
     expect(startOfNextMonthUtc(new Date("2026-12-31T23:59:59Z")).toISOString()).toBe(
       "2027-01-01T00:00:00.000Z",
     );
+  });
+});
+
+// #1259 review — the ONE scam_urls whois_* mapping. Go-red (2026-09-27):
+// drop the `if (w.deferral) return {}` → "a deferred lookup maps to no
+// columns" fails.
+describe("whoisScamUrlColumns", () => {
+  const served = {
+    registrar: "R",
+    registrarAbuseEmail: null,
+    registrantCountry: "AU",
+    createdDate: "2026-01-01",
+    expiresDate: null,
+    nameServers: ["ns1"],
+    isPrivate: false,
+    raw: null,
+  };
+  it("a served lookup maps every whois_* column and stamps whois_lookup_at", () => {
+    expect(whoisScamUrlColumns(served, "T")).toMatchObject({
+      whois_registrar: "R",
+      whois_created_date: "2026-01-01",
+      whois_lookup_at: "T",
+    });
+  });
+  it("a deferred lookup maps to no columns (no nulls, no whois_lookup_at)", () => {
+    expect(
+      whoisScamUrlColumns(
+        {
+          ...served,
+          registrar: null,
+          deferral: { reason: "quota_deferred", retryAfter: "2026-10-01T00:00:00.000Z" },
+        },
+        "T",
+      ),
+    ).toEqual({});
   });
 });

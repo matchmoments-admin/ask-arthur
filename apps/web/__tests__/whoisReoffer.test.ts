@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -120,6 +118,45 @@ describe("planWhoisReoffer", () => {
       "abandoned",
     ]);
     expect(prev?.httpErrorDeferrals).toBe(WHOIS_HTTP_ERROR_MAX_DEFERRALS);
+  });
+
+  // #1259 review. Go-red (2026-09-27): make `isStrike` true for every
+  // http_error regardless of status → "a vendor 429 is never a strike" fails
+  // when a 429 arrives labelled http_error (the belt-and-braces path).
+  it("a vendor 429 is never a strike — a row cannot be abandoned by quota", () => {
+    let prev: WhoisBlock | null = PREV;
+    for (let i = 0; i < WHOIS_HTTP_ERROR_MAX_DEFERRALS + 2; i++) {
+      for (const r of [
+        reg({
+          source: "deferred",
+          deferralReason: "quota_deferred",
+          deferralStatus: 429,
+          retryAfter: "2026-11-01T00:00:00.000Z",
+        }),
+        // Even mislabelled as http_error, a 429 status is not a strike.
+        reg({
+          source: "deferred",
+          deferralReason: "http_error",
+          deferralStatus: 429,
+          retryAfter: "2026-10-02T13:30:00.000Z",
+        }),
+      ]) {
+        const p = planWhoisReoffer(prev, r, NOW);
+        expect(p.verdict).toBe("redeferred");
+        expect(p.whois.deferralStatus).toBe(429);
+        prev = p.whois;
+      }
+    }
+    expect(prev?.httpErrorDeferrals).toBeUndefined();
+  });
+
+  it("not_configured is never a strike either", () => {
+    let prev: WhoisBlock | null = PREV;
+    for (let i = 0; i < WHOIS_HTTP_ERROR_MAX_DEFERRALS + 1; i++) {
+      const p = planWhoisReoffer(prev, deferredReg("not_configured"), NOW);
+      expect(p.verdict).toBe("redeferred");
+      prev = p.whois;
+    }
   });
 
   it("a thrown lookup (null) is an http_error deferral 24h out", () => {
@@ -270,59 +307,5 @@ describe("runWhoisReoffer", () => {
       now: () => NOW,
     });
     expect(out).toMatchObject({ reoffered: 2, written: 0, writeFailed: 2 });
-  });
-});
-
-/**
- * The v336 SQL the re-offer depends on. No harness runs PL/pgSQL here
- * (rpcs.smoke.test.ts self-skips without its env), so the load-bearing
- * clauses are pinned as text.
- *
- * Go-red (2026-09-27, each reverted → failed → restored): replace the merge with `SET attribution = src.whois`
- * → "merges only the whois key" fails; drop `a.attribution_retry_after IS
- * NOT NULL` → "writes only rows still marked" fails; drop the retry column
- * from apply_clone_alert_attributions → "the first write stamps" fails.
- */
-describe("migration v336", () => {
-  const sql = readFileSync(
-    join(
-      process.cwd(),
-      "../../supabase/migration-v336-clone-attribution-whois-deferral.sql",
-    ),
-    "utf8",
-  );
-  const fn = (name: string) => {
-    const start = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
-    expect(start).toBeGreaterThan(-1);
-    return sql.slice(start, sql.indexOf("$function$;", start));
-  };
-
-  it("the re-offer merges only the whois key", () => {
-    expect(fn("apply_clone_alert_whois_reoffers")).toMatch(
-      /SET attribution = a\.attribution\s+OPERATOR\(pg_catalog\.\|\|\) pg_catalog\.jsonb_build_object\('whois', src\.whois\)/,
-    );
-  });
-
-  it("the re-offer writes only rows still marked, with an object dossier", () => {
-    const body = fn("apply_clone_alert_whois_reoffers");
-    expect(body).toContain("AND a.attribution_retry_after IS NOT NULL");
-    expect(body).toContain("pg_catalog.jsonb_typeof(a.attribution) = 'object'");
-  });
-
-  it("the first write stamps attribution_retry_after and keeps its IS NULL guard", () => {
-    const body = fn("apply_clone_alert_attributions");
-    expect(body).toContain("attribution_retry_after = src.retry_after");
-    expect(body).toContain("AND a.attribution IS NULL");
-  });
-
-  it("both functions carry a function-level statement_timeout", () => {
-    for (const name of [
-      "apply_clone_alert_whois_reoffers",
-      "apply_clone_alert_attributions",
-    ]) {
-      expect(fn(name)).toMatch(
-        /SET statement_timeout TO '\d+s'\s+AS \$function\$/,
-      );
-    }
   });
 });

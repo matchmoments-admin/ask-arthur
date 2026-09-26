@@ -6,7 +6,10 @@ import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize";
-import { lookupWhois } from "@askarthur/scam-engine/whois";
+import {
+  lookupWhois,
+  whoisScamUrlColumns,
+} from "@askarthur/scam-engine/whois";
 import { checkSSL } from "@askarthur/scam-engine/ssl";
 import { logger } from "@askarthur/utils/logger";
 
@@ -202,19 +205,13 @@ export async function POST(req: NextRequest) {
             ]);
 
             // #1253: an unanswered lookup (quota guard / non-200 / no key)
-            // is not WHOIS data. whois_lookup_at non-null is this route's
-            // domain-level cache key (the select above), so stamping it here
-            // would hand the empty result to every later report of the domain.
-            if (!whois.deferral) {
-              updateData.whois_registrar = whois.registrar;
-              updateData.whois_registrant_country = whois.registrantCountry;
-              updateData.whois_created_date = whois.createdDate;
-              updateData.whois_expires_date = whois.expiresDate;
-              updateData.whois_name_servers = whois.nameServers;
-              updateData.whois_is_private = whois.isPrivate;
-              updateData.whois_raw = whois.raw;
-              updateData.whois_lookup_at = new Date().toISOString();
-            }
+            // maps to NO whois_* columns. whois_lookup_at non-null is this
+            // route's domain-level cache key (the select above), so stamping
+            // it would hand the empty result to every later report.
+            Object.assign(
+              updateData,
+              whoisScamUrlColumns(whois, new Date().toISOString()),
+            );
             updateData.ssl_valid = ssl.valid;
             updateData.ssl_issuer = ssl.issuer;
             updateData.ssl_days_remaining = ssl.daysRemaining;
@@ -228,8 +225,10 @@ export async function POST(req: NextRequest) {
             };
           } catch (err) {
             logger.error("WHOIS/SSL enrichment failed", { error: String(err) });
-            // Mark that we attempted the lookup
-            updateData.whois_lookup_at = new Date().toISOString();
+            // #1259: no whois_lookup_at stamp here. It was "mark that we
+            // attempted the lookup", but whois_lookup_at non-null is this
+            // route's domain cache key (the select above), so a failed
+            // attempt handed empty WHOIS to every later report of the domain.
           }
         }
 

@@ -33,9 +33,10 @@
 --      (answered, or given up), a later instant pushes it forward (deferred
 --      again). campaign_key is replaced when supplied (a registrar that arrives
 --      changes the fingerprint; null leaves it alone, as in v331). Writes ONLY
---      rows still marked for a re-offer (attribution_retry_after IS NOT NULL) that
---      carry an object dossier, so a retried step whose first attempt already
---      cleared the mark is a no-op.
+--      rows still DUE for a re-offer (attribution_retry_after IS NOT NULL AND
+--      <= now()) that carry an object dossier, so a retried or stale write
+--      whose first attempt already cleared the mark — or pushed it forward —
+--      is a no-op instead of clobbering the newer state.
 --   4. Backfill, by predicate, of rows already saved as final:
 --      in the 35-day window, whois.source = 'whoisjson' AND registrar IS NULL,
 --      plus any `source = 'deferred'` dossier written before this migration
@@ -61,9 +62,13 @@
 -- registrar that arrives late is projected onto the Platform Entity too
 -- (its COALESCE never overwrites a value another feed supplied).
 --
--- Deploy order: APPLY THIS BEFORE MERGING. Code that reaches prod first selects
--- a column that does not exist (the re-offer step logs an error and reports
--- whois_reoffer_due = null) and the old apply function ignores the new key.
+-- Deploy order: apply this, then merge the code right away — both before a
+-- 13:30 UTC enricher tick. Then re-run section 4's backfill UPDATE once after
+-- the deploy (its predicate only touches rows with attribution_retry_after IS
+-- NULL, so a re-run is safe): it catches rows the OLD code wrote as final
+-- between apply and deploy. Code that reaches prod first selects a column that
+-- does not exist (select-pending records whois_reoffer_due = null) and the old
+-- apply function ignores the new key.
 --
 -- Rollback: DROP FUNCTION apply_clone_alert_whois_reoffers(jsonb); re-apply
 -- v331's apply_clone_alert_attributions body; DROP INDEX + ALTER TABLE … DROP
@@ -185,6 +190,10 @@ BEGIN
   FROM src
   WHERE a.id = src.id
     AND a.attribution_retry_after IS NOT NULL
+    -- Still DUE, not merely marked: a replayed or stale write (a retried step
+    -- whose first attempt already pushed this row forward) must not clobber
+    -- the newer deferral with an older answer.
+    AND a.attribution_retry_after <= pg_catalog.now()
     -- `||` on a non-object would replace the dossier wholesale; the NOT NULL
     -- is explicit because jsonb_typeof(NULL) is NULL, not false.
     AND a.attribution IS NOT NULL
@@ -204,7 +213,7 @@ COMMENT ON FUNCTION public.apply_clone_alert_whois_reoffers(jsonb) IS
   'WHOIS re-offer write (clone-watch-enrich-attribution, #1253): '
   '[{id, whois, retry_after?, campaign_key?}] → merges ONLY attribution.whois '
   '(kit_siblings etc. kept), sets attribution_retry_after (null clears), '
-  'replaces campaign_key when non-null. Only rows still marked for re-offer. '
+  'replaces campaign_key when non-null. Only rows still due (retry_after <= now()). '
   'Returns rows written. Cap 500. v336.';
 
 -- ── 4. Backfill the rows already saved as final ─────────────────────────────

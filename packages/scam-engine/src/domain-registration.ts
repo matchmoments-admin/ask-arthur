@@ -42,6 +42,9 @@ export interface DomainRegistration extends WhoisResult {
   retryAfter?: string;
   /** Only when source is `deferred`: why (whois.ts WhoisDeferralReason). */
   deferralReason?: WhoisDeferralReason;
+  /** Only when source is `deferred` and whoisjson answered: its HTTP status
+   *  (429 = quota, never a failure strike). */
+  deferralStatus?: number;
 }
 
 /** A WhoisResult (whoisjson) widened to the DomainRegistration shape. An
@@ -60,6 +63,9 @@ function fromWhois(w: WhoisResult): DomainRegistration {
           source: "deferred" as const,
           retryAfter: deferral.retryAfter,
           deferralReason: deferral.reason,
+          ...(deferral.status !== undefined
+            ? { deferralStatus: deferral.status }
+            : {}),
         }
       : { source: "whoisjson" as const }),
   };

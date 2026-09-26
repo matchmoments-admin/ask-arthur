@@ -21,7 +21,7 @@ import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { lookupWhois } from "../whois";
+import { lookupWhois, whoisScamUrlColumns } from "../whois";
 import { checkSSL } from "../ssl";
 import { extractDomain } from "../url-normalize";
 import { ANALYZE_COMPLETED_EVENT, parseAnalyzeCompletedData } from "./events";
@@ -118,20 +118,8 @@ export const onDemandUrlEnrich = inngest.createFunction(
           const { error: upErr } = await supabase
             .from("scam_urls")
             .update({
-              // #1253: same rule as enrichment.ts — an unanswered lookup
-              // writes no whois_* columns and no whois_lookup_at.
-              ...(whois.deferral
-                ? {}
-                : {
-                    whois_registrar: whois.registrar,
-                    whois_registrant_country: whois.registrantCountry,
-                    whois_created_date: whois.createdDate,
-                    whois_expires_date: whois.expiresDate,
-                    whois_name_servers: whois.nameServers,
-                    whois_is_private: whois.isPrivate,
-                    whois_raw: whois.raw,
-                    whois_lookup_at: new Date().toISOString(),
-                  }),
+              // #1253: an unanswered lookup maps to NO whois_* columns.
+              ...whoisScamUrlColumns(whois, new Date().toISOString()),
               ssl_valid: ssl.valid,
               ssl_issuer: ssl.issuer,
               ssl_days_remaining: ssl.daysRemaining,

@@ -22,6 +22,9 @@
  *   - answered (any non-deferred result, even a served record with no
  *     registrar)                       → retry column cleared (resolved)
  *   - deferred again                   → column pushed to the new retryAfter
+ *     (quota_deferred — the guard OR a whoisjson 429 — and not_configured
+ *     retry on the 1st of next month and are never a strike: a 429 is quota
+ *     exhaustion, not the domain refusing)
  *   - http_error for the Nth time      → column cleared (abandoned) — a domain
  *     whoisjson keeps refusing must not cost a lookup a day forever; non-200s
  *     are NOT counted by the monthly guard (whois.ts), so an unbounded retry
@@ -86,8 +89,16 @@ export function planWhoisReoffer(
   const reason = fresh?.deferralReason ?? "http_error";
   const prevHttpErrors =
     typeof prev?.httpErrorDeferrals === "number" ? prev.httpErrorDeferrals : 0;
-  const httpErrorDeferrals =
-    reason === "http_error" ? prevHttpErrors + 1 : prevHttpErrors;
+  // Only a real failure is a strike. quota_deferred (the guard, or a vendor
+  // 429) and not_configured never are — a 429 is quota exhaustion, not the
+  // domain refusing (CLAUDE.md). The status check is belt-and-braces: whois.ts
+  // already maps 429 to quota_deferred.
+  const isStrike = reason === "http_error" && fresh?.deferralStatus !== 429;
+  const httpErrorDeferrals = isStrike ? prevHttpErrors + 1 : prevHttpErrors;
+  const status =
+    fresh?.deferralStatus !== undefined
+      ? { deferralStatus: fresh.deferralStatus }
+      : {};
   const base: WhoisBlock =
     prev ??
     (fresh
@@ -103,19 +114,18 @@ export function planWhoisReoffer(
           source: "deferred",
         });
   // Strip the previous retry bookkeeping; the new one is added below.
-  const { retryAfter: _prevRetry, ...kept } = base;
+  const { retryAfter: _prevRetry, deferralStatus: _prevStatus, ...kept } = base;
   void _prevRetry;
+  void _prevStatus;
 
-  if (
-    reason === "http_error" &&
-    httpErrorDeferrals >= WHOIS_HTTP_ERROR_MAX_DEFERRALS
-  ) {
+  if (isStrike && httpErrorDeferrals >= WHOIS_HTTP_ERROR_MAX_DEFERRALS) {
     // Given up: still `deferred` (the answer never came), with no retryAfter.
     return {
       whois: {
         ...kept,
         source: "deferred",
         deferralReason: reason,
+        ...status,
         httpErrorDeferrals,
       },
       retryAfter: null,
@@ -132,6 +142,7 @@ export function planWhoisReoffer(
       source: "deferred",
       retryAfter,
       deferralReason: reason,
+      ...status,
       ...(httpErrorDeferrals > 0 ? { httpErrorDeferrals } : {}),
     },
     retryAfter,

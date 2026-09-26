@@ -382,6 +382,8 @@ describe("clone-watch-enrich-attribution (function)", () => {
     mocks.from
       .mockReturnValueOnce(query({ data: pending, error: null }))
       .mockReturnValueOnce(query({ count: 60, error: null }))
+      .mockReturnValueOnce(query({ data: [], error: null })) // re-offer ids
+      .mockReturnValueOnce(query({ count: 0, error: null })) // re-offer count
       .mockReturnValueOnce(
         query({ data: pending.map((p) => ({ id: p.id })), error: null }),
       )
@@ -405,8 +407,11 @@ describe("clone-watch-enrich-attribution (function)", () => {
     expect(names.filter((n) => n.startsWith("enrich"))).toEqual([
       "enrich-batch",
     ]);
-    // select-pending, enrich-batch, whois-reoffer (#1253), backfill, log-outcome.
-    expect(names.length).toBeLessThanOrEqual(6);
+    // select-pending, enrich-batch, backfill, log-outcome — and NO
+    // whois-reoffer step: nothing was due (#1253 review: the step is
+    // scheduled only when select-pending returns due ids).
+    expect(names).not.toContain("whois-reoffer");
+    expect(names.length).toBeLessThanOrEqual(5);
     expect(mocks.enrich).toHaveBeenCalledTimes(60);
     const writes = mocks.rpc.mock.calls.filter(
       ([n]) => n === "apply_clone_alert_attributions",
@@ -463,6 +468,10 @@ describe("clone-watch-enrich-attribution (function)", () => {
  *     "stamps a deferred WHOIS" fails (undefined, not the retry instant).
  *   - the whois-reoffer step short-circuited to NO_REOFFER (as if removed):
  *     "re-offers due rows" fails (no apply_clone_alert_whois_reoffers call).
+ *   - the `reofferSel.ids.length === 0` skip removed (step always scheduled):
+ *     "runs ONE enrich step…" fails on `not.toContain("whois-reoffer")`.
+ *   - a failed re-offer select recorded as due 0 instead of null: "a failed
+ *     re-offer select" fails.
  */
 describe("clone-watch-enrich-attribution — WHOIS deferral (#1253)", () => {
   const run = (step: unknown) =>
@@ -515,6 +524,8 @@ describe("clone-watch-enrich-attribution — WHOIS deferral (#1253)", () => {
     mocks.from
       .mockReturnValueOnce(query({ data: pending, error: null }))
       .mockReturnValueOnce(query({ count: 2, error: null }))
+      .mockReturnValueOnce(query({ data: [], error: null })) // re-offer ids
+      .mockReturnValueOnce(query({ count: 0, error: null })) // re-offer count
       .mockReturnValueOnce(query({ data: [{ id: 1 }, { id: 2 }], error: null }))
       .mockReturnValue(query({ data: [], count: 0, error: null }));
     await run(step);
@@ -562,8 +573,9 @@ describe("clone-watch-enrich-attribution — WHOIS deferral (#1253)", () => {
     mocks.from
       .mockReturnValueOnce(query({ data: [], error: null })) // enrich worklist
       .mockReturnValueOnce(query({ count: 0, error: null })) // its backlog
-      .mockReturnValueOnce(query({ data: due, error: null })) // re-offer rows
+      .mockReturnValueOnce(query({ data: [{ id: 7 }], error: null })) // re-offer ids
       .mockReturnValueOnce(query({ count: 1, error: null })) // re-offer backlog
+      .mockReturnValueOnce(query({ data: due, error: null })) // step re-read by id
       .mockReturnValue(query({ data: [], error: null }));
     const res = await run(step);
 
@@ -590,6 +602,28 @@ describe("clone-watch-enrich-attribution — WHOIS deferral (#1253)", () => {
       whois_resolved: 1,
       whois_redeferred: 0,
       whois_abandoned: 0,
+    });
+  });
+
+  it("a failed re-offer select schedules no step and records due as null (unknown)", async () => {
+    mocks.from
+      .mockReturnValueOnce(query({ data: [], error: null })) // enrich worklist
+      .mockReturnValueOnce(query({ count: 0, error: null })) // its backlog
+      .mockReturnValueOnce(query({ data: null, error: { message: "boom" } })) // re-offer ids
+      .mockReturnValueOnce(query({ count: null, error: null })) // re-offer count
+      .mockReturnValue(query({ data: [], error: null }));
+    const names: string[] = [];
+    await run({
+      run: async (name: string, fn: () => unknown) => {
+        names.push(name);
+        return fn();
+      },
+    });
+    expect(names).not.toContain("whois-reoffer");
+    expect(mocks.lookupReg).not.toHaveBeenCalled();
+    expect(outcomeRow()).toMatchObject({
+      whois_reoffer_due: null,
+      whois_reoffered: 0,
     });
   });
 });
