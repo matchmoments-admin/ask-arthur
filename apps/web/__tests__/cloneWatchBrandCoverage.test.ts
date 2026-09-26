@@ -3,6 +3,7 @@ import {
   TREND_FLOOR,
   brandsCoveredForMonth,
   classifyTrend,
+  moveSigma,
   coveredForWholeMonth,
   summariseTrendExclusions,
   type BrandCoverage,
@@ -103,7 +104,19 @@ describe("classifyTrend", () => {
     expect(v.pct).toBe(87);
   });
 
-  it("ALLOWS Bonds 16 -> 28 with a percentage", () => {
+  it("ALLOWS a covered brand beyond chance with a percentage (16 -> 40, +3.2σ)", () => {
+    const v = classifyTrend({
+      currentClones: 40,
+      priorClones: 16,
+      currentMonth: AUG,
+      priorMonth: JUL,
+      coverage: [{ ...LONG_COVERED, brandDomain: "bonds.com.au", brandNormalized: "bonds" }],
+    });
+    expect(v.kind).toBe("claimable");
+    expect(v.pct).toBe(150);
+  });
+
+  it("reads Bonds 16 -> 28 (+1.8σ) as about the same, not a +75% rise (#1226)", () => {
     const v = classifyTrend({
       currentClones: 28,
       priorClones: 16,
@@ -111,8 +124,28 @@ describe("classifyTrend", () => {
       priorMonth: JUL,
       coverage: [{ ...LONG_COVERED, brandDomain: "bonds.com.au", brandNormalized: "bonds" }],
     });
-    expect(v.kind).toBe("claimable");
-    expect(v.pct).toBe(75);
+    expect(v).toEqual({ kind: "noise", delta: 12, pct: null });
+  });
+
+  it("the real Jul→Aug movers clear the noise band; apple does not (#1226 evidence)", () => {
+    const k = (c: number, p: number) =>
+      classifyTrend({ currentClones: c, priorClones: p, currentMonth: AUG, priorMonth: JUL, coverage: [LONG_COVERED] }).kind;
+    expect(moveSigma(71, 38)).toBeGreaterThan(3); // amazon-shaped
+    expect(k(71, 38)).toBe("claimable");
+    expect(k(12, 40)).toBe("claimable"); // a real fall (−3.8σ)
+    expect(k(22, 20)).toBe("noise");
+  });
+
+  it("withholds every delta when the matcher changed between the months", () => {
+    const v = classifyTrend({
+      currentClones: 71,
+      priorClones: 38,
+      currentMonth: AUG,
+      priorMonth: JUL,
+      coverage: [LONG_COVERED],
+      methodChanged: true,
+    });
+    expect(v).toEqual({ kind: "method_changed", delta: 33, pct: null });
   });
 
   it("uses the DOMAIN key's figures, not the brand-name key's", () => {
@@ -129,9 +162,11 @@ describe("classifyTrend", () => {
       priorMonth: JUL,
       coverage: [{ ...LONG_COVERED, brandDomain: "kmart.com.au", brandNormalized: "kmart" }],
     });
-    expect(v.kind).toBe("claimable");
+    // …and by the domain key, +2 is within counting noise (#1226): "about
+    // the same", not even a +6%.
+    expect(v.kind).toBe("noise");
     expect(v.delta).toBe(2);
-    expect(v.pct).toBe(6);
+    expect(v.pct).toBeNull();
   });
 
   it("BLOCKS NAB 2 -> 1 as below_floor", () => {
@@ -208,6 +243,7 @@ describe("summariseTrendExclusions", () => {
       coverageEnded: 0,
       belowFloor: 1,
       unknown: 1,
+      methodChanged: 0,
     });
   });
 
@@ -322,6 +358,7 @@ describe("several brands, one domain", () => {
   });
 
   it("still allows August-vs-July, so the pending edition is unaffected", () => {
+    // Comparable (the coverage gate passes); flat, so it reads "about the same".
     expect(
       classifyTrend({
         currentClones: 13,
@@ -330,7 +367,7 @@ describe("several brands, one domain", () => {
         priorMonth: JUL,
         coverage: SERVICES_AUSTRALIA_ROWS,
       }).kind,
-    ).toBe("claimable");
+    ).toBe("noise");
   });
 
   it("reports coverage_ended when one contributing brand leaves", () => {
@@ -379,7 +416,7 @@ describe("a brand de-listed then re-added (review finding)", () => {
     // were actively monitoring it.
     expect(
       classifyTrend({
-        currentClones: 28,
+        currentClones: 40,
         priorClones: 16,
         currentMonth: AUG,
         priorMonth: JUL,

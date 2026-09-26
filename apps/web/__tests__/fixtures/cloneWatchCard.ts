@@ -65,7 +65,7 @@ export const JUNE_FIXTURE: CloneWatchReportCard = {
   },
   brandTrends: {
     claimable: [],
-    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
+    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0, methodChanged: 0 },
     publishable: true,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },

@@ -42,7 +42,7 @@ import {
   type StockStatus,
 } from "@/lib/clone-watch/clone-metrics";
 import type { MonthWindow } from "@/lib/clone-watch/month-window";
-import type { CloneWatchTrendRows } from "@/lib/clone-watch/report-card";
+import type { CloneWatchTrendRows, FrozenMonth } from "@/lib/clone-watch/report-card";
 
 type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
 
@@ -442,7 +442,20 @@ export async function loadStoreV2Inputs(
     });
   }
 
-  let sweptDomains: number | null = null;
+  const sweptDomains = await readSweptDomains(sb, window);
+
+  return { stockSnapshots, sweptDomains, stockState, stockReadError };
+}
+
+/**
+ * NRD domains swept in the month (the feed denominator), or null when not
+ * recorded / not covering the month / the read failed. Degrades, never throws.
+ * Shared by the store write path and the report card's feed-shift check.
+ */
+export async function readSweptDomains(
+  sb: ServiceClient,
+  window: Pick<MonthWindow, "periodMonth" | "startIso" | "endIso">,
+): Promise<number | null> {
   try {
     const { data, error } = await sb
       .from("cost_telemetry")
@@ -453,7 +466,7 @@ export async function loadStoreV2Inputs(
       .lt("created_at", window.endIso)
       .limit(1000);
     if (error) throw new Error(error.message);
-    sweptDomains = sumDomainsScanned(
+    return sumDomainsScanned(
       (data ?? []) as Array<{ metadata: unknown; created_at: string }>,
       window.startIso,
     );
@@ -463,9 +476,85 @@ export async function loadStoreV2Inputs(
       error: err instanceof Error ? err.message : String(err),
       consequence: "swept_domains persisted as null (not recorded)",
     });
+    return null;
   }
+}
 
-  return { stockSnapshots, sweptDomains, stockState, stockReadError };
+/**
+ * The FROZEN store for the given months (#1226) — what each month PUBLISHED,
+ * for the report card's month-over-month comparison. A month with no frozen
+ * row is simply absent from the map (never published). null = the read
+ * failed; the card then falls back to its live recount and says so.
+ */
+export async function readFrozenMonths(
+  sb: ServiceClient,
+  periodMonths: readonly string[],
+): Promise<Map<string, FrozenMonth> | null> {
+  const { rows, error } = await fetchAllRows<{
+    period_month: string;
+    brand: string;
+    clones: number | null;
+    matcher_version: string | null;
+    swept_domains: number | string | null;
+  }>((from, to) =>
+    sb
+      .from("clone_watch_monthly_brand_stats")
+      .select("period_month, brand, clones, matcher_version, swept_domains")
+      .in("period_month", periodMonths as string[])
+      .not("frozen_at", "is", null)
+      .order("period_month", { ascending: true })
+      .order("brand", { ascending: true })
+      .range(from, to) as unknown as PromiseLike<{
+      data: Array<{
+        period_month: string;
+        brand: string;
+        clones: number | null;
+        matcher_version: string | null;
+        swept_domains: number | string | null;
+      }> | null;
+      error: { message: string } | null;
+    }>,
+  );
+  if (error) {
+    logger.warn("monthly-brand-store: frozen-month read failed", {
+      months: periodMonths,
+      error: error.message,
+      consequence: "month-over-month falls back to the live recount",
+    });
+    return null;
+  }
+  return foldFrozenMonths(rows);
+}
+
+/** Pure half of `readFrozenMonths`. */
+export function foldFrozenMonths(
+  rows: ReadonlyArray<{
+    period_month: string;
+    brand: string;
+    clones: number | null;
+    matcher_version: string | null;
+    swept_domains: number | string | null;
+  }>,
+): Map<string, FrozenMonth> {
+  const out = new Map<string, FrozenMonth>();
+  for (const r of rows) {
+    const month = r.period_month.slice(0, 10);
+    let m = out.get(month);
+    if (!m) {
+      m = { byBrand: new Map(), total: 0, brands: 0, matcherVersion: null, sweptDomains: null };
+      out.set(month, m);
+    }
+    const n = Number(r.clones ?? 0);
+    const brand = r.brand.trim().toLowerCase();
+    m.byBrand.set(brand, (m.byBrand.get(brand) ?? 0) + n);
+    m.total += n;
+    if (n > 0) m.brands += 1;
+    // One value per month by construction (the writer stamps every row).
+    if (r.matcher_version && !m.matcherVersion) m.matcherVersion = r.matcher_version;
+    const swept = r.swept_domains == null ? null : Number(r.swept_domains);
+    if (swept != null && Number.isFinite(swept) && m.sweptDomains == null) m.sweptDomains = swept;
+  }
+  return out;
 }
 
 /**

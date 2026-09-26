@@ -17,7 +17,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getCloneWatchReportCard } from "../lib/clone-watch/report-card-data";
-import { generateCloneWatchCaption } from "../lib/clone-watch/clone-watch-caption";
+import {
+  CAPTION_MAX,
+  generateCloneWatchCaption,
+} from "../lib/clone-watch/clone-watch-caption";
 import { getPinnedCard } from "../lib/clone-watch/report-summary";
 import { monthWindow } from "../lib/clone-watch/month-window";
 import type { CloneWatchReportCard } from "../lib/clone-watch/report-card-data";
@@ -75,7 +78,6 @@ async function main() {
   // job, before the approval gate — rather than let the publish step red after
   // founder approval + document upload (where a re-run risks a double-post).
   // 2,900 leaves headroom for LinkedIn's own entity-escaping.
-  const CAPTION_MAX = 2_900;
   if (caption.bodyWithHashtags.length > CAPTION_MAX) {
     throw new Error(
       `caption is ${caption.bodyWithHashtags.length} chars (> ${CAPTION_MAX} safety cap for LinkedIn's ~3000 limit) — trim the month's blocks before publish`,

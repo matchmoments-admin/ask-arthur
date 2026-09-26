@@ -51,7 +51,18 @@ export type TrendKind =
   /** Too few clones for the movement to mean anything. */
   | "below_floor"
   /** No coverage record at all — treated as unpublishable, never as covered. */
-  | "coverage_unknown";
+  | "coverage_unknown"
+  /**
+   * The lexical matcher changed between the months: the count moved because
+   * WE changed what counts (#1226). Suppressed like a coverage change.
+   */
+  | "method_changed"
+  /**
+   * Comparable and above the floor, but the move is within counting noise
+   * (|Δ| / √(this + last) < NOISE_Z): published as "about the same", never as
+   * a rise or fall (#1226). Includes Δ = 0.
+   */
+  | "noise";
 
 export interface TrendVerdict {
   kind: TrendKind;
@@ -70,6 +81,24 @@ export interface TrendVerdict {
  * Westpac 3, NAB 1), which is a fact about their clone volume, not a defect.
  */
 export const TREND_FLOOR = 10;
+
+/**
+ * A move is "about the same" below this many standard deviations.
+ *
+ * Monthly lookalike counts behave like Poisson counts, so the difference of
+ * two months has variance ≈ this + last, and |Δ| / √(this + last) is the move
+ * in standard deviations. Below 2 a move of that size turns up by chance in
+ * roughly one month in twenty — not something to headline. Jul→Aug 2026:
+ * amazon +3.2σ and revolut −2.5σ were real campaigns; apple +0.6σ was noise
+ * (#1226).
+ */
+export const NOISE_Z = 2;
+
+/** |Δ| / √(this + last); 0 when both months are 0. */
+export function moveSigma(current: number, prior: number): number {
+  const n = current + prior;
+  return n > 0 ? Math.abs(current - prior) / Math.sqrt(n) : 0;
+}
 
 /**
  * Throws on an unparseable month rather than returning Invalid Date.
@@ -231,6 +260,8 @@ export function classifyTrend(input: {
   currentMonth: string;
   priorMonth: string;
   coverage: readonly BrandCoverage[] | null | undefined;
+  /** The lexical matcher version differs between the months (#1226). */
+  methodChanged?: boolean;
 }): TrendVerdict {
   const { currentClones, priorClones, currentMonth, priorMonth, coverage } = input;
   const delta = currentClones - priorClones;
@@ -262,8 +293,18 @@ export function classifyTrend(input: {
     };
   }
 
+  // After coverage (a coverage change is the more specific explanation),
+  // before the floor (a method change is not a volume problem).
+  if (input.methodChanged) {
+    return { kind: "method_changed", delta, pct: null };
+  }
+
   if (currentClones < TREND_FLOOR && priorClones < TREND_FLOOR) {
     return { kind: "below_floor", delta, pct: null };
+  }
+
+  if (moveSigma(currentClones, priorClones) < NOISE_Z) {
+    return { kind: "noise", delta, pct: null };
   }
 
   // A percentage needs a trustworthy denominator, so it requires the floor in
@@ -296,13 +337,18 @@ export function summariseTrendExclusions(
   coverageEnded: number;
   belowFloor: number;
   unknown: number;
+  methodChanged: number;
 } {
   return {
-    claimable: verdicts.filter((v) => v.kind === "claimable" && v.delta !== 0).length,
-    unchanged: verdicts.filter((v) => v.kind === "claimable" && v.delta === 0).length,
+    // `noise` guarantees delta !== 0 is impossible to publish at σ < 2, and
+    // Δ = 0 is always noise, so every claimable verdict moved.
+    claimable: verdicts.filter((v) => v.kind === "claimable").length,
+    // "About the same" — comparable, within noise (#1226; was Δ = 0 only).
+    unchanged: verdicts.filter((v) => v.kind === "noise").length,
     coverageStarted: verdicts.filter((v) => v.kind === "coverage_started").length,
     coverageEnded: verdicts.filter((v) => v.kind === "coverage_ended").length,
     belowFloor: verdicts.filter((v) => v.kind === "below_floor").length,
     unknown: verdicts.filter((v) => v.kind === "coverage_unknown").length,
+    methodChanged: verdicts.filter((v) => v.kind === "method_changed").length,
   };
 }

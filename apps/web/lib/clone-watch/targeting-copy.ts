@@ -64,6 +64,8 @@ export interface TrendExclusions {
   coverageEnded: number;
   belowFloor: number;
   unknown: number;
+  /** Matcher changed between the months (#1226). Optional for old callers. */
+  methodChanged?: number;
 }
 
 /**
@@ -74,10 +76,24 @@ export interface TrendExclusions {
  * that publishes no trend also publishes no dangling caveat.
  */
 export function buildTrendDisclosure(x: TrendExclusions): string {
-  if (x.claimable === 0) return "";
-  const withheld = x.coverageStarted + x.coverageEnded + x.belowFloor + x.unknown;
+  if (x.claimable === 0) {
+    // Nothing to claim — but a matcher change must still be said, or its
+    // silence reads as a quiet month.
+    return (x.methodChanged ?? 0) > 0
+      ? "Month-on-month change is withheld this month: we changed how lookalikes are matched, so the two months are not comparable."
+      : "";
+  }
+  const methodChanged = x.methodChanged ?? 0;
+  const withheld =
+    x.coverageStarted + x.coverageEnded + x.belowFloor + x.unknown + methodChanged;
+  // Changes within counting noise are reported as "about the same", not as
+  // withheld: they are comparable, just not a rise or a fall.
+  const same =
+    x.unchanged > 0
+      ? ` ${x.unchanged} more moved by no more than chance would, and count as about the same.`
+      : "";
   if (withheld === 0) {
-    return `Month-on-month change is shown for all ${x.claimable} brands we monitored across both months.`;
+    return `Month-on-month change is shown for all ${x.claimable} brands we monitored across both months that moved beyond chance.${same}`;
   }
   const reasons: string[] = [];
   if (x.coverageStarted > 0) {
@@ -92,10 +108,13 @@ export function buildTrendDisclosure(x: TrendExclusions): string {
   if (x.unknown > 0) {
     reasons.push(`${x.unknown} we cannot confirm we monitored for the whole period`);
   }
+  if (methodChanged > 0) {
+    reasons.push(`${methodChanged} where we changed how lookalikes are matched between the months`);
+  }
   return (
     `Month-on-month change is shown only for the ${x.claimable} brands we monitored ` +
-    `across both months with enough volume to compare. ${withheld} are excluded: ` +
-    `${reasons.join("; ")}. Everything else here is a count, not a trend.`
+    `across both months that moved beyond chance. ${withheld} are excluded: ` +
+    `${reasons.join("; ")}.${same} Everything else here is a count, not a trend.`
   );
 }
 

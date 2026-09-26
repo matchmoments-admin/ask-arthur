@@ -73,7 +73,7 @@ const JUNE: CloneWatchReportCard = {
   },
   brandTrends: {
     claimable: [],
-    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
+    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0, methodChanged: 0 },
     publishable: true,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
@@ -195,14 +195,14 @@ describe("generateCloneWatchCaption", () => {
     expect(c.body).not.toContain("2. ");
   });
 
-  it("MoM that rounds to 0%: 'essentially flat', never 'up 0%'", () => {
+  it("MoM within counting noise: 'about the same', never 'up 0%' (#1226)", () => {
     const barelyUp: CloneWatchReportCard = {
       ...JULY,
       total: 1001,
       mom: { available: true, priorLabel: "June 2026", priorTotal: 1000, priorBrands: 129, totalDelta: 1, totalPct: 0, brandsDelta: 0 },
     };
     const c = generateCloneWatchCaption(barelyUp);
-    expect(c.body).toContain("That's essentially flat on June 2026 (1000 → 1001)");
+    expect(c.body).toContain("That's about the same as June 2026 (1000 → 1001)");
     expect(c.body).not.toMatch(/up 0%|down 0%/);
   });
 
@@ -450,16 +450,25 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
       totalDelta: 228,
       totalPct: 28,
       brandsDelta: 26,
+      // #1226: every new sentence at its longest — feed-shift caveat and a
+      // three-month line with long labels, plus the "about the same" count.
+      noise: false,
+      feedShift: { priorSwept: 2_100_000, currentSwept: 1_400_000, pct: -33 },
+      series: [
+        { label: "September 2026", total: 1032 },
+        { label: "September 2026", total: 1032 },
+        { label: "September 2026", total: 1032 },
+      ],
     },
     brandTrends: {
       claimable: [],
       excluded: {
         claimable: 38,
-        unchanged: 0,
+        unchanged: 25,
         coverageStarted: 7,
         coverageEnded: 2,
         belowFloor: 108,
-        unknown: 3,
+        unknown: 3, methodChanged: 0,
       },
       publishable: true,
     },
@@ -481,6 +490,17 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
       },
     },
   };
+
+  it("sheds the three-month line, never the disclosure, when a heavy month overruns (#1226)", () => {
+    const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
+    expect(c.body).not.toContain("Three months:");
+    expect(c.body).toContain("33% smaller"); // the feed caveat stays
+    const light = generateCloneWatchCaption(
+      { ...WORST, brandTrends: { ...WORST.brandTrends, excluded: { ...WORST.brandTrends.excluded, unchanged: 0 } }, mom: { ...WORST.mom, feedShift: null } },
+      "https://askarthur.au/method",
+    );
+    expect(light.body).toContain("Three months:"); // kept when it fits
+  });
 
   it("fits, with the disclosure intact", () => {
     const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");

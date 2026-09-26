@@ -10,6 +10,7 @@
 // `noindex` until FF_CLONE_WATCH_PUBLIC is ON (waits on #371 vetted copy); the
 // route still renders behind noindex so it can be previewed.
 
+import { shortTotalMove, type MomLike } from "@/lib/clone-watch/trend-copy";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -33,13 +34,8 @@ interface SuperFund {
   clones: number;
   auRank: number;
 }
-interface MonthOverMonth {
-  available: boolean;
-  priorLabel: string;
-  totalDelta: number;
-  totalPct: number | null;
-  brandsDelta: number;
-}
+// The persisted `mom` jsonb — trend-copy's reading of it plus the brand delta.
+type MonthOverMonth = MomLike & { brandsDelta: number };
 interface SummaryRow {
   period_month: string;
   total_domains: number;
@@ -166,10 +162,9 @@ export default async function CloneWatchMonthPage({
 
   const label = periodLabel(row.period_month);
   const mom = row.mom;
-  const momLine =
-    mom?.available && mom.totalPct !== null
-      ? `${mom.totalDelta >= 0 ? "+" : ""}${mom.totalDelta} (${mom.totalPct >= 0 ? "+" : ""}${mom.totalPct.toFixed(0)}%) vs ${mom.priorLabel}`
-      : null;
+  // trend-copy.ts decides the wording (#1226): noise reads "about the same",
+  // a matcher change shows nothing, a % only above the floor.
+  const momLine = mom ? shortTotalMove(mom) : null;
 
   return (
     <>

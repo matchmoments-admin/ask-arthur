@@ -635,6 +635,32 @@ v3, v4, etc.
 
 ---
 
+## 7. Month-over-month — what the report may say (#1226, 2026-09-26)
+
+One gate (`brand-coverage.ts classifyTrend`) and one copy home
+(`trend-copy.ts`) decide every "more or less than last month" the report
+prints — LinkedIn caption and `/clone-watch/[period]` alike.
+
+- **Prior month = what was PUBLISHED.** The card reads the prior month from the
+  frozen `clone_watch_monthly_brand_stats` store (`readFrozenMonths`); only if
+  no frozen month exists does it recount live, and `mom.priorSource` says
+  which. A live recount drifts as alerts are re-triaged, so the same edition
+  read twice could report two deltas.
+- **Noise band.** |Δ| / √(this + last) < 2 (`NOISE_Z`) is "about the same" —
+  never up/down. Jul→Aug 2026: amazon +3.2σ and revolut −2.5σ were real,
+  apple +0.6σ was noise.
+- **Floor.** A percentage only when both months have ≥ 10 (`TREND_FLOOR`);
+  otherwise the absolute change. (125 of 148 brands sit below it monthly.)
+- **Confounders suppress.** A coverage change (watchlist add/remove) or a
+  lexical-matcher version change (`matcher_version` on the frozen row) means
+  no delta. A classifier change (Haiku→Jev) does NOT — the headline count is
+  lexical matches, not classifier verdicts.
+- **Feed volume.** When `swept_domains` moved >20% the copy always says part of
+  the change is feed size, not attackers (the free feed is capped at 70k/day).
+- **Three months.** `mom.series` / claimable `series` carry the last three
+  published months; an unpublished month is null and the line is omitted,
+  never shown as 0.
+
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)
 
 Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469 / #475 / #476 / #482–#489 (admin-auth + bank-channel routing + inline-enqueue + URLscan-embedded evidence). The pipeline turns Layer 0 daily NRD hits into community-blocklist submissions + brand-team notifications + auto-classified screenshots, with a daily batch-builder + admin-click approval before any email leaves the platform.
