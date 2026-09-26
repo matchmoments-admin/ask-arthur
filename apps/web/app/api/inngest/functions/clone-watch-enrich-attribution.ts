@@ -16,6 +16,13 @@ import {
   enrichCloneAttribution,
   type HostingInfo,
 } from "@/lib/clone-watch/enrich-attribution";
+import {
+  ENRICH_CONCURRENCY,
+  ENRICH_FLUSH_EVERY,
+  ENRICH_MIN_START_INTERVAL_MS,
+  runEnrichBatch,
+  type EnrichBatchOutcome,
+} from "@/lib/clone-watch/enrich-attribution-batch";
 import { computeCampaignKey } from "@/lib/clone-watch/campaign-fingerprint";
 import { searchURLScan } from "@askarthur/scam-engine/urlscan-search";
 import {
@@ -82,44 +89,56 @@ const KIT_PIVOT_RUN_CAP = 10;
  */
 const KIT_PIVOT_WALL_CLOCK_MS = 120_000;
 
+/**
+ * In-step wall-clock budget for the enrich batch, in milliseconds.
+ *
+ * IN-STEP (budgetedStep): the whole batch runs inside ONE step.run, so the
+ * bound is the route's 300s maxDuration and the clock starts at step entry.
+ * A budget measured from event.ts here would be the #1124/#1141 defect —
+ * expired at index 0 whenever the step queued behind the fleet.
+ *
+ * Sized from the pacing, not guessed: ENRICH_RUN_CAP (60) rows started at
+ * least ENRICH_MIN_START_INTERVAL_MS (3s) apart need ~177s, so 200s lets a
+ * healthy full run finish. The budget is checked before each row STARTS, so
+ * the last row can begin at 200s and run its worst case (~34s — see
+ * enrich-attribution-batch.ts) plus the final flush: ~235s, inside 300s. The
+ * budget itself sits under budgetedStep's 240s ceiling.
+ *
+ * Stopping early is safe: an unreached row keeps `attribution IS NULL` and is
+ * the OLDEST in tomorrow's oldest-first worklist.
+ */
+const ENRICH_WALL_CLOCK_MS = 200_000;
+
 interface PendingAlert {
   id: number;
   candidate_domain: string;
   urlscan_evidence: { server?: HostingInfo } | null;
 }
 
-// inngest-finish-budget: 64 boundaries — 3 static + 1 per-item enrich step x
-// ENRICH_RUN_CAP (60), declared at the old 4-static count (the check-brake
-// step folded into select-pending 2026-09-24) to keep the 36m budget's minute
-// of headroom rather than re-derive it. The single largest per-item fan-out in the lane;
-// batching it is the highest-value fold available. See #1074.
+// inngest-finish-budget: 5 boundaries — select-pending, enrich-batch
+// (budgetedStep), kit-pivots (budgetedStep), backfill-campaign-keys,
+// log-outcome. Was 64: the 60 per-alert `enrich-${id}` steps are folded into
+// ONE bounded-concurrency step (#1229; #1074 named this the largest per-item
+// fan-out in the fleet). budgetedStep's step.run is invisible to the static
+// count, so the declaration names all five.
 //
-// The floor is therefore 64 x 30s = 1920s of queue wait + 120s inline
-// (KIT_PIVOT_WALL_CLOCK_MS) + 60s slack = 2100s. The declared 33m WAS the
-// floor exactly, with zero headroom, so adding the kit-pivot budget in #1136
-// pushed the floor past it and the guard went red — as designed.
+// Floor = 5 x 30s queue wait + 320s inline (ENRICH_WALL_CLOCK_MS 200s +
+// KIT_PIVOT_WALL_CLOCK_MS 120s) + 60s slack = 530s. 10m = 600s leaves 70s of
+// real headroom rather than a budget sitting on its floor (#1138). Was 36m.
 //
-// 36m, not 35m: 35m is 2100s, which is the new floor EXACTLY, so #1136 fixed
-// a budget-sitting-on-its-floor by moving it onto its next floor — the same
-// property it faulted 33m for, caught in review (#1138). 36m leaves a real
-// minute of headroom, and a finish tuned to the exact worst case cancels
-// healthy runs with no retry, no error and no telemetry (#1069).
-//
-// Folding the 60-step enrich fan-out into one batched step would take this to
-// ~5 boundaries and ~8m — still the largest step-run reduction available in
-// the fleet. Deliberately not done here: per-item steps checkpoint completed
-// rows, so folding re-runs up to 60 rows of PAID lookups (whois/RDAP/CT/
-// AbuseIPDB) on a mid-batch retry under retries: 2. It wants an idempotency
-// read-back first. Tracked in BACKLOG.md.
+// The objection that kept this fold out of #1136 — "folding re-runs up to 60
+// rows of PAID lookups on a mid-batch retry" — is answered in
+// lib/clone-watch/enrich-attribution-batch.ts: every attempt of the step
+// first re-reads which rows still have `attribution IS NULL`, and results are
+// bulk-written in chunks, so a retry re-pays at most one unflushed chunk.
 export const cloneWatchEnrichAttribution = inngest.createFunction(
   {
     id: "clone-watch-enrich-attribution",
     name: "Clone-watch: attribution dossier enricher",
-    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
-    // concurrency slots (~30–60s each under contention); the old budget
-    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // 10m (was 36m, #1229): derived above from 5 boundaries + two in-step
+    // wall clocks. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "36m" },
+    timeouts: { finish: "10m" },
     retries: 2,
     // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
     // manual-trigger must have a throttle AND a same-window cooldown, or
@@ -222,7 +241,11 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
           logger.error("clone-watch enrich: select failed", {
             error: error.message,
           });
-          return { braked: false as const, rows: [] as PendingAlert[], backlog: null };
+          return {
+            braked: false as const,
+            rows: [] as PendingAlert[],
+            backlog: null,
+          };
         }
         // A failed head count returns count=null AND error=null (204): null
         // is "unknown", never 0 (head-count-failures-carry-no-error).
@@ -247,47 +270,112 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // in the enricher's steady state — once it catches up on enrichment (the
       // normal condition), the backfill and kit-pivots silently stopped running
       // forever. Measured 2026-07-17: enrich worklist 0, while 1,085 rows awaited
-      // campaign_key and 42 awaited a kit pivot. The empty loop below is a no-op,
-      // so each stage now gates on its OWN worklist and nothing else.
-      let enriched = 0;
-      for (const alert of pending) {
-        const ok = await step.run(`enrich-${alert.id}`, async () => {
-          const hosting: HostingInfo = {
-            ip: alert.urlscan_evidence?.server?.ip ?? null,
-            country: alert.urlscan_evidence?.server?.country ?? null,
-            asn: alert.urlscan_evidence?.server?.asn ?? null,
-          };
-          const dossier = await enrichCloneAttribution(
-            alert.candidate_domain,
-            hosting,
-          );
-          const sb = createServiceClient();
-          if (!sb) return false;
-          // Stamp the campaign key in the SAME write (zero extra writes). Sentinel
-          // "insufficient" for a too-weak fingerprint so the row still crosses the
-          // backfill predicate below and is never re-selected.
-          const update: { attribution: typeof dossier; campaign_key?: string } =
-            {
-              attribution: dossier,
-            };
-          if (featureFlags.cloneCampaigns) {
-            update.campaign_key =
-              campaignKeyFromDossier(dossier) ?? "insufficient";
-          }
-          const { error } = await sb
-            .from("shopfront_clone_alerts")
-            .update(update)
-            .eq("id", alert.id);
-          if (error) {
-            logger.error("clone-watch enrich: update failed", {
-              alertId: alert.id,
-              error: error.message,
-            });
-            return false;
-          }
-          return true;
-        });
-        if (ok) enriched += 1;
+      // campaign_key and 42 awaited a kit pivot. An empty worklist skips only the
+      // enrich step below, so each stage gates on its OWN worklist and nothing
+      // else.
+      //
+      // ONE step for the whole enrich worklist (#1229; was one `enrich-${id}`
+      // step per alert). Not scheduled at all when the worklist is empty —
+      // `pending` is memoised, so that skip is replay-stable and a quiet day
+      // costs no step. Every counter lives inside the step and comes back as
+      // its return value: nothing here is a handler-level accumulator for an
+      // Inngest replay to reset.
+      const enrich: EnrichBatchOutcome =
+        pending.length === 0
+          ? { ...NO_ENRICH }
+          : await budgetedStep(
+              step,
+              "enrich-batch",
+              ENRICH_WALL_CLOCK_MS,
+              async (budget) => {
+                const sb = createServiceClient();
+                if (!sb) return { ...NO_ENRICH, pending: pending.length };
+                const byId = new Map(pending.map((a) => [a.id, a]));
+                return runEnrichBatch({
+                  rows: pending,
+                  budget,
+                  concurrency: ENRICH_CONCURRENCY,
+                  minStartIntervalMs: ENRICH_MIN_START_INTERVAL_MS,
+                  flushEvery: ENRICH_FLUSH_EVERY,
+                  // Idempotency read-back: a retry of this step (a Vercel kill
+                  // at maxDuration, a throw, retries: 2) re-reads which rows
+                  // still need a dossier and skips the rest, so it never
+                  // re-pays their lookups. A failed read THROWS — proceeding
+                  // blind would re-pay every one of them.
+                  readBack: async (ids) => {
+                    const { data, error } = await sb
+                      .from("shopfront_clone_alerts")
+                      .select("id")
+                      .in("id", ids)
+                      .is("attribution", null);
+                    if (error) {
+                      throw new Error(
+                        `clone-watch enrich: read-back failed: ${error.message}`,
+                      );
+                    }
+                    return new Set(
+                      ((data ?? []) as Array<{ id: number }>).map((r) => r.id),
+                    );
+                  },
+                  enrich: async (row) => {
+                    const alert = byId.get(row.id)!;
+                    const hosting: HostingInfo = {
+                      ip: alert.urlscan_evidence?.server?.ip ?? null,
+                      country: alert.urlscan_evidence?.server?.country ?? null,
+                      asn: alert.urlscan_evidence?.server?.asn ?? null,
+                    };
+                    const dossier = await enrichCloneAttribution(
+                      alert.candidate_domain,
+                      hosting,
+                    );
+                    // Stamp the campaign key in the SAME write (zero extra
+                    // writes). Sentinel "insufficient" for a too-weak
+                    // fingerprint so the row still crosses the backfill
+                    // predicate below and is never re-selected. null leaves
+                    // the column alone (flag off), as the old per-row update
+                    // did by omitting the key.
+                    return {
+                      id: alert.id,
+                      attribution: dossier,
+                      campaign_key: featureFlags.cloneCampaigns
+                        ? (campaignKeyFromDossier(dossier) ?? "insufficient")
+                        : null,
+                    };
+                  },
+                  // Bulk write (v331): fills only `attribution IS NULL`, so a
+                  // chunk that races a retry is a no-op, never an overwrite.
+                  flush: async (writes) => {
+                    const { data, error } = await sb.rpc(
+                      "apply_clone_alert_attributions",
+                      { p_rows: writes },
+                    );
+                    if (error) return { error: error.message };
+                    return { written: typeof data === "number" ? data : 0 };
+                  },
+                  onRowError: (alertId, err) =>
+                    logger.error("clone-watch enrich: lookup failed", {
+                      alertId,
+                      error: err instanceof Error ? err.message : String(err),
+                    }),
+                  onFlushError: (alertIds, message) =>
+                    logger.error("clone-watch enrich: bulk write failed", {
+                      alertIds,
+                      error: message,
+                    }),
+                });
+              },
+            );
+      // Worklist rows that now carry a dossier: written by this attempt, or by
+      // an earlier attempt of the same step (the read-back's skips). Counting
+      // only this attempt's writes would make a retried run read as
+      // `pending>0 ∧ enriched=0` — this Lane's silent_zero page.
+      const enriched = enrich.written + enrich.alreadyEnriched;
+      if (
+        enrich.lookupFailed > 0 ||
+        enrich.writeFailed > 0 ||
+        enrich.notReachedBudget > 0
+      ) {
+        logger.warn("clone-watch enrich: rows left unenriched", { ...enrich });
       }
 
       // Kit pivots: for confirmed likely_phishing clones, search urlscan for
@@ -484,9 +572,16 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // (09-11..16) were indistinguishable from "nothing to enrich".
       await step.run("log-outcome", () =>
         recordLaneOutcome("clone-watch-enrich-attribution", enriched, {
-          ...(pending.length === 0 ? { reason: "nothing_pending" as const } : {}),
+          ...(pending.length === 0
+            ? { reason: "nothing_pending" as const }
+            : {}),
           pending: pending.length,
           enriched,
+          // #1229: what the folded batch did with the worklist.
+          already_enriched: enrich.alreadyEnriched,
+          lookup_failed: enrich.lookupFailed,
+          write_failed: enrich.writeFailed,
+          not_reached_budget: enrich.notReachedBudget,
           // #1231: the cap and the backlog it leaves (null = count failed).
           cap: ENRICH_RUN_CAP,
           cap_reached: pending.length >= ENRICH_RUN_CAP,
@@ -499,6 +594,9 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         ok: true,
         candidates: pending.length,
         enriched,
+        enrichLookupFailed: enrich.lookupFailed,
+        enrichWriteFailed: enrich.writeFailed,
+        enrichNotReachedBudget: enrich.notReachedBudget,
         backfilled: backfill.written,
         backfillFailed: backfill.failed,
         kitPivoted: kitPivots.written,
@@ -510,6 +608,18 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     },
   ),
 );
+
+const NO_ENRICH: Readonly<EnrichBatchOutcome> = Object.freeze({
+  pending: 0,
+  alreadyEnriched: 0,
+  attempted: 0,
+  written: 0,
+  lookupFailed: 0,
+  writeFailed: 0,
+  writeSkipped: 0,
+  notReachedBudget: 0,
+  deadlineHit: false,
+});
 
 /** Derive the campaign-fingerprint inputs from a stored/fresh attribution
  *  dossier. Tolerant of partial dossiers (returns null → caller stamps the

@@ -282,7 +282,14 @@ export interface LaneOutcome {
   "clone-watch-enrich-attribution": {
     reason?: "nothing_pending";
     pending: number;
+    /** Worklist rows that now carry a dossier — this attempt's writes plus
+     *  rows an earlier attempt of the same step wrote (#1229). */
     enriched: number;
+    /** #1229 — the folded enrich batch. Absent on rows before the fold. */
+    already_enriched?: number;
+    lookup_failed?: number;
+    write_failed?: number;
+    not_reached_budget?: number;
     /** #1231 — the per-run cap, and whether this run was held by it. Absent
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;

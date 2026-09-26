@@ -387,17 +387,21 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // count reads lifecycle_state, so it landed in the wrong bucket.
       //
       // v278's RPC takes an id and nothing else, so this step cannot name a
-      // lifecycle state at all.
+      // lifecycle state at all. v331 (#1229) is its array form — the same
+      // per-row write for every attempted id in ONE statement, instead of up
+      // to RECHECK_BATCH_LIMIT sequential round trips inside a held slot. It
+      // still takes ids and nothing else. A failure throws for the step's
+      // retry, as before; the write is a whole-batch statement, so there is
+      // no half-stamped batch to reason about.
       await step.run("mark-rechecked", async () => {
-        for (const id of attemptedIds) {
-          const { error } = await sb.rpc("mark_clone_alert_rechecked", {
-            p_alert_id: id,
-          });
-          if (error) {
-            throw new Error(
-              `mark_clone_alert_rechecked failed for alert ${id}: ${error.message}`,
-            );
-          }
+        if (attemptedIds.length === 0) return;
+        const { error } = await sb.rpc("mark_clone_alerts_rechecked", {
+          p_alert_ids: attemptedIds,
+        });
+        if (error) {
+          throw new Error(
+            `mark_clone_alerts_rechecked failed for ${attemptedIds.length} alerts: ${error.message}`,
+          );
         }
       });
 

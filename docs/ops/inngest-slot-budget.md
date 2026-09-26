@@ -182,6 +182,15 @@ event per row, up to 50 runs/day x 2 steps = 100 boundaries**, and its
 
 ### Step 2 — `clone-watch-enrich-attribution`
 
+> **DONE 2026-09-26 (#1229 part 1, v331).** The fold below shipped: one
+> `enrich-batch` step (4 wide, starts ≥3 s apart — whoisjson's 20/min, not
+> AbuseIPDB, turned out to be the binding vendor rate), an `attribution IS
+NULL` read-back per attempt, chunked bulk writes via
+> `apply_clone_alert_attributions`. Declared boundaries 64 → 5, finish 36m →
+> 10m, ~63 → ~4 steps/day. `kit-pivots` was already one budgeted step with its
+> 429 `break` intact and is unchanged. The text below is kept as the decision
+> record.
+
 One run/day, `2 + N + K + B` steps where N ≤ `ENRICH_RUN_CAP` (60). Its declared
 33-minute finish budget is pinned to that 64-boundary worst case by
 `apps/web/__tests__/inngestFinishBudgets.test.ts`.

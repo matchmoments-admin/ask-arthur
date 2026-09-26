@@ -483,6 +483,27 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(data).toBe(0);
   });
 
+  // v331 (#1229): the two batch writers. Called with ids/rows that match
+  // nothing, so they exercise the plpgsql body and the TS arg names without
+  // writing a row. A 42883 means the arg name or type drifted.
+  it("mark_clone_alerts_rechecked no-ops on an absent id and returns 0", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("mark_clone_alerts_rechecked", {
+      p_alert_ids: [-1],
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(0);
+  });
+
+  it("apply_clone_alert_attributions no-ops on an absent id and returns 0", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("apply_clone_alert_attributions", {
+      p_rows: [{ id: -1, attribution: { enriched_at: "smoke" }, campaign_key: null }],
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(0);
+  });
+
   it("record_clone_watch_jev_classification rejects an absent alert (FK) without a type error", async () => {
     const supabase = getClient();
     const { error } = await supabase.rpc("record_clone_watch_jev_classification", {
