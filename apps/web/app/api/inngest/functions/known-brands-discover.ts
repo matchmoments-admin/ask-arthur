@@ -95,7 +95,10 @@ export const knownBrandsDiscover = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   [
-    { cron: "0 6 * * *" }, // daily 06:00 UTC
+    // PARKED (#1230, 2026-09-26): the daily 06:00 run found every known brand
+    // already probed (100% `all_probed`) — one wasted run a day. Manual only;
+    // restore `{ cron: "0 6 * * *" }` when new brands arrive faster than an
+    // operator would trigger it.
     { event: "known-brands/discover.manual-trigger.v1" },
   ],
   withAxiomLogging({ fnId: "known-brands-discover" }, async ({ step }) => {

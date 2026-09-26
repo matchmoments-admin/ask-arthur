@@ -112,6 +112,14 @@ interface Shape<L extends LaneId> {
    */
   crons?: readonly string[];
   /**
+   * PARKED (#1230): the Lane does nothing on its schedule today, so it runs
+   * only on its manual-trigger event. The value says why. `laneCrons()`
+   * returns no schedule and the digest expects no row, so a parked Lane never
+   * pages "absent" and burns no Inngest runs. Un-parking is deleting this one
+   * field — `crons` keeps the schedule to restore (one declaration, as ever).
+   */
+  parked?: string;
+  /**
    * ISO instant before which a MISSING row is not `absent` — a new Lane whose
    * first scheduled run is still ahead (a monthly one would otherwise page
    * "no row in the window" every day until it first fires). Only the
@@ -340,6 +348,8 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-notify-brand-prepare": {
     crons: ["30 9 * * *"],
+    parked:
+      "no brand contact until the #1237 readiness gate holds (#1227); 100% no_unbatched_rows",
     flags: ["shopfrontCloneOutreach", "shopfrontCloneNotifyBrand"],
     consecutive: 1,
     shape: "every prepared group failed",
@@ -420,6 +430,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-fp-cluster-digest": {
     crons: ["30 9 * * 0"],
+    parked: "no FP-cluster input since 2026-09-04; triage is paused with brand contact (#1227)",
     flags: ["shopfrontCloneWatch"],
     consecutive: 1,
     shape: "(absence only)",
@@ -439,6 +450,7 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
  * declares none — an event-driven Lane asking for a schedule is a wiring bug.
  */
 export function laneCrons(lane: LaneId): Array<{ cron: string }> {
+  if (LANE_SHAPES[lane].parked) return [];
   const crons = LANE_SHAPES[lane].crons;
   if (!crons?.length) throw new Error(`laneCrons: ${lane} declares no crons`);
   return crons.map((cron) => ({ cron }));
@@ -447,6 +459,7 @@ export function laneCrons(lane: LaneId): Array<{ cron: string }> {
 /** Longest healthy gap between the Lane's rows: explicit, else from its crons. */
 export function laneExpectEvery(lane: LaneId): number {
   const shape = LANE_SHAPES[lane];
+  if (shape.parked) return Number.POSITIVE_INFINITY;
   if (shape.expectEvery !== undefined) return shape.expectEvery;
   if (shape.crons?.length) return expectEveryFromCrons(shape.crons);
   throw new Error(`laneExpectEvery: ${lane} declares neither crons nor expectEvery`);
