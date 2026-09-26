@@ -123,8 +123,13 @@ interface PendingAlert {
 // count, so the declaration names all five.
 //
 // Floor = 5 x 30s queue wait + 320s inline (ENRICH_WALL_CLOCK_MS 200s +
-// KIT_PIVOT_WALL_CLOCK_MS 120s) + 60s slack = 530s. 10m = 600s leaves 70s of
-// real headroom rather than a budget sitting on its floor (#1138). Was 36m.
+// KIT_PIVOT_WALL_CLOCK_MS 120s) + 60s slack = 530s. 15m, not 10m (review of
+// #1252): the floor ignores enrich-batch's tail past its budget (~40 s: the
+// check precedes a row, then the worst row + final flush), 60 s queue waits
+// under contention (~690 s healthy worst case), and the case the read-back
+// exists for — a Vercel kill at 300 s then a retry — which alone is ~500 s
+// before the other steps. A finish-cancel is silent and loses log-outcome.
+// Was 36m.
 //
 // The objection that kept this fold out of #1136 — "folding re-runs up to 60
 // rows of PAID lookups on a mid-batch retry" — is answered in
@@ -138,7 +143,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     // 10m (was 36m, #1229): derived above from 5 boundaries + two in-step
     // wall clocks. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "10m" },
+    timeouts: { finish: "15m" },
     retries: 2,
     // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
     // manual-trigger must have a throttle AND a same-window cooldown, or
