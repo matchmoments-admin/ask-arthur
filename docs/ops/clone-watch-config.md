@@ -1355,10 +1355,16 @@ feed-platform (`scam_urls`/`scam_entities`), notify-weaponised,
 enforcement-plan and the Netcraft lanes. That holds whichever path persisted
 the verdict: retrieve, the submit lane's reputation fallback, or a later
 recheck. The miss is stamped on the sample row (`miss_at`). The daily submit
-lane claims new misses (`claim_clone_not_a_clone_audit_misses`) and logs one
-always-ship `warn` per miss: `clone-watch: not-a-clone audit MISS — review`.
-Outcome Row field: `audit_misses`. If a sample is later re-judged
-`is_clone=true`, the normal edges apply again.
+lane reads unsurfaced misses (`list_clone_not_a_clone_audit_unwarned_misses`),
+ships one **always-ship Axiom warn** per miss (`clone-watch.not-a-clone-audit.miss`,
+via `getLogger` inside the `surface-audit-misses` step, flush awaited — the
+console logger survives ~1 h in Vercel and is not a record), writes their ids to
+the Outcome Row (`audit_misses`, `audit_miss_ids`), and only THEN stamps
+`miss_warned_at` (`mark_clone_not_a_clone_audit_misses_warned`). A run that
+dies in between re-presents the miss; a replay does not re-ship the warns. The
+branch fails CLOSED: only an explicit re-judgement to `is_clone=true` lets a
+sample weaponise — a NULL or missing classification stays measurement. If a
+sample is re-judged `is_clone=true`, the normal edges apply again.
 
 **Prod, queried 2026-09-26.**
 
@@ -1375,7 +1381,7 @@ Outcome Row field: `audit_misses`. If a sample is later re-judged
 **How it runs (no new cron).** The daily `shopfront-clone-urlscan-submit` lane
 (09:00 UTC) does the following:
 
-- Its load step draws the weekly sample (flagged), claims new misses, and lists
+- Its load step draws the weekly sample (flagged), reads unsurfaced misses, and lists
   `due` samples (`list_clone_not_a_clone_audit_pending`).
 - It asks the regular worklist for the full 75, so v285's oldest-rows reserve
   keeps its size. `composeSubmitBatch` gives samples at most
@@ -1392,7 +1398,8 @@ Outcome Row field: `audit_misses`. If a sample is later re-judged
   attempts. Never-tried samples go first, then the longest-waiting retry.
 - A sample is **unscannable** only when its attempts are exhausted with no
   verdict. A lost stamp still waits out the cadence, because the state also
-  reads urlscan's `attempted_at`.
+  reads urlscan's `attempted_at` (failed attempts) and `urlscan_submitted_at`
+  (successful submits).
 - Every state comes from ONE function,
   `clone_watch_not_a_clone_audit_sample_states()`, which both the worklist and
   the summary read.
@@ -1436,7 +1443,8 @@ SELECT * FROM public.clone_watch_not_a_clone_audit_summary();
 -- weekly samples of the last 30 days, for #1237:
 SELECT * FROM public.clone_watch_not_a_clone_audit_summary(now() - interval '30 days')
  WHERE cohort = 'weekly';
--- misses to review (also in the logs as warns):
+-- misses to review (also in Axiom: clone-watch.not-a-clone-audit.miss;
+-- and cost_telemetry submit_batch metadata->'audit_miss_ids'):
 SELECT alert_id, miss_at, cohort_key, model_id FROM clone_watch_not_a_clone_samples
  WHERE miss_at IS NOT NULL ORDER BY miss_at DESC;
 ```

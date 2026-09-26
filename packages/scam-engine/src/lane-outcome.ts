@@ -224,8 +224,11 @@ export interface LaneOutcome {
     /** Sample rows the weekly draw marked on this run (0 on six days of seven,
      *  and while the weekly flag is off). */
     audit_drawn?: number;
-    /** New misses claimed this run — each one also logged as a warn. */
+    /** Misses surfaced this run — each also shipped as an always-ship Axiom
+     *  warn, and stamped miss_warned_at only after this row is written. */
     audit_misses?: number;
+    /** The alert ids of those misses: the durable record of what was surfaced. */
+    audit_miss_ids?: number[];
     /** Audit samples in this run's batch (≤ AUDIT_SLOTS_PER_RUN). */
     audit_offered?: number;
     /** Samples tried (an attempt recorded; excludes 429s and unreached). */

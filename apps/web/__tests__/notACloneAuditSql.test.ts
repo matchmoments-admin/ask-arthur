@@ -13,6 +13,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 //        → "a sampled miss never reaches weaponised or weaponised_at" FAILED
 //   - apply: keyed the branch on sample membership only (no is_clone check)
 //        → "a sample later re-judged is_clone=true weaponises normally" FAILED
+//   - apply: `c.is_clone IS FALSE` (fail-open) instead of NOT EXISTS(is_clone IS TRUE)
+//        → "a NULL re-judgement fails closed" FAILED
+//   - states: dropped urlscan_submitted_at from the attempt clock
+//        → "a submitted-then-unstamped sample is not re-offered daily" FAILED
+//   - misses: listed rows with miss_warned_at set   → "misses stay listed until marked warned" FAILED
 //   - draw: dropped the triage_status <> 'fp' filter      → "samples only never-scanned … non-fp" FAILED
 //   - draw: dropped ON CONFLICT (alert_id) DO NOTHING     → "a draw under another key skips … instead of raising" FAILED
 //   - draw: dropped the cohort_key EXISTS early-return     → "weekly draw happens once per ISO week" FAILED
@@ -195,14 +200,27 @@ describe("v330: a miss is measurement, never an action", () => {
     expect((await sampleRow(1)).miss_at).toBeNull();
   });
 
-  it("each miss is claimed for the operator warn exactly once", async () => {
+  it("a NULL re-judgement fails closed (still measurement, never weaponised)", async () => {
+    await alert({ id: 1 });
+    await drawBaseline("b", 10);
+    await db.exec("UPDATE clone_watch_classifications SET is_clone = NULL WHERE alert_id = 1");
+    await persist(1, "likely_phishing");
+    expect(await row(1)).toMatchObject({ lifecycle_state: "monitoring", weaponised_at: null });
+    expect((await sampleRow(1)).miss_at).not.toBeNull();
+  });
+
+  it("misses stay listed until marked warned — nothing is stamped by the read", async () => {
     await alert({ id: 1 });
     await drawBaseline("b", 10);
     await persist(1, "likely_phishing");
-    const first = (await db.query<{ alert_id: number }>("SELECT * FROM claim_clone_not_a_clone_audit_misses(50)")).rows;
-    const again = (await db.query("SELECT * FROM claim_clone_not_a_clone_audit_misses(50)")).rows;
-    expect(first.map((r) => Number(r.alert_id))).toEqual([1]);
-    expect(again).toEqual([]);
+    const list = async () =>
+      (await db.query<{ alert_id: number }>("SELECT * FROM list_clone_not_a_clone_audit_unwarned_misses(50)"))
+        .rows.map((r) => Number(r.alert_id));
+    expect(await list()).toEqual([1]);
+    expect(await list()).toEqual([1]); // a read never marks
+    const n = (await db.query<{ n: number }>("SELECT mark_clone_not_a_clone_audit_misses_warned(ARRAY[1]::bigint[]) AS n")).rows[0]!.n;
+    expect(n).toBe(1);
+    expect(await list()).toEqual([]);
   });
 });
 
@@ -323,6 +341,18 @@ describe("v330 attempts + worklist", () => {
     await drawBaseline("b", 10);
     await db.exec(
       `UPDATE shopfront_clone_alerts SET urlscan_evidence = jsonb_build_object('status', 400, 'attempted_at', now() + interval '1 minute') WHERE id = 1`,
+    );
+    expect(await pending()).toEqual([]);
+  });
+
+  it("a submitted-then-unstamped sample is not re-offered daily (urlscan_submitted_at clock)", async () => {
+    await alert({ id: 1 });
+    await drawBaseline("b", 10);
+    // Submitted after the draw, the lane's stamp lost, and retrieve failed out
+    // (streak 3) — without the submitted_at clock it would be due immediately.
+    await db.exec(
+      `UPDATE shopfront_clone_alerts SET urlscan_uuid = 'u', urlscan_failure_streak = 3,
+         urlscan_submitted_at = now() + interval '1 minute' WHERE id = 1`,
     );
     expect(await pending()).toEqual([]);
   });

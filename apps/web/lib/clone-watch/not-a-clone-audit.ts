@@ -12,7 +12,8 @@
 // apply_clone_urlscan_verdict routes a sampled is_clone=false alert's
 // likely_phishing verdict to `monitoring`, never `weaponised`, so no weaponised
 // consumer (feed-platform, notify-weaponised, enforcement, Netcraft) is
-// reachable. The lane logs one always-ship warn per miss (claimAuditMisses).
+// reachable. The lane surfaces each miss durably (surfaceAuditMisses: an
+// always-ship Axiom warn + the ids on its Outcome Row) before stamping it.
 //
 // How a sample moves (SQL in supabase/migration-v330-*):
 //   draw    — an operator marks the one-off baseline (~100, SQL); the lane
@@ -27,6 +28,7 @@
 //             weekly recheck), likely_phishing → monitoring + miss_at.
 //   count   — clone_watch_not_a_clone_audit_summary() (#1237's input).
 
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import type { CloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 
 /** Of the submit lane's daily SUBMIT_BATCH_LIMIT (75), at most this many go to
@@ -95,14 +97,15 @@ export interface AuditLoad {
   samples: CloneCandidate[];
   /** Rows the weekly draw marked on this call (0 on six days of seven). */
   drawn: number;
-  /** Misses recorded since the last run, claimed for the operator warn. */
+  /** Misses not yet surfaced (read-only — stamped only after the lane has
+   *  written them durably, see markAuditMissesWarned). */
   misses: AuditMiss[];
   /** Set when a call failed; the lane then runs its regular batch unchanged. */
   error?: string;
 }
 
 /**
- * Draw this week's sample (when enabled), claim new misses, and list the due
+ * Draw this week's sample (when enabled), read unsurfaced misses, and list the due
  * samples. Never throws: the audit is secondary to the lane's real job, and
  * before v330 is applied these RPCs do not exist — the lane must keep working.
  */
@@ -121,9 +124,9 @@ export async function loadAuditSamples(
     if (error) errors.push(`draw: ${error.message}`);
     else drawn = typeof data === "number" ? data : 0;
   }
-  const claimed = await sb.rpc("claim_clone_not_a_clone_audit_misses", {});
-  if (claimed.error) errors.push(`misses: ${claimed.error.message}`);
-  const misses = claimed.error ? [] : ((claimed.data as AuditMiss[] | null) ?? []);
+  const unwarned = await sb.rpc("list_clone_not_a_clone_audit_unwarned_misses", {});
+  if (unwarned.error) errors.push(`misses: ${unwarned.error.message}`);
+  const misses = unwarned.error ? [] : ((unwarned.data as AuditMiss[] | null) ?? []);
 
   const { data, error } = await sb.rpc("list_clone_not_a_clone_audit_pending", {
     p_limit: opts.limit ?? AUDIT_SLOTS_PER_RUN,
@@ -144,6 +147,58 @@ export async function stampAuditAttempts(
 ): Promise<number | null> {
   if (ids.length === 0) return 0;
   const { data, error } = await sb.rpc("mark_clone_not_a_clone_audit_attempted", {
+    p_alert_ids: ids,
+  });
+  if (error) return null;
+  return typeof data === "number" ? data : ids.length;
+}
+
+/** The warn text an operator searches Axiom for. */
+export const AUDIT_MISS_WARN = "clone-watch.not-a-clone-audit.miss";
+
+/**
+ * Ship one always-ship Axiom warn per miss and wait for the flush. The console
+ * logger (`@askarthur/utils/logger`) has no Axiom transport — Vercel keeps it
+ * about an hour — so it is NOT a record. Call inside a step.run so a replay
+ * does not repeat it. Throws if the flush fails, so the step retries and the
+ * misses are not stamped as surfaced.
+ */
+export async function surfaceAuditMisses(
+  misses: readonly AuditMiss[],
+  runId?: string,
+): Promise<number> {
+  if (misses.length === 0) return 0;
+  const log = getLogger({
+    source: "inngest",
+    requestId: runId,
+    fn: "shopfront-clone-urlscan-submit",
+    feature: "clone_not_a_clone_audit",
+  });
+  for (const m of misses) {
+    log.warn(AUDIT_MISS_WARN, {
+      alertId: m.alert_id,
+      candidateDomain: m.candidate_domain,
+      candidateUrl: m.candidate_url,
+      cohortKey: m.cohort_key,
+      classifier: m.model_id,
+      confidence: m.confidence,
+      missAt: m.miss_at,
+      action: "review — routed to monitoring, never weaponised (v330)",
+    });
+  }
+  await log.flush();
+  return misses.length;
+}
+
+/** Stamp misses as surfaced — call only AFTER the Axiom warn and the Outcome
+ *  Row (audit_miss_ids) were written. Returns null when the write failed; the
+ *  misses then re-present next run (a repeat warn beats a silent one). */
+export async function markAuditMissesWarned(
+  sb: RpcClient,
+  ids: readonly number[],
+): Promise<number | null> {
+  if (ids.length === 0) return 0;
+  const { data, error } = await sb.rpc("mark_clone_not_a_clone_audit_misses_warned", {
     p_alert_ids: ids,
   });
   if (error) return null;

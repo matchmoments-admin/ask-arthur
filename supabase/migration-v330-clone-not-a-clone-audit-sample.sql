@@ -31,9 +31,11 @@
 --    notify-weaponised, enforcement-plan, the Netcraft lanes — is therefore
 --    unreachable from an audit miss, whichever path persisted the verdict
 --    (retrieve, the submit lane's reputation fallback, or a later recheck).
---    The miss is stamped on the sample row in the same transaction; the submit
---    lane claims new misses daily and logs one always-ship warn each for
---    operator review. The rest of the body is byte-for-byte the live prod
+--    The miss is stamped on the sample row in the same transaction. The submit
+--    lane reads new misses daily, ships one always-ship Axiom warn each, writes
+--    their ids to its Outcome Row (audit_miss_ids), and only then stamps
+--    miss_warned_at. The branch fails CLOSED: only an explicit is_clone=true
+--    re-judgement lets a sample weaponise. The rest of the body is byte-for-byte the live prod
 --    definition (pg_get_functiondef, 2026-09-26); ACL restated. The live
 --    function has no function-level statement_timeout (proconfig is only
 --    search_path) and none is added: it only ever runs nested inside
@@ -157,12 +159,15 @@ BEGIN
     -- to monitoring for human review — never weaponised, so no weaponised
     -- consumer (feed-platform, notify-weaponised, enforcement, Netcraft) can
     -- act on it under the brand the classifier rejected.
+    -- Fails CLOSED: only an explicit is_clone=true re-judgement lets a sample
+    -- weaponise; a NULL or missing classification stays measurement.
     IF EXISTS (
-      SELECT 1
-      FROM public.clone_watch_not_a_clone_samples s
-      JOIN public.clone_watch_classifications c ON c.alert_id = s.alert_id
+      SELECT 1 FROM public.clone_watch_not_a_clone_samples s
       WHERE s.alert_id = p_alert_id
-        AND c.is_clone IS FALSE
+    ) AND NOT EXISTS (
+      SELECT 1 FROM public.clone_watch_classifications c
+      WHERE c.alert_id = p_alert_id
+        AND c.is_clone IS TRUE
     ) THEN
       v_audit_miss := true;
       v_next := CASE WHEN v_current = 'detected' THEN 'monitoring' ELSE v_current END;
@@ -350,10 +355,16 @@ AS $$
       END AS age_band,
       GREATEST(
         s.last_attempt_at,
+        -- A failed attempt records attempted_at in urlscan evidence …
         CASE
           WHEN (sca.urlscan_evidence ->> 'attempted_at') IS NOT NULL
            AND (sca.urlscan_evidence ->> 'attempted_at')::timestamptz >= s.sampled_at
           THEN (sca.urlscan_evidence ->> 'attempted_at')::timestamptz
+        END,
+        -- … a successful submit records urlscan_submitted_at (and a uuid).
+        -- Either keeps the cadence if the lane's own stamp was lost.
+        CASE
+          WHEN sca.urlscan_submitted_at >= s.sampled_at THEN sca.urlscan_submitted_at
         END
       ) AS last_attempt_at,
       sca.urlscan_uuid, sca.urlscan_failure_streak, sca.weaponised_at,
@@ -458,38 +469,58 @@ REVOKE ALL ON FUNCTION public.mark_clone_not_a_clone_audit_attempted(bigint[])
 GRANT EXECUTE ON FUNCTION public.mark_clone_not_a_clone_audit_attempted(bigint[])
   TO service_role;
 
--- ── 7. Claim new misses for the operator warn ───────────────────────────────
--- Returns each miss once (stamps miss_warned_at in the same statement). The
--- submit lane logs one always-ship warn per returned row.
-CREATE OR REPLACE FUNCTION public.claim_clone_not_a_clone_audit_misses(p_limit integer DEFAULT 50)
+-- ── 7. Misses awaiting the operator warn ────────────────────────────────────
+-- Two calls, not one claim: the lane READS the unwarned misses, ships an
+-- always-ship Axiom warn per miss and writes their ids into its Outcome Row,
+-- and only THEN stamps miss_warned_at. A miss is never marked surfaced before
+-- something durable was written; a run that dies in between re-presents it.
+CREATE OR REPLACE FUNCTION public.list_clone_not_a_clone_audit_unwarned_misses(p_limit integer DEFAULT 50)
 RETURNS TABLE(alert_id bigint, candidate_domain text, candidate_url text,
               cohort_key text, model_id text, confidence real, miss_at timestamptz)
 LANGUAGE sql
+STABLE
 SECURITY DEFINER
 SET search_path = ''
 SET statement_timeout = '30s'
 AS $$
-  WITH claimed AS (
-    UPDATE public.clone_watch_not_a_clone_samples s
-       SET miss_warned_at = pg_catalog.now()
-     WHERE s.alert_id IN (
-       SELECT s2.alert_id FROM public.clone_watch_not_a_clone_samples s2
-        WHERE s2.miss_at IS NOT NULL AND s2.miss_warned_at IS NULL
-        ORDER BY s2.miss_at ASC
-        LIMIT GREATEST(1, LEAST(p_limit, 200))
-     )
-    RETURNING s.alert_id, s.cohort_key, s.model_id, s.confidence, s.miss_at
-  )
-  SELECT c.alert_id, sca.candidate_domain, sca.candidate_url, c.cohort_key,
-         c.model_id, c.confidence, c.miss_at
-  FROM claimed c
-  JOIN public.shopfront_clone_alerts sca ON sca.id = c.alert_id
-  ORDER BY c.miss_at ASC;
+  SELECT s.alert_id, sca.candidate_domain, sca.candidate_url, s.cohort_key,
+         s.model_id, s.confidence, s.miss_at
+  FROM public.clone_watch_not_a_clone_samples s
+  JOIN public.shopfront_clone_alerts sca ON sca.id = s.alert_id
+  WHERE s.miss_at IS NOT NULL
+    AND s.miss_warned_at IS NULL
+  ORDER BY s.miss_at ASC, s.alert_id ASC
+  LIMIT GREATEST(1, LEAST(p_limit, 200));
 $$;
 
-REVOKE ALL ON FUNCTION public.claim_clone_not_a_clone_audit_misses(integer)
+REVOKE ALL ON FUNCTION public.list_clone_not_a_clone_audit_unwarned_misses(integer)
   FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_clone_not_a_clone_audit_misses(integer)
+GRANT EXECUTE ON FUNCTION public.list_clone_not_a_clone_audit_unwarned_misses(integer)
+  TO service_role;
+
+CREATE OR REPLACE FUNCTION public.mark_clone_not_a_clone_audit_misses_warned(p_alert_ids bigint[])
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+SET statement_timeout = '30s'
+AS $$
+DECLARE
+  v_n integer;
+BEGIN
+  UPDATE public.clone_watch_not_a_clone_samples s
+     SET miss_warned_at = pg_catalog.now()
+   WHERE s.alert_id = ANY (p_alert_ids)
+     AND s.miss_at IS NOT NULL
+     AND s.miss_warned_at IS NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mark_clone_not_a_clone_audit_misses_warned(bigint[])
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.mark_clone_not_a_clone_audit_misses_warned(bigint[])
   TO service_role;
 
 -- ── 8. The measurement (#1237 reads this) ────────────────────────────────────
@@ -587,7 +618,9 @@ AS $function$
   ) kb ON true
   -- v330: is this a not-a-clone audit sample still judged is_clone=false?
   LEFT JOIN LATERAL (
-    SELECT (cwc.is_clone IS FALSE AND EXISTS (
+    -- Same fail-closed rule as apply_clone_urlscan_verdict: a sample stays an
+    -- audit row until it is explicitly re-judged is_clone=true.
+    SELECT (cwc.is_clone IS NOT TRUE AND EXISTS (
       SELECT 1 FROM public.clone_watch_not_a_clone_samples nac
       WHERE nac.alert_id = sca.id
     )) AS nac_audit

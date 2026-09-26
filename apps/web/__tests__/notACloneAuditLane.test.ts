@@ -16,12 +16,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 //                                       → "records an attempt … keeps them out of units" FAILED
 //   - submit fn: counted samples in `units` (candidates + audit)
 //                                       → "a DNS-dead audit-only day is not silent_zero" FAILED
-//   - submit fn: dropped the per-miss logger.warn → "logs one warn per claimed miss" FAILED
+//   - submit fn: dropped the surface-audit-misses step (no Axiom warn)
+//                                       → "ships one always-ship Axiom warn per miss …" FAILED
+//   - submit fn: ran the Axiom warn loop OUTSIDE step.run
+//                                       → "a replayed run does not re-ship the miss warns" FAILED
+//   - submit fn: stamped miss_warned_at in the load step (before anything durable)
+//                                       → "a failed Axiom flush leaves the misses unstamped" FAILED
+//   - submit fn: dropped audit_miss_ids from the Outcome Row
+//                                       → "ships one always-ship Axiom warn per miss …" FAILED
 //   - submit fn: let loadAuditSamples' error throw out of the load step
 //                                       → "keeps submitting the regular batch when the audit RPCs are missing" FAILED
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(), submit: vi.fn(), log: vi.fn(), warn: vi.fn(),
+  axiomWarn: vi.fn(), axiomFlush: vi.fn(),
   flags: { cloneWatchNotACloneAuditWeekly: false } as Record<string, boolean>,
 }));
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({ inngest: {
@@ -34,6 +42,12 @@ vi.mock("@askarthur/supabase/server", () => ({ createServiceClient: () => ({ rpc
 vi.mock("@askarthur/scam-engine/cost-log", () => ({ logCost: mocks.log }));
 vi.mock("@askarthur/utils/logger", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: mocks.warn, debug: vi.fn() },
+}));
+vi.mock("@askarthur/utils/axiom-logger", () => ({
+  getLogger: () => ({
+    debug: vi.fn(), info: vi.fn(), error: vi.fn(),
+    warn: mocks.axiomWarn, flush: mocks.axiomFlush,
+  }),
 }));
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: new Proxy({}, {
   get: (_t, key: string) => (key in mocks.flags ? mocks.flags[key] : true),
@@ -114,6 +128,7 @@ describe("submit lane with audit samples", () => {
     vi.stubEnv("URLSCAN_API_KEY", "test");
     mocks.flags.cloneWatchNotACloneAuditWeekly = false;
     mocks.submit.mockResolvedValue({ kind: "submitted", reputationMalicious: false });
+    mocks.axiomFlush.mockResolvedValue(undefined);
   });
 
   function worklists(
@@ -124,7 +139,8 @@ describe("submit lane with audit samples", () => {
     mocks.rpc.mockImplementation(async (name: string) => {
       if (name === "list_clone_alerts_pending_urlscan_submit") return { data: regular, error: null };
       if (name === "list_clone_not_a_clone_audit_pending") return { data: samples, error: null };
-      if (name === "claim_clone_not_a_clone_audit_misses") return { data: misses, error: null };
+      if (name === "list_clone_not_a_clone_audit_unwarned_misses") return { data: misses, error: null };
+      if (name === "mark_clone_not_a_clone_audit_misses_warned") return { data: misses.length, error: null };
       if (name === "draw_clone_not_a_clone_audit_sample") return { data: 3, error: null };
       if (name === "mark_clone_not_a_clone_audit_attempted") return { data: 1, error: null };
       return { data: 0, error: null };
@@ -175,15 +191,50 @@ describe("submit lane with audit samples", () => {
     expect(shape.silentZero(outcome() as never)).toBe(true);
   });
 
-  it("logs one warn per claimed miss and counts them on the Outcome Row", async () => {
-    worklists(range(1, 1), [], [
-      { alert_id: 7, candidate_domain: "x.example", candidate_url: "https://x.example", cohort_key: "baseline:b", model_id: "jev-1.13.0", confidence: 0.2, miss_at: "2026-09-26T00:00:00Z" },
-      { alert_id: 8, candidate_domain: "y.example", candidate_url: "https://y.example", cohort_key: "baseline:b", model_id: "jev-1.13.0", confidence: 0.3, miss_at: "2026-09-26T00:00:00Z" },
-    ]);
+  const MISSES = [
+    { alert_id: 7, candidate_domain: "x.example", candidate_url: "https://x.example", cohort_key: "baseline:b", model_id: "jev-1.13.0", confidence: 0.2, miss_at: "2026-09-26T00:00:00Z" },
+    { alert_id: 8, candidate_domain: "y.example", candidate_url: "https://y.example", cohort_key: "baseline:b", model_id: "jev-1.13.0", confidence: 0.3, miss_at: "2026-09-26T00:00:00Z" },
+  ];
+
+  it("ships one always-ship Axiom warn per miss, records the ids, then stamps them", async () => {
+    worklists(range(1, 1), [], MISSES);
     await invoke();
-    const missWarns = mocks.warn.mock.calls.filter(([msg]) => String(msg).includes("not-a-clone audit MISS"));
-    expect(missWarns.map(([, ctx]) => (ctx as { alertId: number }).alertId)).toEqual([7, 8]);
-    expect(outcome()).toMatchObject({ audit_misses: 2 });
+    expect(mocks.axiomWarn.mock.calls.map(([, ctx]) => (ctx as { alertId: number }).alertId)).toEqual([7, 8]);
+    expect(mocks.axiomFlush).toHaveBeenCalled();
+    expect(outcome()).toMatchObject({ audit_misses: 2, audit_miss_ids: [7, 8] });
+    expect(rpcs("mark_clone_not_a_clone_audit_misses_warned")).toEqual([{ p_alert_ids: [7, 8] }]);
+    // Order: the Outcome Row is written before the stamp.
+    const logAt = mocks.log.mock.invocationCallOrder.at(-1)!;
+    const markIdx = mocks.rpc.mock.calls.findIndex(([n]) => n === "mark_clone_not_a_clone_audit_misses_warned");
+    expect(mocks.rpc.mock.invocationCallOrder[markIdx]!).toBeGreaterThan(logAt);
+  });
+
+  it("records and stamps misses on a quiet day too", async () => {
+    worklists([], [], MISSES);
+    await invoke();
+    expect(outcome()).toMatchObject({ reason: "no_gated_candidates", audit_miss_ids: [7, 8] });
+    expect(rpcs("mark_clone_not_a_clone_audit_misses_warned")).toEqual([{ p_alert_ids: [7, 8] }]);
+  });
+
+  it("a replayed run does not re-ship the miss warns (they live inside a step)", async () => {
+    worklists(range(1, 1), [], MISSES);
+    // A replay: Inngest returns the memoised output of completed steps without
+    // running them again.
+    await (cloneWatchUrlscanSubmit as unknown as (ctx: unknown) => Promise<unknown>)({
+      event: { ts: Date.now(), data: {} },
+      runId: "run-1",
+      step: {
+        run: (name: string, fn: () => unknown) => (name === "surface-audit-misses" ? 2 : fn()),
+      },
+    });
+    expect(mocks.axiomWarn).not.toHaveBeenCalled();
+  });
+
+  it("a failed Axiom flush leaves the misses unstamped (the step throws and retries)", async () => {
+    worklists(range(1, 1), [], MISSES);
+    mocks.axiomFlush.mockRejectedValue(new Error("axiom down"));
+    await expect(invoke()).rejects.toThrow("axiom down");
+    expect(rpcs("mark_clone_not_a_clone_audit_misses_warned")).toEqual([]);
   });
 
   it("cap_reached is set when samples displaced regular rows", async () => {

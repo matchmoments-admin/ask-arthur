@@ -12,7 +12,9 @@ import {
 import {
   composeSubmitBatch,
   loadAuditSamples,
+  markAuditMissesWarned,
   stampAuditAttempts,
+  surfaceAuditMisses,
 } from "@/lib/clone-watch/not-a-clone-audit";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
@@ -58,7 +60,8 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * is_clone=false alerts — never scanned otherwise — so the pre-classifier's
  * false-negative rate is measured (lib/clone-watch/not-a-clone-audit.ts). The
  * audit is MEASUREMENT: v330 routes a sampled miss to monitoring, never
- * weaponised, and this lane logs one warn per miss for human review. Samples
+ * weaponised, and this lane surfaces each miss durably (Axiom warn + ids on the
+ * Outcome Row) for human review. Samples
  * take at most AUDIT_SLOTS_PER_RUN of the SUBMIT_BATCH_LIMIT slots and run
  * after the regular batch. Only ~33 regular rows were eligible on 2026-09-26,
  * so they mostly fill otherwise-empty slots: while samples are due the lane
@@ -123,7 +126,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-urlscan-submit" },
-    async ({ step }) => {
+    async ({ step, runId }) => {
       // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
       const gate = laneGate("shopfront-clone-urlscan-submit");
       if (!gate.ok) return { skipped: true, reason: gate.reason };
@@ -166,20 +169,25 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       });
       const { regular: candidates, audit: auditCandidates, auditDrawn } = loaded;
 
-      // One always-ship warn per audit miss (v330): a sampled "not a clone"
-      // that urlscan graded likely_phishing. It was routed to monitoring, NOT
-      // weaponised — no brand, feed or vendor action happens — so a human must
-      // look at it. claim_clone_not_a_clone_audit_misses returns each miss once.
-      for (const miss of loaded.auditMisses) {
-        logger.warn("clone-watch: not-a-clone audit MISS — review", {
-          alertId: miss.alert_id,
-          candidateDomain: miss.candidate_domain,
-          candidateUrl: miss.candidate_url,
-          cohortKey: miss.cohort_key,
-          classifier: miss.model_id,
-          confidence: miss.confidence,
-          missAt: miss.miss_at,
-        });
+      // Audit misses (v330): a sampled "not a clone" that urlscan graded
+      // likely_phishing. It was routed to monitoring, NOT weaponised — no brand,
+      // feed or vendor action happens — so a human must look at it. Surfaced
+      // durably: one always-ship Axiom warn each, inside a step (a replay does
+      // not repeat it; a failed flush throws and retries), then the ids go on
+      // the Outcome Row and only after that are they stamped miss_warned_at.
+      const auditMissIds = loaded.auditMisses.map((m) => m.alert_id);
+      // Called inside the log-cost step, AFTER the Outcome Row write.
+      const stampMissesSurfaced = async (ids: number[]) => {
+        if ((await markAuditMissesWarned(sb, ids)) === null) {
+          logger.error("clone-watch urlscan submit: audit miss stamp failed", {
+            ids: ids.length,
+          });
+        }
+      };
+      if (auditMissIds.length > 0) {
+        await step.run("surface-audit-misses", () =>
+          surfaceAuditMisses(loaded.auditMisses, runId),
+        );
       }
 
       // Retire what we are giving up on, BEFORE the empty-worklist return — a
@@ -221,19 +229,21 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         // submit_batch row lands inside 26h, and a quiet day (no gated
         // candidates, nothing to retire) used to write nothing. units 0
         // satisfies no silent-zero predicate.
-        await step.run("log-cost-quiet", () =>
-          recordLaneOutcome("shopfront-clone-urlscan-submit", 0, {
+        await step.run("log-cost-quiet", async () => {
+          await recordLaneOutcome("shopfront-clone-urlscan-submit", 0, {
             reason: "no_gated_candidates",
             submitted: 0,
             submit_failed: 0,
             rate_limited: 0,
             dormant_retired: dormant,
             audit_drawn: auditDrawn,
-            audit_misses: loaded.auditMisses.length,
+            audit_misses: auditMissIds.length,
+            audit_miss_ids: auditMissIds,
             audit_offered: 0,
             audit_attempted: 0,
-          }),
-        );
+          });
+          await stampMissesSurfaced(auditMissIds);
+        });
         return {
           ok: true,
           submitted: 0,
@@ -323,7 +333,8 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             cap_reached:
               loaded.regularFetched >= SUBMIT_BATCH_LIMIT || loaded.regularLeft > 0,
             audit_drawn: auditDrawn,
-            audit_misses: loaded.auditMisses.length,
+            audit_misses: auditMissIds.length,
+            audit_miss_ids: auditMissIds,
             audit_offered: auditCandidates.length,
             audit_attempted: auditTally.attemptedIds.length,
             audit_submitted: auditTally.submitted,
@@ -332,6 +343,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             audit_rate_limited: auditTally.rateLimited,
           },
         );
+        await stampMissesSurfaced(auditMissIds);
       });
 
       logger.info("clone-watch urlscan submit: batch complete", {
