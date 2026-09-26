@@ -720,8 +720,9 @@ only where v4 said no (every v4 match is a v5 match):
 - **floor** — `SHORT_BRAND_NEIGHBOUR_WORDS` (generated, 164 words) blocks
   both paths: bonus/bands/gonds/apply/bondi/cowes stay dead.
 
-The admitted row carries `signals[].evidence.short_brand_gate`, so the v5
-additions are selectable:
+A row ingested under v5 carries `signals[].evidence.short_brand_gate`, so v5
+additions from merge onward are selectable (rows ingested earlier carry the
+signals of the matcher that wrote them — see the re-triage note below):
 
 ```sql
 SELECT candidate_domain, inferred_target_domain, s->'evidence'->>'short_brand_gate' AS gate,
@@ -772,7 +773,8 @@ the ingest has no dated-backfill parameter, and none is proposed.
   (method changed, #1247), November's is the first comparable one.
 - If a restatement is ever wanted: `triage_status` back to
   `needs_investigation`, note `[matcher-v5-audit]`, `triage_by` NULL, for the
-  45 rows the §7b SQL selects — then re-publish with an `editorialNote`.
+  45 rows listed by id in PR #1262 (their signals predate v5, so the SQL
+  above cannot find them) — then re-publish with an `editorialNote`.
 
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)
 
