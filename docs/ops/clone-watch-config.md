@@ -1860,24 +1860,32 @@ scorecard row (upsert). A failed compute leaves no row → the gate reads NOT re
 `apps/web/lib/clone-watch/readiness.ts` — the ONE home; founder-adjustable; each
 row records the thresholds in force when computed):
 
-| Component            | Source (existing)                                                                                                                           | Pass when                                                                       | Insufficient when                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Weaponised precision | human `tp_confirmed`/`fp` on weaponised or likely_phishing alerts, `triage_at` in month (`clone_watch_readiness_inputs`)                    | ≥ 0.95                                                                          | n < 10                                                               |
-| Lookalike FP share   | human fp ÷ all human-triaged (tp/fp/needs_investigation) in month; classifier reject share shown as context                                 | ≤ 0.25                                                                          | n < 10                                                               |
-| Not-a-clone FN rate  | `clone_watch_not_a_clone_audit_summary()` cohorts first sampled before month end                                                            | ≤ 0.05                                                                          | no sample drawn, or scanned < 30                                     |
-| Lane health          | `alert_delivery_log` health-digest rows: days with `silent_zero`/`absent`/`brake_unknown`/`cap_bound`/`quota_exhausted` (`braked` excluded) | ≤ 2 problem days                                                                | measured days < 80% of the month (fails early once problem days > 2) |
-| Report correctness   | frozen `clone_watch_monthly_brand_stats.clones` vs `loadCardInputs` → `buildTrendRows` recount                                              | max per-brand diff ≤ 1 and ≤ 2% of brands differ                                | month not frozen / unreadable                                        |
-| Takedown validity    | `clone_watch_takedown_stats(days-in-month)` (v329), trailing window ending at compute time                                                  | no negative duration in any column, every median present exactly when its n > 0 | unreadable, or a pre-v329 row (no per-clock n)                       |
-| Month-end stock      | `clone_liveness_runs` (v325)                                                                                                                | completed, unverified ≤ 20% of stock                                            | no completed run                                                     |
+| Component            | Source (existing)                                                                                                                                                                                                                       | Pass when                                                                       | Insufficient when                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Weaponised precision | human decided verdicts (`tp_confirmed`/`tp_actioned` = TP, `fp`) on weaponised or likely_phishing alerts, `triage_at` in month (`clone_watch_readiness_inputs`)                                                                         | ≥ 0.95                                                                          | n < 10                                                               |
+| Lookalike FP share   | human fp ÷ human decided verdicts (tp_confirmed/tp_actioned/fp) in month — `needs_investigation` is a deferral, in neither side; classifier reject share shown as context                                                               | ≤ 0.25                                                                          | n < 10                                                               |
+| Not-a-clone FN rate  | `clone_watch_not_a_clone_audit_summary()` cohorts **drawn in the month** (by draw, not verdict: fixed at sampling, counted once; a late-month draw still unscanned on the 1st counts in sampled, not scanned)                           | ≤ 0.05                                                                          | no sample drawn in the month, or scanned < 30                        |
+| Lane health          | `alert_delivery_log` health-digest rows: days with `silent_zero`/`absent`/`brake_unknown`/`cap_bound`/`quota_exhausted` (`braked` excluded)                                                                                             | ≤ 2 problem days                                                                | measured days < 80% of the month (fails early once problem days > 2) |
+| Report correctness   | frozen `clone_watch_monthly_brand_stats.clones` vs `loadCardInputs` → `buildTrendRows` recount. On the 1st (minutes after the freeze) this proves the fold is **deterministic**; drift since the freeze shows only on a later recompute | max per-brand diff ≤ 1 and ≤ 2% of brands differ                                | month not frozen / unreadable                                        |
+| Takedown validity    | `clone_watch_takedown_stats(days-in-month)` (v329), trailing window ending at compute time                                                                                                                                              | no negative duration in any column, every median present exactly when its n > 0 | unreadable, or a pre-v329 row (no per-clock n)                       |
+| Month-end stock      | `clone_liveness_runs` (v325)                                                                                                                                                                                                            | completed, unverified ≤ 20% of stock                                            | no completed run                                                     |
 
 `ready` = all seven pass (enforced by CHECK `ready_iff_all_pass`).
 **Insufficient ≠ fail**: the admin page labels it "Insufficient data" (go
 measure), but it keeps the month not ready.
 
-**Human verdicts** are `triage_status` set through the admin triage route.
-`triage_by` is NULL for every row in prod (HMAC admin), so machine writers are
-excluded by note marker: `auto-park:`, `auto-triage:`, `[matcher-v4-audit]`. A
-new machine writer MUST use a note marker and be added to v335's exclusion list.
+**Human verdicts** are judged by `shopfront_clone_alerts.triage_source` (v335):
+`set_clone_alert_triage` stamps `p_source` (default `'human'`; the admin triage
+route is its only caller) and `auto-park.ts` stamps `'machine'`. The note is NOT
+the discriminator — `set_clone_alert_triage` COALESCEs `triage_notes` and the UI
+sends none, so a human verdict on an auto-parked or matcher-v4-audited alert
+keeps the machine note (#1260 review H1). Rows written before v335
+(`triage_source` NULL) count as human only with `triage_at` set and no machine
+marker: `auto-park%` (incl. the 98-row `auto-park (one-time backfill…)` form),
+`auto-triage%`, `[matcher-v4-audit]%`. `tp_actioned` counts as a TP: Netcraft's
+`merge_clone_alert_submission` rewrites a human `tp_confirmed` to it and never
+stamps `triage_at` or `triage_source`. A new machine writer MUST stamp
+`triage_source = 'machine'`.
 
 **Lane-health record.** The daily health digest (`/api/cron/health-digest`) writes
 one `alert_delivery_log` row per firing; its `metadata.lane_problems` (strings
@@ -1900,7 +1908,15 @@ Enforced at:
   manual approval, which runs the same gate. The lane is parked (#1230).
 
 Not gated: `/api/admin/brand-outreach/send` (the founder's hand-composed pilot
-outreach — a sales email, not a Clone Watch report) and onward abuse reports.
+outreach — a sales email, not a Clone Watch report) and `onward-brand-abuse`
+(consumer-reported onward reporting). **Open founder question: does #1227 cover
+onward brand-abuse reports?**
+
+**The compute can never fail the report run** (#1260 review L2): the step runs
+AFTER `log-outcome`; its body (`computeAndRecordReadiness`) catches everything
+and is bounded by `READINESS_WALL_CLOCK_MS` (90 s), writing nothing after a
+timeout; a step failure it cannot catch (platform timeout after retries) is
+caught around `step.run`. Every failure = no row = gate closed.
 
 **Measured 2026-09-27 (read-only, prod):** August — not ready (precision,
 fp share, FN rate, lane health insufficient; report diff 0 of 148 brands,

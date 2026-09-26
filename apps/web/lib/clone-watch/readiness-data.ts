@@ -15,7 +15,7 @@
  * the safe direction for a gate in front of brand contact.
  */
 
-import type { createServiceClient } from "@askarthur/supabase/server";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { logger } from "@askarthur/utils/logger";
 import { monthWindow } from "@/lib/clone-watch/month-window";
@@ -27,6 +27,7 @@ import {
   evaluateReadinessGate,
   requiredMonths,
   scoreReadiness,
+  sumAuditCohorts,
   toReadinessRow,
   READINESS_REQUIRED_MONTHS,
   type NotACloneInputs,
@@ -65,26 +66,28 @@ async function readSqlInputs(
   }
 }
 
-/** Cohorts first sampled before the month's end, summed (the RPC is cohort-grained). */
+/**
+ * Samples DRAWN in the month, summed (the RPC is cohort-grained; a cohort's
+ * samples are drawn in one call, so first_sampled_at is its draw time).
+ *
+ * Windowed by draw, not by verdict (#1260 review L3): the draw is fixed at
+ * sampling, so a month's figure never moves once its samples are scanned, and
+ * a sample counts once in the month that drew it. The cost: a sample drawn
+ * late in the month may still be unscanned on the 1st (it is re-offered every
+ * 168 h) — it counts in `sampled`, not `scanned`, so the month reads
+ * insufficient rather than a rate over the early part only.
+ */
 async function readNotAClone(
   sb: ServiceClient,
+  startIso: string,
   endIso: string,
 ): Promise<NotACloneInputs | null> {
   try {
     const { data, error } = await sb.rpc("clone_watch_not_a_clone_audit_summary", {
-      p_since: null,
+      p_since: startIso,
     });
     if (error) throw new Error(error.message);
-    const end = Date.parse(endIso);
-    const acc: NotACloneInputs = { sampled: 0, scanned: 0, misses: 0 };
-    for (const r of (data ?? []) as Array<Record<string, unknown>>) {
-      const first = Date.parse(String(r.first_sampled_at ?? ""));
-      if (!Number.isFinite(first) || first >= end) continue;
-      acc.sampled += Number(r.sampled ?? 0);
-      acc.scanned += Number(r.scanned ?? 0);
-      acc.misses += Number(r.misses ?? 0);
-    }
-    return acc;
+    return sumAuditCohorts((data ?? []) as Array<Record<string, unknown>>, startIso, endIso);
   } catch (err) {
     warn("not-a-clone audit", err);
     return null;
@@ -169,7 +172,7 @@ export async function loadReadinessInputs(
   const days = Math.round((Date.parse(w.endIso) - Date.parse(w.startIso)) / 86_400_000);
   const [sql, notAClone, report, takedown, stock] = await Promise.all([
     readSqlInputs(sb, w.startIso, w.endIso),
-    readNotAClone(sb, w.endIso),
+    readNotAClone(sb, w.startIso, w.endIso),
     readReportDiff(sb, periodYm, w.periodMonth),
     // Trailing window ending NOW: computed on the 1st, it covers the month
     // just closed. A later on-demand recompute of an old month is therefore
@@ -205,6 +208,74 @@ export async function writeReadiness(
     .from("clone_watch_readiness")
     .upsert(row, { onConflict: "period_month" });
   if (error) throw new Error(`clone_watch_readiness upsert: ${error.message}`);
+}
+
+/**
+ * Wall-clock bound on the monthly compute (#1260 review L2). A compute that
+ * outruns it returns a degraded result instead of running into the platform's
+ * own timeout, which would fail the step with nothing caught. Restated in
+ * clone-watch-report-summary's finish-budget header (the budget test sums every
+ * `*_WALL_CLOCK_MS` in a function's source) — change both together.
+ */
+export const READINESS_WALL_CLOCK_MS = 90_000;
+
+export type ReadinessRunResult =
+  | { ready: boolean; statuses: Record<string, string> }
+  | { errored: "supabase_unavailable" | "timeout" | "compute_or_write_failed" | "step_failed" };
+
+/**
+ * The monthly step body: compute, write, log. NEVER throws — every failure is
+ * a degraded result (no row → the gate reads NOT ready). The write happens
+ * only when the compute beat the clock, so a late compute cannot land a row
+ * after the step has already reported a timeout.
+ */
+export async function computeAndRecordReadiness(
+  periodYm: string,
+  deps: {
+    client?: () => ServiceClient | null;
+    compute?: (sb: ServiceClient, ym: string) => Promise<Scorecard>;
+    write?: (sb: ServiceClient, card: Scorecard) => Promise<void>;
+    wallClockMs?: number;
+  } = {},
+): Promise<ReadinessRunResult> {
+  const compute = deps.compute ?? computeReadiness;
+  const write = deps.write ?? writeReadiness;
+  const wallClockMs = deps.wallClockMs ?? READINESS_WALL_CLOCK_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const sb = deps.client ? deps.client() : createServiceClient();
+    if (!sb) return { errored: "supabase_unavailable" };
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), wallClockMs);
+    });
+    const card = await Promise.race([compute(sb, periodYm), timeout]);
+    if (card === "timeout") {
+      logger.error("clone-watch readiness: compute exceeded its wall clock", {
+        period: periodYm,
+        wallClockMs,
+        consequence: "no clone_watch_readiness row → brand sends stay in shadow",
+      });
+      return { errored: "timeout" };
+    }
+    await write(sb, card);
+    const statuses = Object.fromEntries(card.components.map((c) => [c.key, c.status]));
+    // Monthly and decisive for brand contact — always-ship (warn).
+    logger.warn("clone-watch readiness: scorecard written", {
+      period: card.periodMonth,
+      ready: card.ready,
+      ...statuses,
+    });
+    return { ready: card.ready, statuses };
+  } catch (err) {
+    logger.error("clone-watch readiness: compute or write failed", {
+      period: periodYm,
+      error: err instanceof Error ? err.message : String(err),
+      consequence: "no clone_watch_readiness row → brand sends stay in shadow",
+    });
+    return { errored: "compute_or_write_failed" };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**

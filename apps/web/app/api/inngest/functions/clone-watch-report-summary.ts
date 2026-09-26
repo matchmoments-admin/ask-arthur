@@ -26,8 +26,8 @@ import {
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneCrons } from "@/lib/laneHealth";
 import {
-  computeReadiness,
-  writeReadiness,
+  computeAndRecordReadiness,
+  type ReadinessRunResult,
 } from "@/lib/clone-watch/readiness-data";
 
 const MANUAL_TRIGGER_EVENT = "clone-watch/report-summary.manual-trigger.v1";
@@ -93,10 +93,11 @@ export const cloneWatchReportSummary = inngest.createFunction(
     // the merged step now does two fetches and two writes back-to-back, so the
     // headroom moved from queue-wait to in-step work rather than disappearing.
     // Verified by apps/web/__tests__/inngestFinishBudgets.test.ts.
-    // #1237 added compute-readiness: now 5 step.run sites + 1 sendEvent →
-    // 6 x 30s + 60s = 240s floor, still inside 360s. Its in-step work (one more month
-    // pagination for the report-correctness recount + five small reads) is
-    // of the same order as compute-and-write-summary's.
+    // #1237 added compute-readiness: now 5 step.run sites + 1 sendEvent, and
+    // the step's compute is bounded in-step by READINESS_WALL_CLOCK_MS (90s,
+    // readiness-data.ts — the budget test adds every *_WALL_CLOCK_MS it
+    // finds, so it is restated here): 6 x 30s + 90s + 60s = 330s, inside 360s.
+    // READINESS_WALL_CLOCK_MS = 90_000
     timeouts: { finish: "6m" },
     retries: 2,
   },
@@ -314,41 +315,6 @@ export const cloneWatchReportSummary = inngest.createFunction(
         });
       }
 
-      // The readiness scorecard (#1237, v335) — computed ONCE a month, here,
-      // after the store is frozen (component 5 diffs that frozen store against
-      // a live recount). Runs on EVERY path, frozen/no-clone included, so the
-      // manual trigger `{ periodMonth }` on an already-frozen month is the
-      // on-demand recompute: it restates nothing but this row.
-      //
-      // Never fails the run: a scorecard that cannot be computed or written
-      // leaves the month without a row, which the send gate reads as NOT
-      // ready (fail closed) — the month's report must not be lost to it.
-      const readiness = await step.run("compute-readiness", async () => {
-        try {
-          const sb = createServiceClient();
-          if (!sb) return { errored: "supabase_unavailable" as const };
-          const card = await computeReadiness(sb, periodYm);
-          await writeReadiness(sb, card);
-          const statuses = Object.fromEntries(
-            card.components.map((c) => [c.key, c.status]),
-          );
-          // Monthly and decisive for brand contact — always-ship (warn).
-          logger.warn("clone-watch-report-summary: readiness scorecard", {
-            period: card.periodMonth,
-            ready: card.ready,
-            ...statuses,
-          });
-          return { ready: card.ready, statuses };
-        } catch (err) {
-          logger.error("clone-watch-report-summary: readiness scorecard failed", {
-            period: periodYm,
-            error: err instanceof Error ? err.message : String(err),
-            consequence: "no clone_watch_readiness row → brand sends stay in shadow",
-          });
-          return { errored: "compute_or_write_failed" as const };
-        }
-      });
-
       // One Outcome Row per run (ADR-0025), frozen/no-clone runs included.
       await step.run("log-outcome", () =>
         recordLaneOutcome(
@@ -362,8 +328,6 @@ export const cloneWatchReportSummary = inngest.createFunction(
             brand_rows: "brandRows" in result ? (result.brandRows ?? 0) : 0,
             store_status: result.storeStatus,
             emitted,
-            // #1237: null = the scorecard was not written this run.
-            readiness_ready: "ready" in readiness ? readiness.ready : null,
             // v325 — how much of the month's store is "watched, nothing
             // found", and whether the stock figure exists at all (false =
             // no month-end snapshot → active_stock_eom NULL, never 0).
@@ -379,9 +343,39 @@ export const cloneWatchReportSummary = inngest.createFunction(
         ),
       );
 
+      // The readiness scorecard (#1237, v335) — computed ONCE a month, here,
+      // after the store is frozen (component 5 diffs that frozen store against
+      // a live recount) and AFTER log-outcome, so nothing about it can cost
+      // the run its Outcome Row. Runs on EVERY path, frozen/no-clone included,
+      // so the manual trigger `{ periodMonth }` on an already-frozen month is
+      // the on-demand recompute: it restates nothing but this row.
+      //
+      // Never fails the run (#1260 review L2), at two levels:
+      //   - inside the step, computeAndRecordReadiness catches everything and
+      //     bounds the compute at READINESS_WALL_CLOCK_MS, returning a
+      //     degraded result instead of throwing;
+      //   - around the step, a failure the step cannot catch itself (a
+      //     platform timeout that exhausts its retries) is caught here.
+      // Either way the month is left without a row, which the send gate reads
+      // as NOT ready (fail closed) — and the month's report is already written.
+      let readiness: ReadinessRunResult;
+      try {
+        readiness = await step.run("compute-readiness", () =>
+          computeAndRecordReadiness(periodYm),
+        );
+      } catch (err) {
+        logger.error("clone-watch-report-summary: readiness step failed", {
+          period: periodYm,
+          error: err instanceof Error ? err.message : String(err),
+          consequence: "no clone_watch_readiness row → brand sends stay in shadow",
+        });
+        readiness = { errored: "step_failed" };
+      }
+
       if ("skipped" in result) {
         return {
           ok: true,
+          readiness,
           period: result.period,
           coverage,
           skipped: result.skipped,
@@ -391,7 +385,7 @@ export const cloneWatchReportSummary = inngest.createFunction(
       }
 
       logger.info("clone-watch-report-summary: snapshot written", result);
-      return { ok: true, ...result, emitted };
+      return { ok: true, ...result, emitted, readiness };
     },
   ),
 );

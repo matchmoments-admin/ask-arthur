@@ -99,8 +99,11 @@ export interface ComponentResult {
 
 /** The SQL-side inputs (v335 clone_watch_readiness_inputs). */
 export interface TriageAndLaneInputs {
-  human_triaged: number;
+  /** Human DECIDED verdicts (tp_confirmed / tp_actioned / fp) in the window. */
+  human_decided: number;
   human_fp: number;
+  /** Human needs_investigation — a deferral, context only. */
+  human_deferred: number;
   phishing_tp: number;
   phishing_fp: number;
   machine_fp: number;
@@ -199,8 +202,9 @@ function fpShare(
   if (!sql) {
     return { ...base, status: "insufficient", value: null, n: null, reason: "Triage verdicts could not be read." };
   }
-  const n = sql.human_triaged;
+  const n = sql.human_decided;
   const extra = {
+    human_deferred: sql.human_deferred,
     min_n: t.fpShareMinN,
     classified: sql.classified,
     classifier_rejected: sql.classifier_rejected,
@@ -214,7 +218,11 @@ function fpShare(
       : "";
   const machine =
     sql.machine_fp > 0
-      ? ` ${sql.machine_fp} rule-based bulk rejects excluded — a rule is not a verdict.`
+      ? ` ${sql.machine_fp} machine-set fp excluded — a rule is not a verdict.`
+      : "";
+  const deferred =
+    sql.human_deferred > 0
+      ? ` ${sql.human_deferred} deferred (needs investigation) not counted.`
       : "";
   if (n < t.fpShareMinN) {
     return {
@@ -222,7 +230,7 @@ function fpShare(
       status: "insufficient",
       value: n > 0 ? round4(sql.human_fp / n) : null,
       n,
-      reason: `${n} alert${n === 1 ? "" : "s"} human-triaged this month; ${t.fpShareMinN} needed.${machine}${context}`,
+      reason: `${n} human verdict${n === 1 ? "" : "s"} (tp or fp) this month; ${t.fpShareMinN} needed.${deferred}${machine}${context}`,
       extra,
     };
   }
@@ -232,7 +240,7 @@ function fpShare(
     status: value <= t.fpShareMax ? "pass" : "fail",
     value,
     n,
-    reason: `${pct(value)} of ${n} human-triaged alerts were false positives (needs ≤ ${pct(t.fpShareMax)}).${machine}${context}`,
+    reason: `${pct(value)} of ${n} human verdicts were false positives (needs ≤ ${pct(t.fpShareMax)}).${deferred}${machine}${context}`,
     extra,
   };
 }
@@ -250,7 +258,7 @@ function fnRate(
       value: null,
       n: audit ? 0 : null,
       reason: audit
-        ? "No not-a-clone audit sample drawn yet — the baseline is deferred until after the 1 Oct publish."
+        ? "No not-a-clone audit sample drawn this month (the baseline is deferred until after the 1 Oct publish)."
         : "The not-a-clone audit summary could not be read.",
       extra,
     };
@@ -261,7 +269,7 @@ function fnRate(
       status: "insufficient",
       value: audit.scanned > 0 ? round4(audit.misses / audit.scanned) : null,
       n: audit.scanned,
-      reason: `${audit.scanned} of ${audit.sampled} audit samples scanned; ${t.fnRateMinScanned} needed.`,
+      reason: `${audit.scanned} of ${audit.sampled} audit samples drawn this month scanned; ${t.fnRateMinScanned} needed.`,
       extra,
     };
   }
@@ -271,7 +279,7 @@ function fnRate(
     status: value <= t.fnRateMax ? "pass" : "fail",
     value,
     n: audit.scanned,
-    reason: `${audit.misses} of ${audit.scanned} scanned not-a-clone samples were live phishing — ${pct(value)} (needs ≤ ${pct(t.fnRateMax)}).`,
+    reason: `${audit.misses} of ${audit.scanned} scanned not-a-clone samples drawn this month were live phishing — ${pct(value)} (needs ≤ ${pct(t.fnRateMax)}).`,
     extra,
   };
 }
@@ -354,7 +362,7 @@ function reportDiff(
     status: pass ? "pass" : "fail",
     value: report.maxDiff,
     n: report.brandsCompared,
-    reason: `Frozen store vs live recount: max per-brand difference ${report.maxDiff}, ${report.brandsDiffering} of ${report.brandsCompared} brands differ (${pct(share)}); limits ${t.reportMaxBrandDiff} and ${pct(t.reportMaxDiffBrandShare)}.`,
+    reason: `Frozen store vs live recount: max per-brand difference ${report.maxDiff}, ${report.brandsDiffering} of ${report.brandsCompared} brands differ (${pct(share)}); limits ${t.reportMaxBrandDiff} and ${pct(t.reportMaxDiffBrandShare)}. Computed minutes after the freeze, this proves the fold is deterministic; drift since the freeze shows only on a later recompute.`,
     extra: { ...extra, brands_differing: report.brandsDiffering, differing_share: round4(share) },
   };
 }
@@ -491,6 +499,28 @@ export function diffBrandClones(
     if (d > maxDiff) maxDiff = d;
   }
   return { brandsCompared: brands.size, maxDiff, brandsDiffering };
+}
+
+/**
+ * Sum clone_watch_not_a_clone_audit_summary cohorts DRAWN in [start, end) —
+ * see readNotAClone for why the window is the draw, not the verdict.
+ */
+export function sumAuditCohorts(
+  rows: ReadonlyArray<Record<string, unknown>>,
+  startIso: string,
+  endIso: string,
+): NotACloneInputs {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  const acc: NotACloneInputs = { sampled: 0, scanned: 0, misses: 0 };
+  for (const r of rows) {
+    const at = Date.parse(String(r.first_sampled_at ?? ""));
+    if (!Number.isFinite(at) || at < start || at >= end) continue;
+    acc.sampled += Number(r.sampled ?? 0);
+    acc.scanned += Number(r.scanned ?? 0);
+    acc.misses += Number(r.misses ?? 0);
+  }
+  return acc;
 }
 
 // ── Row mapping (clone_watch_readiness, v335) ───────────────────────────────

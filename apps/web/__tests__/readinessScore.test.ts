@@ -30,6 +30,11 @@
 //        → "a brand present on one side only counts its whole count" FAILED
 //   - evaluateReadinessGate: dropped the missing-month check
 //        → "a missing month is not ready" FAILED
+//   - sumAuditCohorts: dropped the `at < start` bound (pooled every earlier
+//     sample, #1260 L3) → "counts only cohorts drawn in [start, end)" FAILED
+//   - fp_share: dropped the deferred note → "fp share names … excluded" FAILED
+//   - report_diff: dropped the determinism sentence (#1260 L1)
+//        → "report diff: not frozen is insufficient …" FAILED
 //   - evaluateReadinessGate: required < 1 returned ready
 //        → "a misconfigured required-months constant never opens the gate" FAILED
 
@@ -41,14 +46,16 @@ import {
   READINESS_THRESHOLDS,
   requiredMonths,
   scoreReadiness,
+  sumAuditCohorts,
   toReadinessRow,
   type ReadinessInputs,
   type TriageAndLaneInputs,
 } from "@/lib/clone-watch/readiness";
 
 const SQL: TriageAndLaneInputs = {
-  human_triaged: 40,
+  human_decided: 40,
   human_fp: 4,
+  human_deferred: 0,
   phishing_tp: 20,
   phishing_fp: 0,
   machine_fp: 0,
@@ -117,21 +124,22 @@ describe("scoreReadiness", () => {
   });
 
   it("fp share passes at or under the cap and fails above it", () => {
-    expect(comp({ ...ALL_PASS, sql: { ...SQL, human_triaged: 40, human_fp: 10 } }, "fp_share").status).toBe("pass");
-    expect(comp({ ...ALL_PASS, sql: { ...SQL, human_triaged: 40, human_fp: 11 } }, "fp_share").status).toBe("fail");
+    expect(comp({ ...ALL_PASS, sql: { ...SQL, human_decided: 40, human_fp: 10 } }, "fp_share").status).toBe("pass");
+    expect(comp({ ...ALL_PASS, sql: { ...SQL, human_decided: 40, human_fp: 11 } }, "fp_share").status).toBe("fail");
   });
 
   it("fp share names rule-based rejects as excluded and the classifier share as context", () => {
-    const c = comp({ ...ALL_PASS, sql: { ...SQL, human_triaged: 0, human_fp: 0, machine_fp: 466 } }, "fp_share");
+    const c = comp({ ...ALL_PASS, sql: { ...SQL, human_decided: 0, human_fp: 0, human_deferred: 3, machine_fp: 466 } }, "fp_share");
     expect(c.status).toBe("insufficient");
-    expect(c.reason).toContain("466 rule-based bulk rejects excluded");
+    expect(c.reason).toContain("466 machine-set fp excluded");
+    expect(c.reason).toContain("3 deferred (needs investigation) not counted");
     expect(c.reason).toContain("14.0% of 100");
   });
 
   it("fn rate is insufficient until the baseline is drawn", () => {
     const c = comp({ ...ALL_PASS, notAClone: { sampled: 0, scanned: 0, misses: 0 } }, "fn_rate");
     expect(c).toMatchObject({ status: "insufficient", value: null, n: 0 });
-    expect(c.reason).toContain("baseline is deferred");
+    expect(c.reason).toContain("drawn this month");
     expect(comp({ ...ALL_PASS, notAClone: { sampled: 50, scanned: 29, misses: 0 } }, "fn_rate").status).toBe("insufficient");
     expect(comp({ ...ALL_PASS, notAClone: { sampled: 50, scanned: 40, misses: 3 } }, "fn_rate").status).toBe("fail");
   });
@@ -161,7 +169,10 @@ describe("scoreReadiness", () => {
     expect(c).toMatchObject({ status: "insufficient", reason: "not frozen" });
     expect(comp({ ...ALL_PASS, report: { brandsCompared: 148, maxDiff: 2, brandsDiffering: 1 } }, "report_diff").status).toBe("fail");
     expect(comp({ ...ALL_PASS, report: { brandsCompared: 100, maxDiff: 1, brandsDiffering: 3 } }, "report_diff").status).toBe("fail");
-    expect(comp({ ...ALL_PASS, report: { brandsCompared: 100, maxDiff: 1, brandsDiffering: 2 } }, "report_diff").status).toBe("pass");
+    const ok = comp({ ...ALL_PASS, report: { brandsCompared: 100, maxDiff: 1, brandsDiffering: 2 } }, "report_diff");
+    expect(ok.status).toBe("pass");
+    // L1: on the 1st this only proves the fold is deterministic — say so.
+    expect(ok.reason).toContain("proves the fold is deterministic");
   });
 
   it("a negative duration in ANY column fails", () => {
@@ -191,6 +202,23 @@ describe("scoreReadiness", () => {
     expect(comp({ ...ALL_PASS, stock: { stock: 10, unverified: 0, completedAt: null } }, "stock").status).toBe("insufficient");
     expect(comp({ ...ALL_PASS, stock: { stock: 10, unverified: 2, completedAt: "x" } }, "stock").status).toBe("pass");
     expect(comp({ ...ALL_PASS, stock: { stock: 10, unverified: 3, completedAt: "x" } }, "stock").status).toBe("fail");
+  });
+});
+
+describe("sumAuditCohorts — samples DRAWN in the month (#1260 L3)", () => {
+  const rows = [
+    { first_sampled_at: "2026-08-31T23:59:59Z", sampled: 100, scanned: 90, misses: 9 },
+    { first_sampled_at: "2026-09-01T00:00:00Z", sampled: 12, scanned: 10, misses: 1 },
+    { first_sampled_at: "2026-09-29T08:00:00Z", sampled: 13, scanned: 2, misses: 0 },
+    { first_sampled_at: "2026-10-01T00:00:00Z", sampled: 50, scanned: 50, misses: 5 },
+    { first_sampled_at: null, sampled: 7, scanned: 7, misses: 7 },
+  ];
+  it("counts only cohorts drawn in [start, end)", () => {
+    expect(sumAuditCohorts(rows, "2026-09-01T00:00:00Z", "2026-10-01T00:00:00Z")).toEqual({
+      sampled: 25,
+      scanned: 12,
+      misses: 1,
+    });
   });
 });
 

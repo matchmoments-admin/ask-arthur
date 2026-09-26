@@ -12,10 +12,23 @@ import { scoreReadiness, toReadinessRow, type ReadinessInputs } from "@/lib/clon
 //        → "ready=true with an insufficient component is rejected" FAILED
 //   - table: dropped the first-of-month CHECK
 //        → "period_month must be the first of a month" FAILED
-//   - inputs: dropped the `auto-park:` exclusion
-//        → "machine note markers are not human verdicts" FAILED
+//   - inputs: marker `auto-park:%` instead of `auto-park%` (#1260 H1)
+//        → "pre-v335 rows: machine note markers … (incl. the backfill form)" FAILED
 //   - inputs: dropped the `[matcher-v4-audit]` exclusion
-//        → "machine note markers are not human verdicts" FAILED
+//        → "pre-v335 rows: machine note markers …" FAILED
+//   - inputs: judged origin by note marker only, ignoring triage_source (H1)
+//        → "triage_source decides when set …" FAILED
+//        → "a human verdict through set_clone_alert_triage on an auto-parked alert counts" FAILED
+//   - inputs: needs_investigation back in the decided set (H2)
+//        → "needs_investigation is a deferral …" FAILED
+//   - inputs: tp_actioned not counted as TP (M1)
+//        → "counts human DECIDED verdicts … tp_actioned is a TP" FAILED
+//   - set_clone_alert_triage: dropped `triage_source = p_source`
+//        → "a human verdict through set_clone_alert_triage …" FAILED
+//   - set_clone_alert_triage: dropped the p_source validation
+//        → "set_clone_alert_triage: one signature, p_source validated …" FAILED
+//   - migration: dropped the DROP of the 4-arg signature (two overloads)
+//        → "set_clone_alert_triage: one signature …" FAILED
 //   - inputs: counted every health-digest row as measured (no jsonb_typeof filter)
 //        → "a digest row without lane_problems is NOT a measured day" FAILED
 //   - inputs: counted `braked` as a problem kind
@@ -36,8 +49,20 @@ beforeAll(async () => {
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE TABLE public.shopfront_clone_alerts (
       id bigint PRIMARY KEY, triage_status text DEFAULT 'pending', triage_at timestamptz,
-      triage_notes text, weaponised_at timestamptz, urlscan_classification text
+      triage_by uuid, triage_notes text, weaponised_at timestamptz, urlscan_classification text
     );
+    -- The pre-v335 live 4-arg writer (pg_get_functiondef 2026-09-27), so the
+    -- migration's DROP + re-create is exercised against what prod has.
+    CREATE FUNCTION public.set_clone_alert_triage(p_alert_id bigint, p_status text, p_admin_id uuid, p_notes text DEFAULT NULL::text)
+    RETURNS TABLE(id bigint, triage_status text, triage_at timestamptz)
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_catalog' AS $f$
+    BEGIN
+      RETURN QUERY UPDATE public.shopfront_clone_alerts
+        SET triage_status = p_status, triage_by = p_admin_id, triage_at = now(),
+            triage_notes = COALESCE(p_notes, triage_notes)
+      WHERE shopfront_clone_alerts.id = p_alert_id
+      RETURNING shopfront_clone_alerts.id, shopfront_clone_alerts.triage_status, shopfront_clone_alerts.triage_at;
+    END; $f$;
     CREATE TABLE public.clone_watch_classifications (
       alert_id bigint PRIMARY KEY, is_clone boolean, classified_at timestamptz DEFAULT now()
     );
@@ -55,12 +80,18 @@ beforeEach(async () =>
 );
 
 let nextId = 1;
-async function triaged(status: string, at: string, opts: { notes?: string; weaponised?: boolean; cls?: string } = {}) {
+async function triaged(
+  status: string,
+  at: string | null,
+  opts: { notes?: string; weaponised?: boolean; cls?: string; source?: string } = {},
+) {
+  const id = nextId++;
   await db.query(
-    `INSERT INTO shopfront_clone_alerts (id, triage_status, triage_at, triage_notes, weaponised_at, urlscan_classification)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [nextId++, status, at, opts.notes ?? null, opts.weaponised ? at : null, opts.cls ?? null],
+    `INSERT INTO shopfront_clone_alerts (id, triage_status, triage_at, triage_notes, weaponised_at, urlscan_classification, triage_source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, status, at, opts.notes ?? null, opts.weaponised ? (at ?? "2026-09-02") : null, opts.cls ?? null, opts.source ?? null],
   );
+  return id;
 }
 async function digest(at: string, lane_problems?: string[]) {
   const meta = lane_problems === undefined ? { lanes_checked: 20 } : { lane_problems };
@@ -78,29 +109,80 @@ async function inputs(start = "2026-09-01T00:00:00Z", end = "2026-10-01T00:00:00
 }
 
 describe("clone_watch_readiness_inputs — triage", () => {
-  it("counts human verdicts and the phishing subset", async () => {
+  it("counts human DECIDED verdicts and the phishing subset; tp_actioned is a TP", async () => {
     await triaged("tp_confirmed", "2026-09-05T00:00:00Z", { weaponised: true });
-    await triaged("tp_confirmed", "2026-09-05T00:00:00Z", { cls: "likely_phishing" });
+    await triaged("tp_actioned", "2026-09-05T00:00:00Z", { cls: "likely_phishing" });
     await triaged("fp", "2026-09-05T00:00:00Z", { cls: "likely_phishing" });
     await triaged("fp", "2026-09-06T00:00:00Z");
-    await triaged("needs_investigation", "2026-09-06T00:00:00Z", { notes: "looks odd" });
     const v = await inputs();
-    expect(v).toMatchObject({ human_triaged: 5, human_fp: 2, phishing_tp: 2, phishing_fp: 1 });
+    expect(v).toMatchObject({ human_decided: 4, human_fp: 2, phishing_tp: 2, phishing_fp: 1 });
   });
 
-  it("machine note markers are not human verdicts", async () => {
-    await triaged("needs_investigation", "2026-09-05T00:00:00Z", { notes: "auto-park: pre-classifier is_clone=false" });
+  it("needs_investigation is a deferral: in neither numerator nor denominator", async () => {
+    await triaged("fp", "2026-09-05T00:00:00Z");
+    await triaged("needs_investigation", "2026-09-06T00:00:00Z", { notes: "looks odd" });
+    await triaged("needs_investigation", "2026-09-06T00:00:00Z", { source: "human" });
+    expect(await inputs()).toMatchObject({ human_decided: 1, human_fp: 1, human_deferred: 2 });
+  });
+
+  it("a Netcraft tp_actioned with no triage_at is not a verdict", async () => {
+    await triaged("tp_actioned", null, { weaponised: true });
+    expect(await inputs()).toMatchObject({ human_decided: 0, phishing_tp: 0 });
+  });
+
+  it("pre-v335 rows: machine note markers are not human verdicts (incl. the backfill form)", async () => {
     await triaged("tp_confirmed", "2026-09-05T00:00:00Z", { notes: "auto-triage: confirmed", weaponised: true });
     await triaged("fp", "2026-09-04T00:00:00Z", { notes: "[matcher-v4-audit] Reject: v4 drops it" });
+    await triaged("fp", "2026-09-04T00:00:00Z", { notes: "auto-park (one-time backfill 2026-06)" });
     await triaged("fp", "2026-09-04T00:00:00Z", { notes: "operator: parked reseller" });
-    const v = await inputs();
-    expect(v).toMatchObject({ human_triaged: 1, human_fp: 1, phishing_tp: 0, machine_fp: 1 });
+    expect(await inputs()).toMatchObject({ human_decided: 1, human_fp: 1, phishing_tp: 0, machine_fp: 2 });
+  });
+
+  it("triage_source decides when set: human counts despite a machine note, machine never counts", async () => {
+    await triaged("fp", "2026-09-04T00:00:00Z", { notes: "[matcher-v4-audit] Reject", source: "human" });
+    await triaged("tp_confirmed", "2026-09-04T00:00:00Z", { notes: "no marker at all", source: "machine", weaponised: true });
+    expect(await inputs()).toMatchObject({ human_decided: 1, human_fp: 1, phishing_tp: 0 });
+  });
+
+  it("a human verdict through set_clone_alert_triage on an auto-parked alert counts (H1)", async () => {
+    const id = await triaged("needs_investigation", "2026-09-02T00:00:00Z", {
+      notes: "auto-park: pre-classifier is_clone=false",
+      source: "machine",
+    });
+    // The triage route's call shape: four named args, no notes, no source.
+    await db.query(
+      `SELECT * FROM public.set_clone_alert_triage(p_alert_id => $1, p_status => 'fp', p_admin_id => NULL, p_notes => NULL)`,
+      [id],
+    );
+    const r = await db.query<{ triage_source: string; triage_notes: string }>(
+      `SELECT triage_source, triage_notes FROM shopfront_clone_alerts WHERE id = $1`, [id],
+    );
+    // The note is kept (COALESCE) — which is exactly why origin needs its own column.
+    expect(r.rows[0]).toEqual({ triage_source: "human", triage_notes: "auto-park: pre-classifier is_clone=false" });
+    expect(await inputs("2026-09-01T00:00:00Z", "2099-01-01T00:00:00Z")).toMatchObject({ human_decided: 1, human_fp: 1 });
+  });
+
+  it("set_clone_alert_triage: one signature, p_source validated, machine stampable", async () => {
+    const sigs = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'set_clone_alert_triage'`,
+    );
+    expect(sigs.rows[0].n).toBe(1);
+    const id = await triaged("pending", null);
+    await expect(
+      db.query(`SELECT * FROM public.set_clone_alert_triage($1, 'fp', NULL, NULL, 'robot')`, [id]),
+    ).rejects.toThrow(/invalid triage source/);
+    await db.query(`SELECT * FROM public.set_clone_alert_triage($1, 'fp', NULL, NULL, 'machine')`, [id]);
+    const r = await db.query<{ triage_source: string }>(`SELECT triage_source FROM shopfront_clone_alerts WHERE id = $1`, [id]);
+    expect(r.rows[0].triage_source).toBe("machine");
+    await expect(
+      db.query(`UPDATE shopfront_clone_alerts SET triage_source = 'bot' WHERE id = $1`, [id]),
+    ).rejects.toThrow(/triage_source_check/);
   });
 
   it("the window is half-open", async () => {
     await triaged("fp", "2026-10-01T00:00:00Z");
     await triaged("fp", "2026-09-01T00:00:00Z");
-    expect((await inputs()).human_triaged).toBe(1);
+    expect((await inputs()).human_decided).toBe(1);
   });
 
   it("reports the classifier's reject share as context", async () => {
@@ -148,7 +230,7 @@ describe("clone_watch_readiness_inputs — lane health", () => {
 const ALL_PASS: ReadinessInputs = {
   periodMonth: "2026-09-01",
   sql: {
-    human_triaged: 40, human_fp: 4, phishing_tp: 20, phishing_fp: 0, machine_fp: 0,
+    human_decided: 40, human_fp: 4, human_deferred: 0, phishing_tp: 20, phishing_fp: 0, machine_fp: 0,
     classified: 100, classifier_rejected: 14, window_days: 30, measured_days: 30,
     problem_days: 0, problem_kinds: {}, problem_lanes: [],
   },
@@ -200,17 +282,23 @@ describe("clone_watch_readiness — table", () => {
              (SELECT relrowsecurity FROM pg_class WHERE relname = 'clone_watch_readiness') AS rls,
              has_function_privilege('anon', 'public.clone_watch_readiness_inputs(timestamptz, timestamptz)', 'EXECUTE') AS anon_fn,
              has_function_privilege('authenticated', 'public.clone_watch_readiness_inputs(timestamptz, timestamptz)', 'EXECUTE') AS auth_fn,
-             has_function_privilege('service_role', 'public.clone_watch_readiness_inputs(timestamptz, timestamptz)', 'EXECUTE') AS svc_fn`);
+             has_function_privilege('service_role', 'public.clone_watch_readiness_inputs(timestamptz, timestamptz)', 'EXECUTE') AS svc_fn,
+             has_function_privilege('anon', 'public.set_clone_alert_triage(bigint, text, uuid, text, text)', 'EXECUTE') AS anon_tr,
+             has_function_privilege('authenticated', 'public.set_clone_alert_triage(bigint, text, uuid, text, text)', 'EXECUTE') AS auth_tr,
+             has_function_privilege('service_role', 'public.set_clone_alert_triage(bigint, text, uuid, text, text)', 'EXECUTE') AS svc_tr`);
     expect(r.rows[0]).toEqual({
       anon_sel: false, auth_sel: false, svc_ins: true, rls: true,
       anon_fn: false, auth_fn: false, svc_fn: true,
+      anon_tr: false, auth_tr: false, svc_tr: true,
     });
   });
 
-  it("the function carries a function-level statement_timeout", async () => {
-    const r = await db.query<{ cfg: string[] }>(
-      `SELECT proconfig AS cfg FROM pg_proc WHERE proname = 'clone_watch_readiness_inputs'`,
+  it("both functions carry a function-level statement_timeout", async () => {
+    const r = await db.query<{ proname: string; cfg: string[] }>(
+      `SELECT proname, proconfig AS cfg FROM pg_proc
+        WHERE proname IN ('clone_watch_readiness_inputs', 'set_clone_alert_triage') ORDER BY 1`,
     );
     expect(r.rows[0].cfg).toContain("statement_timeout=30s");
+    expect(r.rows[1].cfg).toContain("statement_timeout=15s");
   });
 });

@@ -206,11 +206,13 @@ The measured answer to "is Clone Watch stable and accurate enough to contact
 brands?" (founder decision #1227). One row per closed month, seven components,
 each read from an existing source and scored `pass` / `fail` / `insufficient`
 against a threshold in `apps/web/lib/clone-watch/readiness.ts`: weaponised
-precision (human verdicts), lookalike false-positive share, the Not-a-clone
+precision and lookalike false-positive share (both over **human decided
+verdicts** — tp*confirmed / tp_actioned / fp whose origin, `triage_source`, is
+human; needs_investigation is a deferral, not a verdict), the Not-a-clone
 Audit's false-negative rate, lane-health problem days, monthly report
 correctness (frozen store vs live recount), takedown-metric validity and
 month-end stock measured. The month is **ready** only when all seven pass
-(a SQL CHECK). _Insufficient_ is not _fail_ — it asks for measurement, not a
+(a SQL CHECK). \_Insufficient* is not _fail_ — it asks for measurement, not a
 fix — but it still keeps the month not ready. The **readiness gate**: a real
 brand send (stewardship report, brand-notify batch or auto-send) needs the last
 `READINESS_REQUIRED_MONTHS` closed months ready; a missing or unreadable
