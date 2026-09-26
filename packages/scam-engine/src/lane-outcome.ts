@@ -216,6 +216,16 @@ export interface LaneOutcome {
      *  on quiet runs and rows written before 2026-09-26. */
     cap?: number;
     cap_reached?: boolean;
+    /** Not-a-clone audit (#1238, v330): sample rows the weekly draw marked on
+     *  this run (0 on six days of seven, and while the weekly flag is off). */
+    audit_drawn?: number;
+    /** Audit samples included in this run's batch (≤ AUDIT_SLOTS_PER_RUN,
+     *  inside `units`, never on top of it). */
+    audit_offered?: number;
+    /** Audit samples the batch tried and stamped-for (excludes 429s and the
+     *  unreached tail). The FN rate itself is clone_watch_not_a_clone_audit_
+     *  summary(), not a per-run field. All three absent before v330. */
+    audit_attempted?: number;
   };
   "shopfront-clone-urlscan-retrieve": {
     classified: number;

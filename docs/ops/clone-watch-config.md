@@ -1335,6 +1335,100 @@ Confirm the lane is healthy rather than starved:
 SELECT count(*) FROM list_clone_alerts_pending_urlscan_submit(75, 0.7, 3);
 ```
 
+### Not-a-clone audit (v330, #1238)
+
+**Why.** A pre-classifier `is_clone=false` verdict parks an alert in `detected`
+and nothing ever scans it: the submit worklist requires `c.is_clone`, and the
+recheck worklist only covers `monitoring`/`declined`. A false negative was final
+and invisible. Decision #1233 (founder, 2026-09-26): measure it with a one-off
+random ~100 sample, then keep a ~5% weekly sample; misses are re-opened and
+counted for the readiness scorecard (#1237).
+
+**Prod, queried 2026-09-26.** 607 `source='nrd'` alerts are `detected`,
+`is_clone=false`, with no urlscan uuid and no classification (605 with no
+evidence at all). 588 were judged by **Haiku** (v1 411, v2 177) and only 17 by
+**Jev** — so the baseline measures mostly the retired classifier; read the
+summary's `classifier` column before quoting a number about Jev. First seen
+2026-05-31 .. 2026-09-25; 136 are older than 90 days. New `is_clone=false`
+alerts arrive at ~25–35/week. One not-a-clone that did get scanned
+(`threesbrewingdirect.shop`, Haiku confidence 0.95) is weaponised today.
+
+**How it runs (no new cron, no burst).** The daily `shopfront-clone-urlscan-submit`
+lane (09:00 UTC) lists un-tried samples (`list_clone_not_a_clone_audit_pending`)
+and gives them up to `AUDIT_SLOTS_PER_RUN` = 25 of its `SUBMIT_BATCH_LIMIT` = 75
+slots (`lib/clone-watch/not-a-clone-audit.ts` `composeSubmitBatch`); the regular
+worklist is asked for the rest. Samples go last in the batch, so a wall-clock
+break leaves them — unstamped — for tomorrow. Every sample the batch tried
+(anything but a 429) is stamped `submit_attempted_at`; the worklist also drops a
+row whose urlscan evidence shows an attempt after the draw, so a failed stamp
+cannot loop a DNS-dead row. The retrieve lane persists the verdict like any
+other scan.
+
+**Quota fit.** urlscan unlisted: 60/min, 100/hour, 1,000/day. The run's total is
+still ≤ 75 submissions (and ~half of every batch is DNS-skipped with no urlscan
+call — 47 of 72 on 2026-09-25), submitted sequentially behind a reputation
+lookup each, in the 09:xx hour; the recheck lane fires at :30 of 00/06/12/18, so
+no other lane shares that hour. The baseline 100 drains in 4 runs; it displaces
+up to 25 regular candidates/day for those days (they are re-offered, not lost —
+the regular worklist held 33 eligible rows on 2026-09-26, between runs).
+
+**Operator: run the one-off baseline** (after v330 is applied and this PR is
+deployed; service_role / SQL editor — a write, so not from an agent's
+SELECT-only session):
+
+```sql
+-- Marks ~100 random never-scanned not-a-clones. Idempotent per label: a second
+-- call with the same label returns 0 and draws nothing.
+SELECT public.draw_clone_not_a_clone_audit_sample('baseline', '2026-09', 100);
+```
+
+Nothing else to trigger — the next 4 daily submit runs carry them. To speed it
+up by a day, fire `shopfront/clone.urlscan-submit.manual-trigger.v1` once in a
+DIFFERENT hour from 09:xx and from the recheck :30 slots (e.g. 15:00 UTC); never
+stack fires in one hour.
+
+**Read the FN rate** (~5–6 days after the draw; retrieve needs its own passes):
+
+```sql
+SELECT * FROM public.clone_watch_not_a_clone_audit_summary();
+-- or only the weekly samples of the last 30 days, for #1237:
+SELECT * FROM public.clone_watch_not_a_clone_audit_summary(now() - interval '30 days')
+ WHERE cohort = 'weekly';
+```
+
+- `fn_rate` = misses / scanned — a **miss** is the FIRST urlscan verdict after the
+  draw being `likely_phishing` (read from `clone_watch_scan_transitions`).
+- `unscannable` = tried, no verdict, nothing left to wait for (DNS-dead, genuine
+  submit failure, or a uuid whose retrieve failed 3×). Expect this to be large —
+  about half of all submitted clone-watch domains do not resolve. Quote the rate
+  with its denominator (`scanned`), never alone.
+- `pending` = not yet tried, or submitted and awaiting retrieve.
+- `weaponised_later` = first verdict benign, but the alert is weaponised/reported/
+  taken_down now (the recheck lane caught it later).
+
+**What happens to a miss.** No new lifecycle code: `persist_clone_alert_urlscan`
+(v307) applies `apply_clone_urlscan_verdict` (v200) in the same transaction, so
+`likely_phishing` moves `detected → weaponised` (a stronger re-open than
+`monitoring`: it enters the weaponised lanes) and a benign verdict moves
+`detected → monitoring`, which puts the sampled row in the recheck pool like
+every other scanned alert (≤ 90 days old only). **Caveat:** the Netcraft auto
+lane's worklist still requires `c.is_clone` (v315), so a miss is weaponised and
+visible but is NOT auto-reported to Netcraft — founder decision recorded on the
+PR.
+
+**Weekly sample.** Set `FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY=true` (Vercel,
+server-side; redeploy). The submit lane's load step then calls
+`draw_clone_not_a_clone_audit_sample('weekly', NULL, NULL, 0.05, 90)` every day;
+it draws once per UTC ISO week (≈ 18–25 rows at today's pool: 5% of the
+unsampled never-scanned not-a-clones first seen in the last 90 days, min 1) and
+returns 0 on the other six days. The Outcome Row (`submit_batch`) carries
+`audit_drawn`, `audit_offered`, `audit_attempted`.
+
+**Rollback.** Flag off stops new weekly draws. To stop scanning already-drawn
+samples: `UPDATE clone_watch_not_a_clone_samples SET submit_attempted_at = now()
+WHERE submit_attempted_at IS NULL;` (they then leave the worklist). Nothing in
+v330 touches an alert's lifecycle directly.
+
 ### urlscan rate-limit & budget
 
 - **SETTLED 2026-08-23 — the quota check had never been run, and the documented

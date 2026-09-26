@@ -3,11 +3,18 @@ import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { budgetedStep } from "@askarthur/scam-engine/inngest/step-budget";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import {
   submitCandidateBatch,
   type CloneCandidate,
 } from "@/lib/clone-watch/urlscan-submit-one";
+import {
+  attemptedAuditIds,
+  composeSubmitBatch,
+  loadAuditSamples,
+  stampAuditAttempts,
+} from "@/lib/clone-watch/not-a-clone-audit";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
 
@@ -47,6 +54,16 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * ~200 we sit at roughly a quarter of the ceiling. The binding constraint is
  * SUBMIT_WALL_CLOCK_MS below, not urlscan — and overshooting is graceful,
  * because a 429 leaves the row untouched (urlscan-submit-one.ts:112).
+ *
+ * NOT-A-CLONE AUDIT (#1238, v330). The lane also carries a random sample of
+ * is_clone=false alerts — never scanned otherwise — so the pre-classifier's
+ * false-negative rate is measured (lib/clone-watch/not-a-clone-audit.ts). They
+ * take at most AUDIT_SLOTS_PER_RUN of the SUBMIT_BATCH_LIMIT slots; the batch
+ * total, and so the lane's urlscan volume and wall-clock, are unchanged. The
+ * weekly draw runs inside the load step (idempotent per UTC ISO week), gated
+ * FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY; the one-off baseline is drawn by an
+ * operator (docs/ops/clone-watch-config.md). Every sample the batch tried is
+ * stamped so an unscannable one cannot re-present forever.
  */
 
 const SUBMIT_BATCH_LIMIT = 75;
@@ -109,17 +126,33 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      const candidates = await step.run("load-gated-candidates", async () => {
+      const loaded = await step.run("load-gated-candidates", async () => {
+        // Audit samples first so the regular worklist is asked only for the
+        // slots they leave. Never fails the run (see loadAuditSamples).
+        const audit = await loadAuditSamples(sb, {
+          drawWeekly: featureFlags.cloneWatchNotACloneAuditWeekly,
+        });
+        if (audit.error) {
+          logger.error("clone-watch urlscan submit: audit sample load failed", {
+            error: audit.error,
+          });
+        }
         const { data } = await sb.rpc(
           "list_clone_alerts_pending_urlscan_submit",
           {
-            p_limit: SUBMIT_BATCH_LIMIT,
+            p_limit: Math.max(1, SUBMIT_BATCH_LIMIT - audit.samples.length),
             p_min_confidence: MIN_CONFIDENCE,
             p_max_failure_streak: MAX_FAILURE_STREAK,
           },
         );
-        return (data as CloneCandidate[] | null) ?? [];
+        const plan = composeSubmitBatch(
+          (data as CloneCandidate[] | null) ?? [],
+          audit.samples,
+          SUBMIT_BATCH_LIMIT,
+        );
+        return { ...plan, auditDrawn: audit.drawn };
       });
+      const { candidates, auditIds, auditDrawn } = loaded;
 
       // Retire what we are giving up on, BEFORE the empty-worklist return — a
       // quiet day is exactly when the horizon still needs sweeping. Widening the
@@ -167,6 +200,9 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             submit_failed: 0,
             rate_limited: 0,
             dormant_retired: dormant,
+            audit_drawn: auditDrawn,
+            audit_offered: 0,
+            audit_attempted: 0,
           }),
         );
         return {
@@ -193,18 +229,30 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         step,
         "submit-batch",
         SUBMIT_WALL_CLOCK_MS,
-        async (budget) =>
+        async (budget) => {
           // The outcome → counter mapping lives in submitCandidateBatch (one
           // copy for this lane and the recheck lane). A 429 is counted apart
           // from failures: quota exhaustion, row untouched, no evidence about
           // the URL.
-          submitCandidateBatch(candidates, budget, {
+          const tally = await submitCandidateBatch(candidates, budget, {
             onRowError: (alertId, err) =>
               logger.error("clone-watch urlscan submit: row failed", {
                 alertId,
                 error: err instanceof Error ? err.message : String(err),
               }),
-          }),
+          });
+          // Stamp the audit samples this batch tried, inside the same step so a
+          // replay cannot separate the submit from its stamp. A 429 or an
+          // unreached sample is not in attemptedIds and re-presents tomorrow.
+          const triedAudit = attemptedAuditIds(tally.attemptedIds, auditIds);
+          const stamped = await stampAuditAttempts(sb, triedAudit);
+          if (stamped === null) {
+            logger.error("clone-watch urlscan submit: audit stamp failed", {
+              ids: triedAudit.length,
+            });
+          }
+          return { ...tally, auditAttempted: triedAudit.length };
+        },
       );
       const {
         submitted,
@@ -214,6 +262,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         dnsServfail,
         reputationHits,
         unreached,
+        auditAttempted,
       } = batch;
 
       await step.run("log-cost", async () => {
@@ -235,6 +284,9 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             // #1231: a full worklist means gated rows were left for tomorrow.
             cap: SUBMIT_BATCH_LIMIT,
             cap_reached: candidates.length >= SUBMIT_BATCH_LIMIT,
+            audit_drawn: auditDrawn,
+            audit_offered: auditIds.length,
+            audit_attempted: auditAttempted,
           },
         );
       });
