@@ -30,11 +30,16 @@
  */
 import { brandNormalize } from "@askarthur/shopfront-glue";
 import type { createServiceClient } from "@askarthur/supabase/server";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
+import { logger } from "@askarthur/utils/logger";
 import type { BrandCoverage } from "@/lib/clone-watch/brand-coverage";
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 import {
+  ACTIVE_STOCK_STATUSES,
+  STOCK_STATUSES,
   topRiskUnactioned,
   type CloneBrandMetrics,
+  type StockStatus,
 } from "@/lib/clone-watch/clone-metrics";
 import type { MonthWindow } from "@/lib/clone-watch/month-window";
 import type { CloneWatchTrendRows } from "@/lib/clone-watch/report-card";
@@ -132,6 +137,124 @@ export function weaponisedEverByBrand(rows: CloneAlertRow[]): Map<string, number
     s.add(r.candidate_domain);
     if (!out.has(brand)) out.set(brand, 0);
     if (r.weaponised_at) out.set(brand, out.get(brand)! + 1);
+  }
+  return out;
+}
+
+// ── Month-end stock (v325) ──────────────────────────────────────────────────
+
+/** One clone_liveness_snapshots row, as the summary reads it. */
+export interface StockSnapshotRow {
+  brand: string;
+  status: StockStatus;
+  checked_at: string;
+}
+
+/**
+ * Above this share of `unverified` rows (resolver proved nothing, or the run
+ * never reached the name), a brand's active count is not a measurement: a bad
+ * resolver night would otherwise read as "0 lookalikes up". Normal is ~5%
+ * (review sample: 8 of 150 SERVFAIL/timeout).
+ */
+export const STOCK_UNVERIFIED_MAX_SHARE = 0.2;
+
+export interface BrandStock {
+  /** live_phishing + live + parked — the lookalikes still up at month end. */
+  active: number;
+  /** False when unverified rows exceed STOCK_UNVERIFIED_MAX_SHARE — the
+   *  brand's active_stock_eom then persists NULL, its byStatus still stands. */
+  measured: boolean;
+  /** Every status, zero-filled, so a reader never has to guess a missing key. */
+  byStatus: Record<StockStatus, number>;
+}
+
+function emptyByStatus(): Record<StockStatus, number> {
+  return Object.fromEntries(STOCK_STATUSES.map((s) => [s, 0])) as Record<
+    StockStatus,
+    number
+  >;
+}
+
+/**
+ * The month-end snapshot folded per brand, or `null` when there IS no
+ * snapshot for the month.
+ *
+ * `null` vs a zero is the whole contract: `null` persists as
+ * active_stock_eom NULL ("never measured"), because a month whose liveness
+ * run did not happen has no stock figure — publishing 0 would claim every
+ * lookalike was down. An empty array is treated the same as `null` for that
+ * reason: the snapshot covers ALL active stock (~3k domains), so a month with
+ * zero snapshot rows is a run that did not happen, not a clean month.
+ *
+ * A brand with no rows in a snapshot that DID run genuinely has no stock —
+ * `stockForBrand` returns zeros for it.
+ */
+export function foldStockSnapshot(
+  snapshots: StockSnapshotRow[] | null | undefined,
+): { byBrand: Map<string, BrandStock>; checkedAt: string } | null {
+  if (!snapshots || snapshots.length === 0) return null;
+  const byBrand = new Map<string, BrandStock>();
+  let checkedAt = "";
+  for (const s of snapshots) {
+    const brand = s.brand.trim().toLowerCase();
+    let b = byBrand.get(brand);
+    if (!b) byBrand.set(brand, (b = { active: 0, measured: true, byStatus: emptyByStatus() }));
+    b.byStatus[s.status] = (b.byStatus[s.status] ?? 0) + 1;
+    if (ACTIVE_STOCK_STATUSES.has(s.status)) b.active += 1;
+    if (s.checked_at > checkedAt) checkedAt = s.checked_at;
+  }
+  for (const b of byBrand.values()) {
+    const total = STOCK_STATUSES.reduce((n, k) => n + b.byStatus[k], 0);
+    b.measured = b.byStatus.unverified <= total * STOCK_UNVERIFIED_MAX_SHARE;
+  }
+  return { byBrand, checkedAt };
+}
+
+export function stockForBrand(
+  folded: NonNullable<ReturnType<typeof foldStockSnapshot>>,
+  brand: string,
+): BrandStock {
+  return (
+    folded.byBrand.get(brand.trim().toLowerCase()) ?? {
+      active: 0,
+      measured: true,
+      byStatus: emptyByStatus(),
+    }
+  );
+}
+
+/**
+ * The pre-classifier(s) that judged a brand's cohort (model_id), deduped per
+ * candidate like every other count: the model ids joined with "+", most
+ * frequent first, ties alphabetical (deterministic on re-run). A mix is kept
+ * whole on purpose — a month that straddles a classifier swap (Haiku → Jev,
+ * 2026-09-22) must say so, not read as whichever model had more rows.
+ * Absent from the map = no member has a classification.
+ */
+export function classifierVersionByBrand(
+  rows: CloneAlertRow[],
+): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  const seen = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const brand = r.inferred_target_domain?.trim().toLowerCase();
+    if (!brand || !r.candidate_domain) continue;
+    let s = seen.get(brand);
+    if (!s) seen.set(brand, (s = new Set()));
+    if (s.has(r.candidate_domain)) continue;
+    s.add(r.candidate_domain);
+    const model = r.clone_watch_classifications?.model_id;
+    if (!model) continue;
+    let c = counts.get(brand);
+    if (!c) counts.set(brand, (c = new Map()));
+    c.set(model, (c.get(model) ?? 0) + 1);
+  }
+  const out = new Map<string, string>();
+  for (const [brand, c] of counts) {
+    const models = [...c.entries()]
+      .sort(([a, na], [b, nb]) => nb - na || (a < b ? -1 : a > b ? 1 : 0))
+      .map(([m]) => m);
+    out.set(brand, models.join("+"));
   }
   return out;
 }
@@ -245,6 +368,141 @@ export async function writeMonthlyStats(
   };
 }
 
+/** Why a month's stock figure is or is not trusted (Outcome Row + warn). */
+export type StockState = "measured" | "no_run" | "partial" | "read_error";
+
+/**
+ * The two v325 reads the monthly store needs and no other card surface does:
+ * the month-end liveness snapshot and the feed denominator. Called by the
+ * summary's write path only (the admin preview and digests never pay for it).
+ *
+ * The snapshot is trusted ONLY when the run's completion record
+ * (clone_liveness_runs) exists and the snapshot holds exactly the rows it
+ * says it wrote. A run that died mid-walk leaves a partial snapshot, and
+ * folding it would freeze a fabricated 0 for every brand whose stock sat in
+ * the unreached ids — so it persists NULL instead (review of #1225).
+ *
+ * DEGRADES rather than throws, like the takedown-events read: a failure
+ * persists NULL ("not measured") for the affected columns and is warn-logged,
+ * because a lost stock figure must not cost the month its store row.
+ */
+export async function loadStoreV2Inputs(
+  sb: ServiceClient,
+  window: Pick<MonthWindow, "periodMonth" | "startIso" | "endIso">,
+): Promise<{
+  stockSnapshots: StockSnapshotRow[] | null;
+  sweptDomains: number | null;
+  stockState: StockState;
+  stockReadError: string | null;
+}> {
+  let stockSnapshots: StockSnapshotRow[] | null = null;
+  let stockState: StockState = "read_error";
+  let stockReadError: string | null = null;
+  try {
+    const run = await sb
+      .from("clone_liveness_runs")
+      .select("written")
+      .eq("period_month", window.periodMonth)
+      .maybeSingle();
+    if (run.error) throw new Error(run.error.message);
+    const written = (run.data as { written?: number } | null)?.written;
+    if (written == null) {
+      stockState = "no_run";
+    } else {
+      const { rows, error } = await fetchAllRows<StockSnapshotRow>((from, to) =>
+        sb
+          .from("clone_liveness_snapshots")
+          .select("brand, status, checked_at")
+          .eq("period_month", window.periodMonth)
+          .order("alert_id", { ascending: true })
+          .range(from, to) as unknown as PromiseLike<{
+          data: StockSnapshotRow[] | null;
+          error: { message: string } | null;
+        }>,
+      );
+      if (error) throw new Error(error.message);
+      if (rows.length !== written) {
+        stockState = "partial";
+        stockReadError = `snapshot has ${rows.length} rows, run recorded ${written}`;
+      } else {
+        stockState = "measured";
+        stockSnapshots = rows;
+      }
+    }
+  } catch (err) {
+    stockState = "read_error";
+    stockReadError = err instanceof Error ? err.message : String(err);
+  }
+  if (stockState !== "measured") {
+    logger.warn("monthly-brand-store: month-end stock not measured", {
+      period: window.periodMonth,
+      stockState,
+      error: stockReadError,
+      consequence: "active_stock_eom persisted as null (not measured)",
+    });
+  }
+
+  let sweptDomains: number | null = null;
+  try {
+    const { data, error } = await sb
+      .from("cost_telemetry")
+      .select("metadata, created_at")
+      .eq("feature", "shopfront_clone_watch")
+      .eq("operation", "nrd_daily_ingest")
+      .gte("created_at", window.startIso)
+      .lt("created_at", window.endIso)
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    sweptDomains = sumDomainsScanned(
+      (data ?? []) as Array<{ metadata: unknown; created_at: string }>,
+      window.startIso,
+    );
+  } catch (err) {
+    logger.warn("monthly-brand-store: swept-domains read failed", {
+      period: window.periodMonth,
+      error: err instanceof Error ? err.message : String(err),
+      consequence: "swept_domains persisted as null (not recorded)",
+    });
+  }
+
+  return { stockSnapshots, sweptDomains, stockState, stockReadError };
+}
+
+/**
+ * The month's first ingest row must land within this many days of the month
+ * start, or the sum is a fraction of the feed (telemetry began 2026-06-27, so
+ * June would read ~280k against ~2.1M). SQL twin: the v325 backfill's HAVING.
+ */
+export const SWEPT_COVERAGE_GRACE_DAYS = 3;
+
+/**
+ * Sum of nrd_daily_ingest `domains_scanned`; null when no ingest row carried
+ * the key, or when telemetry does not cover the month from its start.
+ */
+export function sumDomainsScanned(
+  rows: Array<{ metadata: unknown; created_at?: string }>,
+  monthStartIso?: string,
+): number | null {
+  let total = 0;
+  let seen = 0;
+  let first = Number.POSITIVE_INFINITY;
+  for (const r of rows) {
+    const n = Number((r.metadata as { domains_scanned?: unknown } | null)?.domains_scanned);
+    if (!Number.isFinite(n)) continue;
+    total += n;
+    seen += 1;
+    if (r.created_at) first = Math.min(first, Date.parse(r.created_at));
+  }
+  if (seen === 0) return null;
+  if (
+    monthStartIso &&
+    first >= Date.parse(monthStartIso) + SWEPT_COVERAGE_GRACE_DAYS * 24 * 3600_000
+  ) {
+    return null;
+  }
+  return total;
+}
+
 /**
  * Should the completion event fire, i.e. should stewardship prepare this
  * month? Once per published month:
@@ -286,22 +544,37 @@ export interface LedgerStoreRow {
 const LEDGER_SELECT =
   "brand, clones, reported_to_netcraft, taken_down, taken_down_in_month, declined, escalated, weaponised, weaponised_ever, weaponised_after_decline, re_taken_down, alert_ids, frozen_at";
 
+/**
+ * The month's TARGETED brands, every page of them.
+ *
+ * `clones > 0`: since v325 the store also holds a zero row for every brand we
+ * watched and found nothing for (the honest "0 this month, and we were
+ * looking"). The stewardship ledger reports brands that were targeted, so a
+ * zero row must not become a report — it would read as an empty report card.
+ *
+ * Paginated (was one `.range(0, 999)` page plus a throw at 1,000): the zero
+ * rows put the month at ~watchlist size, and PostgREST caps every response at
+ * 1,000 rows, so a single page is a ceiling we would now hit by growth alone.
+ */
 export async function readMonthlyBrandStore(
   sb: ServiceClient,
   periodMonth: string, // "YYYY-MM-01"
 ): Promise<LedgerStoreRow[]> {
-  // ~150 rows a month; one page is plenty, but say so if that ever changes.
-  const { data, error } = await sb
-    .from("clone_watch_monthly_brand_stats")
-    .select(LEDGER_SELECT)
-    .eq("period_month", periodMonth)
-    .order("brand", { ascending: true })
-    .range(0, 999);
+  const { rows, error } = await fetchAllRows<LedgerStoreRow>((from, to) =>
+    sb
+      .from("clone_watch_monthly_brand_stats")
+      .select(LEDGER_SELECT)
+      .eq("period_month", periodMonth)
+      .gt("clones", 0)
+      // `.order` is load-bearing: a .range() walk over an unordered query can
+      // skip and repeat rows between pages.
+      .order("brand", { ascending: true })
+      .range(from, to) as unknown as PromiseLike<{
+      data: LedgerStoreRow[] | null;
+      error: { message: string } | null;
+    }>,
+  );
   if (error) throw new Error(`monthly store read failed: ${error.message}`);
-  const rows = (data ?? []) as LedgerStoreRow[];
-  if (rows.length >= 1000) {
-    throw new Error(`monthly store read truncated: ${periodMonth} has ≥1000 brand rows`);
-  }
   return rows;
 }
 

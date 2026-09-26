@@ -158,6 +158,57 @@ export function brandsCoveredForMonth(
   return covered;
 }
 
+/** Does this coverage row touch any day of the month? */
+function overlapsMonth(row: BrandCoverage, periodMonth: string): boolean {
+  const start = monthStart(periodMonth);
+  const nextMonth = new Date(start);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+  if (new Date(`${row.coveredFrom}T00:00:00Z`) >= nextMonth) return false;
+  return !row.coveredTo || new Date(`${row.coveredTo}T00:00:00Z`) > start;
+}
+
+/**
+ * The brand DOMAINS on the watchlist at any point in the month — the set that
+ * gets a store row even when nothing was found (v325 zero rows). Lower-cased.
+ */
+export function domainsWatchedInMonth(
+  rows: readonly BrandCoverage[],
+  periodMonth: string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const row of rows) {
+    const d = row.brandDomain?.trim().toLowerCase();
+    if (d && overlapsMonth(row, periodMonth)) out.add(d);
+  }
+  return out;
+}
+
+/**
+ * `coverage_full_month` for one store row (v325): was the domain watched for
+ * the WHOLE month with no change in which brands fed it?
+ *
+ *   true  — at least one of the domain's rows covers the whole month, and no
+ *           row for the domain starts or ends inside it;
+ *   false — anything else, including a domain with no coverage row at all.
+ *
+ * Same rule as `classifyTrend`'s one-month half (a composition change is our
+ * measurement changing shape). SQL twin: the v325 backfill — keep in step.
+ */
+export function domainCoveredForMonth(
+  rows: readonly BrandCoverage[],
+  domain: string,
+  periodMonth: string,
+): boolean {
+  const d = domain.trim().toLowerCase();
+  const mine = rows.filter((r) => r.brandDomain?.trim().toLowerCase() === d);
+  let anyCovered = false;
+  for (const row of mine) {
+    if (monthCoverage(row, periodMonth) === "covered") anyCovered = true;
+    else if (overlapsMonth(row, periodMonth)) return false;
+  }
+  return anyCovered;
+}
+
 /**
  * Decide whether a domain's month-over-month movement may be published.
  *

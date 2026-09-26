@@ -18,6 +18,13 @@ import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 import { PARKED_HOST_PATTERNS } from "@/lib/clone-watch/urlscan-classify";
 import { urlscanEvidenceFromJsonb } from "@/lib/clone-watch/urlscan-evidence";
 import { readAttribution } from "@/lib/clone-watch/attribution";
+// Pure classifiers only — the network probe lives in liveness.ts and is called
+// by the month-end liveness function, never from this Module.
+import {
+  classifyDnsLookups,
+  classifyHostLookups,
+  type DnsLookup,
+} from "@/lib/clone-watch/liveness";
 
 // Per-brand detail rows stored in metrics.clones.domains. Sized so the public
 // share page (/clone-report/[token]) is effectively the FULL list for all
@@ -113,6 +120,121 @@ export function squatStatus(row: {
   }
   if (row.urlscan_evidence?.server?.ip) return "live";
   return "unknown";
+}
+
+/**
+ * Month-end STOCK status of one lookalike (v325, clone_liveness_snapshots).
+ *
+ * `squatStatus` answers from what we STORED; this answers from a FRESH DNS
+ * probe taken at month end, falling back to stored facts only where DNS cannot
+ * speak (registry holds live in RDAP, not DNS). It is the one rule behind
+ * `active_stock_eom` — "how many lookalikes of this brand are still up".
+ *
+ * live_phishing — resolves to a host AND our lifecycle says weaponised
+ * live          — resolves to a host (A/AAAA)
+ * parked        — on a parking / aftermarket nameserver, or urlscan saw a
+ *                 for-sale page
+ * held          — registry/registrar hold (EPP clientHold / serverHold)
+ * no_host       — the name exists but points at no address
+ * gone          — NXDOMAIN on both A and NS (the only honest "gone")
+ * unverified    — the resolver proved nothing (SERVFAIL / timeout), or the
+ *                 domain was never probed
+ *
+ * Precedence is documented on `stockStatus`.
+ *
+ * Counted as ACTIVE stock: live_phishing, live, parked (`ACTIVE_STOCK_STATUSES`).
+ */
+export type StockStatus =
+  | "live_phishing"
+  | "live"
+  | "parked"
+  | "held"
+  | "no_host"
+  | "gone"
+  | "unverified";
+
+export const STOCK_STATUSES: readonly StockStatus[] = [
+  "live_phishing",
+  "live",
+  "parked",
+  "held",
+  "no_host",
+  "gone",
+  "unverified",
+] as const;
+
+/** Statuses that count toward `active_stock_eom`. */
+export const ACTIVE_STOCK_STATUSES: ReadonlySet<StockStatus> = new Set([
+  "live_phishing",
+  "live",
+  "parked",
+]);
+
+/** The fresh month-end DNS answers for one name. `aaaa` is null when A had records. */
+export interface StockDns {
+  a: DnsLookup;
+  aaaa: DnsLookup | null;
+  ns: DnsLookup;
+}
+
+/**
+ * Pure. Fresh DNS decides first; stored facts only fill in where DNS did not
+ * prove absence (review of #1225):
+ *
+ * - gone — NXDOMAIN (the only honest "gone"; a stale RDAP hold on a name that
+ *   no longer exists changes nothing).
+ * - resolves to a host → live_phishing when our lifecycle says weaponised
+ *   (checked BEFORE parking: shared-host defaults such as dns-parking.com
+ *   also front live sites, so a parking NS must never hide a live phish);
+ *   parked when the FRESH NS is a parking/aftermarket provider, urlscan saw a
+ *   for-sale page, or — only when the fresh NS lookup failed — the stored
+ *   nameservers are; else live.
+ * - registered but no address → parked if the FRESH NS is a parking provider,
+ *   held on a stored clientHold/serverHold (the hold is why it serves
+ *   nothing), else no_host.
+ * - resolver proved nothing → held on a stored hold, else unverified.
+ *   `null` from the host classifier is never "gone" (liveness.ts).
+ */
+export function stockStatus(input: {
+  dns: StockDns | null;
+  attribution?: unknown;
+  urlscan_classification?: string | null;
+  lifecycle_state?: string | null;
+}): StockStatus {
+  const { dns } = input;
+  if (!dns) return "unverified";
+
+  if (classifyDnsLookups(dns.a, () => dns.ns) === true) return "gone";
+
+  const attr = readAttribution(input.attribution);
+  const held = attr.statuses
+    .map((s) => s.toLowerCase().replace(/[^a-z]/g, ""))
+    .some((s) => s === "clienthold" || s === "serverhold");
+  const freshNs =
+    "records" in dns.ns && dns.ns.records.length > 0 ? dns.ns.records : null;
+  const parkingNs = (ns: readonly string[]) =>
+    ns.some((n) => hostMatches(n, PARKING_NS_ROOTS)) ||
+    ns.some((n) => hostMatches(n, PARKED_HOST_PATTERNS));
+
+  const resolves = classifyHostLookups(
+    dns.a,
+    () => dns.aaaa ?? { errorCode: "UNKNOWN" },
+  );
+  if (resolves === true) {
+    if (input.lifecycle_state === "weaponised") return "live_phishing";
+    if (
+      input.urlscan_classification === "parked_for_sale" ||
+      parkingNs(freshNs ?? attr.nameServers)
+    ) {
+      return "parked";
+    }
+    return "live";
+  }
+  if (resolves === false) {
+    if (freshNs && parkingNs(freshNs)) return "parked";
+    return held ? "held" : "no_host";
+  }
+  return held ? "held" : "unverified";
 }
 
 export interface CloneBrandMetrics {

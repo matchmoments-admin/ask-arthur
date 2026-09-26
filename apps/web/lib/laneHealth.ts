@@ -109,6 +109,13 @@ interface Shape<L extends LaneId> {
    */
   crons?: readonly string[];
   /**
+   * ISO instant before which a MISSING row is not `absent` — a new Lane whose
+   * first scheduled run is still ahead (a monthly one would otherwise page
+   * "no row in the window" every day until it first fires). Only the
+   * never-written case is excused; a stale row after it is judged as usual.
+   */
+  firstExpectedAt?: string;
+  /**
    * Longest healthy gap between rows, in ms — ONLY where `crons` cannot give
    * it: event-driven Lanes (`POSITIVE_INFINITY`) and monthly ones (the cron
    * parser refuses a day-of-month on purpose). Otherwise derived.
@@ -352,6 +359,18 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     shape: "clones found but no store rows written",
     silentZero: (o) => n(o, "total") > 0 && n(o, "brand_rows") === 0,
   },
+  "clone-watch-month-end-liveness": {
+    // Monthly (1st, 01:00) — ten hours before the summary that reads it. An
+    // absent row here IS the "active_stock_eom NULL this month" explanation.
+    crons: ["0 1 1 * *"],
+    firstExpectedAt: "2026-10-01T02:00:00Z",
+    // Monthly: the cron parser refuses day-of-month, so the window is explicit.
+    expectEvery: 32 * 24 * H,
+    consecutive: 1,
+    // `probed` excludes unverified rows, so a resolver-wide failure pages.
+    shape: "active stock > 0 but no DNS verdict",
+    silentZero: (o) => n(o, "stock") > 0 && n(o, "probed") === 0,
+  },
   "report-brand-stewardship": {
     expectEvery: 32 * 24 * H, // monthly, after the store is written
     flags: ["brandStewardshipReport"],
@@ -520,9 +539,11 @@ function absence(
   latest: LaneCostRow | undefined,
   expectEvery: number,
   now: number,
+  firstExpectedAt?: string,
 ): LaneProblem | null {
   if (!Number.isFinite(expectEvery)) return null;
   if (!latest) {
+    if (firstExpectedAt && now < Date.parse(firstExpectedAt)) return null;
     return {
       lane,
       kind: "absent",
@@ -592,6 +613,7 @@ export function classifyLaneHealth(
       mine[0],
       laneExpectEvery(lane),
       now,
+      shape.firstExpectedAt,
     );
     if (absent) {
       problems.push(absent);

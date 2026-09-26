@@ -159,6 +159,13 @@ function healthyRows(): LaneCostRow[] {
       total: 855,
       brand_rows: 148,
     }),
+    // Monthly (1st, 01:00) — ten hours before the summary.
+    outcomeRow("clone-watch-month-end-liveness", 20 * 24, 3000, {
+      stock: 3000,
+      probed: 2850,
+      unverified: 150,
+      not_probed: 0,
+    }),
     rawRow("shopfront_clone_preclassify", "classify", 5, { is_clone: true }),
   ];
 }
@@ -285,6 +292,20 @@ describe("classifyLaneHealth", () => {
         lane: "shopfront-nrd-daily-ingest",
         kind: "absent",
       }),
+    ]);
+  });
+
+  it("excuses a never-written lane until its firstExpectedAt, then reports it absent", () => {
+    const rows = without("stock_snapshot");
+    const liveness = (now: number) =>
+      classifyLaneHealth(rows, { now }).filter(
+        (p) => p.lane === "clone-watch-month-end-liveness",
+      );
+    // Before the first scheduled run (1 Oct 01:00) — nothing to report.
+    expect(liveness(NOW)).toEqual([]);
+    // After it — the missing row is the "active_stock_eom NULL" explanation.
+    expect(liveness(Date.parse("2026-10-02T00:00:00Z"))).toEqual([
+      expect.objectContaining({ kind: "absent" }),
     ]);
   });
 
