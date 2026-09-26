@@ -87,6 +87,24 @@ export interface NetcraftSubmissionUrls {
    *  submitted_at is written AFTER the POST returns, so it trails this by
    *  seconds — and Netcraft often classifies inside that gap. */
   submittedAt: string | null;
+  /** The SUBMISSION-level state (`processing` until Netcraft has finished
+   *  every URL in it). null when the submission object was not read. */
+  submissionState: string | null;
+}
+
+/**
+ * #1148 — has Netcraft finished processing this submission? Its report_issue
+ * endpoint 400s ("Please wait until the submission has been fully processed")
+ * until it has, and — worse — a still-processing submission's state_counts
+ * holds only `processing`, so the no-escalatable pre-filter used to DRAIN it
+ * as `no_escalatable_state`, a terminal skip, before Netcraft had graded
+ * anything. Measured 2026-09-26 over 30 submissions: processing takes 0 min to
+ * 12.1 h after receipt (median ~5 min, 5 of 30 over 1.5 h). A fixed min-age
+ * gate on the worklist would have to be >= 12 h to cover that and would delay
+ * every filing by it; Netcraft's own flag costs nothing and is exact.
+ */
+export function isSubmissionProcessing(state: string | null | undefined): boolean {
+  return normState(state ?? "") === NETCRAFT_URL_STATE.PROCESSING;
 }
 
 /**
@@ -481,6 +499,7 @@ export async function fetchNetcraftSubmissionUrls(
       noEscalatable: false,
       submissionLog: [],
       submittedAt: null,
+      submissionState: null,
     };
   }
 }
@@ -507,6 +526,7 @@ async function fetchNetcraftSubmissionUrlsInner(
       noEscalatable: false,
       submissionLog: [],
       submittedAt: null,
+      submissionState: null,
     };
   }
   const sub = (await subRes.json()) as Record<string, unknown>;
@@ -519,6 +539,7 @@ async function fetchNetcraftSubmissionUrlsInner(
     ? (sub.classification_log as NetcraftClassificationLogEntry[])
     : [];
   const submittedAt = unixToIso(sub.date);
+  const submissionState = typeof sub.state === "string" ? sub.state : null;
 
   // Pre-filter: skip the /urls GET when the histogram has no escalatable state.
   if (opts?.escalatableStates && Object.keys(stateCounts).length > 0) {
@@ -537,6 +558,7 @@ async function fetchNetcraftSubmissionUrlsInner(
         noEscalatable: true,
         submissionLog,
         submittedAt,
+        submissionState,
       };
     }
   }
@@ -557,6 +579,7 @@ async function fetchNetcraftSubmissionUrlsInner(
       noEscalatable: false,
       submissionLog,
       submittedAt,
+      submissionState,
     };
   }
   const body = (await urlsRes.json()) as {
@@ -575,6 +598,7 @@ async function fetchNetcraftSubmissionUrlsInner(
     noEscalatable: false,
     submissionLog,
     submittedAt,
+    submissionState,
   };
 }
 

@@ -39,6 +39,11 @@ export const NETCRAFT_DEFERRAL = {
     deadRecheckMs: 72 * HOUR_MS,
     unavailableRecheckMs: 24 * HOUR_MS,
     transientRecheckMs: 24 * HOUR_MS,
+    // #1148: Netcraft still processing the submission. Its OWN reason, so it
+    // neither spends nor is spent by `transient_state` rounds, and the two
+    // causes stay distinguishable in `rounds`. Processing measured 0 min–12.1 h
+    // (n=30, 2026-09-26): 24 h x 5 rounds is far past the observed max.
+    processingRecheckMs: 24 * HOUR_MS,
   },
   resubmit: {
     rpc: "defer_clone_alert_netcraft_resubmit",

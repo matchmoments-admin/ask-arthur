@@ -12,6 +12,8 @@
  *   apply_netcraft_reconcile       (v249) — a CASE inside a bare UPDATE, with
  *                                          its own no-downgrade set
  *   mark_stale_clone_alerts_dormant(v285/286) — a raw UPDATE
+ *   record_weaponised_liveness     (v329) — weaponised → dormant on a
+ *                                          confirmed NXDOMAIN
  *   NO_DOWNGRADE_STATES / classifyByUrlState (netcraft-urls.ts) — a TS mirror
  *                                          of v249, existing only because SQL
  *                                          functions have no unit-test seam
@@ -57,7 +59,9 @@ export const CLONE_LIFECYCLE_STATES = [
 export type CloneLifecycleState = (typeof CLONE_LIFECYCLE_STATES)[number];
 
 /**
- * States nothing moves out of. `apply_netcraft_reconcile` (v249) additionally
+ * States nothing moves out of — with ONE pinned exception, the v329
+ * re-emergence edge `dormant → weaponised` (TERMINAL_EXITS below), for an
+ * offline clone whose name resolves again. `apply_netcraft_reconcile` (v249) additionally
  * refuses to downgrade OFF `weaponised` — but weaponised is not terminal,
  * because `weaponised -> taken_down` is exactly the outcome the whole
  * enforcement path exists to produce.
@@ -112,7 +116,8 @@ export type LifecycleTrigger =
   | "urlscan_verdict"
   | "netcraft_submit"
   | "netcraft_reconcile"
-  | "stale_sweep";
+  | "stale_sweep"
+  | "liveness_sweep";
 
 export interface LifecycleEdge {
   from: CloneLifecycleState;
@@ -128,7 +133,8 @@ export interface LifecycleEdge {
  *
  * The two rules worth stating in prose because they are what the guards spend
  * their complexity on:
- *   - NO DOWNGRADE: once `weaponised`, the only exit is `taken_down`. A
+ *   - NO DOWNGRADE: once `weaponised`, the only exits are `taken_down`
+ *     (vendor actioned) and, since v329, `dormant` (witnessed offline). A
  *     later benign vendor verdict must NOT move it back to declined —
  *     `apply_netcraft_reconcile` enforces this and `classifyByUrlState`
  *     mirrors it.
@@ -160,7 +166,27 @@ export const LIFECYCLE_EDGES: readonly LifecycleEdge[] = [
 
   // aged out without ever being scanned (v285/v286)
   { from: "detected", to: "dormant", trigger: "stale_sweep", because: "passed the 90-day scan horizon unscanned" },
+
+  // witnessed offline (v329, record_weaponised_liveness). NOT taken_down: every
+  // reader of taken_down says "actioned by Netcraft" / "Blocklisted", and a
+  // site that stopped resolving was not. offline_since dates it.
+  { from: "weaponised", to: "dormant", trigger: "liveness_sweep", because: "stopped resolving — NXDOMAIN on two DNS reads >= 12 h apart" },
+
+  // RE-EMERGENCE (v329 review, #1254) — the ONE edge out of a terminal state.
+  // A weaponised clone we saw go offline is not dead: registrar holds are
+  // reversible (13 of the 142 weaponised carried clientHold/serverHold on
+  // 2026-09-26), and while dormant the v315 projection demotes its B2B feed
+  // row. record_weaponised_liveness re-reads offline clones weekly and moves
+  // one that resolves again straight back to weaponised (alert_state open).
+  // Scoped by the SQL to rows with offline_since + weaponised_at set — a v285
+  // never-scanned dormant row has no way out, as before.
+  { from: "dormant", to: "weaponised", trigger: "liveness_sweep", because: "an offline clone's name resolved again — e.g. a registrar hold was lifted" },
 ];
+
+/** The only sanctioned exits from a terminal state (see RE-EMERGENCE above). */
+export const TERMINAL_EXITS: readonly LifecycleEdge[] = LIFECYCLE_EDGES.filter(
+  (e) => (TERMINAL_STATES as readonly string[]).includes(e.from),
+);
 
 /** The question that used to take five file reads. */
 export function canTransition(from: string, to: string): boolean {

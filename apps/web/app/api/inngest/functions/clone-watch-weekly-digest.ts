@@ -7,6 +7,13 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneGate } from "@/lib/laneHealth";
 import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
+import {
+  formatDurationMinutes,
+  parseTakedownStats,
+  publishableMedian,
+  type TakedownStats,
+} from "@/lib/clone-watch/takedown-stats";
+import { MEDIAN_FLOOR } from "@/lib/clone-watch/duration-kpis";
 
 /**
  * Layer 5 — weekly digest of clone-watch activity. Cron Sun 09:00 UTC
@@ -93,17 +100,11 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
           logger.error("clone-watch weekly digest: takedown stats failed", {
             error: error.message,
           });
-          return EMPTY_TAKEDOWN_STATS;
+          return null;
         }
-        if (!Array.isArray(data) || data.length === 0) {
-          return EMPTY_TAKEDOWN_STATS;
-        }
-        const r = data[0] as Record<string, number>;
-        return {
-          takedowns_total: Number(r.takedowns_total ?? 0),
-          median_minutes: Number(r.median_minutes ?? 0),
-          p90_minutes: Number(r.p90_minutes ?? 0),
-        };
+        // One reader (lib/clone-watch/takedown-stats.ts): a null latency is
+        // "not measured", never "0 min" (#1234).
+        return parseTakedownStats(data);
       });
 
       const brandBreakdown = await step.run(
@@ -318,24 +319,6 @@ const EMPTY_METRICS: WeeklyMetrics = {
   notifications_sent: 0,
 };
 
-export interface TakedownStats {
-  takedowns_total: number;
-  median_minutes: number;
-  p90_minutes: number;
-}
-
-const EMPTY_TAKEDOWN_STATS: TakedownStats = {
-  takedowns_total: 0,
-  median_minutes: 0,
-  p90_minutes: 0,
-};
-
-function formatMinutes(m: number): string {
-  if (!m || m < 1) return "—";
-  if (m < 60) return `${m} min`;
-  return `${(m / 60).toFixed(1)}h`;
-}
-
 export interface LowSeverityDigest {
   total: number;
   byBrand: Array<{ brand: string; count: number }>;
@@ -359,7 +342,7 @@ export function buildTelegramMessage({
   brandBreakdown: Array<{ brand: string; count: number }>;
   reportedBrands: string[];
   linkedinDraft: string;
-  takedown?: TakedownStats;
+  takedown?: TakedownStats | null;
   lowSeverityDigest?: LowSeverityDigest;
 }): SafeHtml {
   const brandLines = brandBreakdown.length
@@ -374,10 +357,16 @@ export function buildTelegramMessage({
       ? html`Reported directly to: <b>${reportedBrands.map((b) => brandDisplayName(b)).join(", ")}</b>`
       : html`Reported directly to: <i>(no direct-email channels fired this week)</i>`;
 
-  const takedownLine =
-    takedown && takedown.takedowns_total > 0
-      ? html`Netcraft takedowns: <b>${takedown.takedowns_total}</b> · median <b>${formatMinutes(takedown.median_minutes)}</b> · P90 ${formatMinutes(takedown.p90_minutes)}`
-      : html`Netcraft takedowns: 0 (polling cron warming up)`;
+  // #1234: detection → blocklist (weaponised_at → Netcraft's own classification
+  // time) and Netcraft's triage latency on its OWN clock. The old line
+  // subtracted our submitted_at from Netcraft's time and read "median 0 min".
+  // A null is a FAILED read (RPC error / no row), never "0 this week" — the
+  // review found the old line printed a confident zero for an outage.
+  const takedownLine = !takedown
+    ? html`Netcraft blocklistings: <i>unavailable (stats read failed)</i>`
+    : takedown.blocklisted > 0
+      ? html`Netcraft blocklistings: <b>${takedown.blocklisted}</b> · detection→blocklist median <b>${formatDurationMinutes(takedown.detectToBlock?.median ?? null)}</b> (n=${takedown.detectToBlock?.n ?? 0}) · Netcraft triage ${formatDurationMinutes(takedown.triageMinutes?.median ?? null)} (n=${takedown.triageMinutes?.n ?? 0})`
+      : html`Netcraft blocklistings: 0 this week`;
 
   const lowSeverityLines: SafeHtml[] =
     lowSeverityDigest && lowSeverityDigest.total > 0
@@ -431,7 +420,7 @@ export function buildLinkedInDraft({
   metrics: WeeklyMetrics;
   brandBreakdown: Array<{ brand: string; count: number }>;
   reportedBrands: string[];
-  takedown?: TakedownStats;
+  takedown?: TakedownStats | null;
 }): string {
   const targetedLine = brandBreakdown
     .slice(0, 5)
@@ -446,9 +435,15 @@ export function buildLinkedInDraft({
       ? `Reported directly to security teams at: ${reportedBrands.map(brandDisplayName).join(", ")}.`
       : null;
 
+  // A public draft: the same n >= MEDIAN_FLOOR bar as the public page.
+  const blockMedian = publishableMedian(takedown?.detectToBlock ?? null, MEDIAN_FLOOR);
   const takedownLine =
-    takedown && takedown.takedowns_total > 0
-      ? `${takedown.takedowns_total} domains browser-blocked via Netcraft — median report→blocklisting ${formatMinutes(takedown.median_minutes)} (classification, not offline).`
+    takedown && takedown.blocklisted > 0
+      ? `${takedown.blocklisted} domains browser-blocked via Netcraft${
+          blockMedian !== null
+            ? ` — median ${formatDurationMinutes(blockMedian)} from our detecting live phishing to the blocklist`
+            : ""
+        } (classification, not offline).`
       : null;
 
   return [

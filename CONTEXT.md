@@ -163,8 +163,14 @@ answers right now (that is `probeLiveness`).
 **Weaponised**:
 A Clone Alert observed serving live phishing or credential-harvest content —
 our own urlscan verdict, not the vendor's. The state the whole enforcement path
-exists to detect and act on. Only ever exits to `taken_down`: a later benign
-vendor grade must NOT move it back (the no-downgrade rule in
+exists to detect and act on. Exits only forward: to `taken_down` (Netcraft
+classified it malicious) or, since v329, to `dormant` when our DNS sweep
+witnesses the name gone twice ≥ 12 h apart (`offline_since` dates it — never
+`taken_down`, which every reader renders as "actioned by Netcraft"). That
+`dormant` is the one reversible terminal state: offline clones are re-read
+weekly and one that resolves again (a lifted registrar hold) goes back to
+`weaponised` — the only edge out of a terminal state (`TERMINAL_EXITS`). A later
+benign vendor grade must NOT move it back (the no-downgrade rule in
 `apply_netcraft_reconcile`). `declined → weaponised` is the money transition —
 the vendor graded it "no threat" and it weaponised afterwards — and is the
 premise of both the recheck loop and the false-negative escalation lane.
@@ -174,6 +180,10 @@ The interval between Netcraft grading a lookalike non-malicious (`declined`)
 and that same domain being observed `weaponised`. The measurable claim behind
 the monthly clone-watch report. Publishable only from witnessed transitions
 (`netcraft_declined_at` + `weaponised_at`), never from backfilled stamps.
+Its live end — a clone still `weaponised` that Netcraft grades clean after its
+own escalation path ran out ("Already reported and rejected.", or our issue
+unanswered ≥ 72 h) — is escalated to the operator once and stamped
+`submitted_to.vendor_gap` (v329).
 
 **Not-a-clone Audit** (v330, #1238):
 A random sample of never-scanned Clone Alerts the pre-classifier judged

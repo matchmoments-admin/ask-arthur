@@ -303,8 +303,18 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // would have paged every few days. The failure it stood in for — a broken
     // worklist read — now throws and writes a Lane error row (PR B, #1188),
     // which the digest reports directly; absence still catches a dead Lane.
-    shape: "(absence only — worklist read failures surface as Lane errors)",
-    silentZero: () => false,
+    //
+    // v329 (#1234 review): the weaponised outcome steps soft-fail by design —
+    // they must not cost the Netcraft half its Outcome Row — so their failure
+    // is a FIELD, not an error row. Without this predicate a missing v329 or a
+    // broken RPC read as a healthy lane forever. An empty Netcraft worklist is
+    // still quiet; these are not.
+    shape:
+      "liveness_error or vendor_gap_error present, or liveness_due > 0 with liveness_checked = 0",
+    silentZero: (o) =>
+      typeof o.liveness_error === "string" ||
+      typeof o.vendor_gap_error === "string" ||
+      (n(o, "liveness_due") > 0 && o.liveness_checked === 0),
   },
   "shopfront-nrd-daily-ingest": {
     crons: ["30 8 * * *"],

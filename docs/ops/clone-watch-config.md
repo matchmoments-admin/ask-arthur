@@ -795,6 +795,78 @@ id>` (Inngest dedups a retried `fire-events` step), and `runUrlBlocklistOnward` 
 > and Netcraft credits by that email (leaderboard handle `br_4918435`); its crediting emails
 > showed 10 sites credited all-time as of 2026-09-22.
 
+> **v329 (#1234, absorbs #1148) — takedown and outcome metrics on one clock each.** Measured
+> 2026-09-26 before the change: `clone_watch_takedown_stats(30)` read n=8, **median 0 min,
+> fastest −2 min** — it subtracted OUR `submitted_at` (written after the POST returns, 1–142 s
+> after Netcraft's receipt) from Netcraft's classification time. It now returns:
+>
+> | Column(s)                                       | Definition                                                                                                                                        | 30d value at change                     |
+> | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+> | `takedowns_total`                               | Netcraft malicious classifications dated in the window                                                                                            | 8                                       |
+> | `median/p90/fastest/slowest_minutes`, `timed_n` | Netcraft triage latency, **both ends Netcraft's clock**: `takedown_received_at` → `takedown_at`. NULL when `timed_n = 0`.                         | n=0 (receipt not persisted before v329) |
+> | `detect_to_block_*`                             | our `weaponised_at` → vendor-dated `takedown_at`; a site Netcraft blocked before we saw it phishing is `blocked_before_detection`, never averaged | n=7, median 231 min (3.9 h)             |
+> | `weaponised_*`                                  | cohort weaponised in the window, by current outcome                                                                                               | 41 → 8 blocklisted, 33 still weaponised |
+>
+> The public `/clone-watch` tile now shows **detection → blocklist** (n ≥ `MEDIAN_FLOOR` 5),
+> labelled "n=7 of 41 weaponised in window", with the sentence that most of that time is our own
+> ~13:00 UTC daily Netcraft submit, not Netcraft (`blocklistTile` in
+> `apps/web/lib/clone-watch/takedown-stats.ts` — the ONE wording). All three readers go through
+> that module; a null is "not measured", never "0 min" — the weekly digest prints "unavailable"
+> for a failed read, and `/admin/clone-watch` always shows the cohort tiles with explicit zeros.
+>
+> **Witnessed offline.** Nothing rechecked a `weaponised` alert (recheck admits monitoring/declined;
+> reconcile/issue stop at 30 days): 142 weaponised, 109 weaponised > 30 days ago, 5 rechecked in
+> 7 days; a DNS read found 63 NXDOMAIN. The reconcile lane now DNS-reads every weaponised alert
+> (≤ 200/run, 20 h cadence, no urlscan quota). First NXDOMAIN sets `offline_since`; a second
+> ≥ 12 h later moves it to `dormant` (alert_state `expired`), with `offline_cause` =
+> `registrar_hold` when the stored RDAP statuses (`attribution.whois.statuses`) carry a
+> client/server hold, else `nxdomain`. Never `taken_down` — that state means "Netcraft classified
+> it" to every reader (outcome-copy, squatting, clone-metrics).
+>
+> **Offline is reversible.** Registrar holds get lifted (13 of the 142 weaponised carried a hold on
+> 2026-09-26), and the v315 projection demotes the B2B feed row on `dormant`. So the same DNS pass
+> re-reads every offline `dormant` clone weekly; one that resolves again goes back to
+> `weaponised` / `open` (`re_emerged` in the Outcome Row) — the only edge out of a terminal state
+> (`TERMINAL_EXITS`, lifecycle.ts).
+>
+> **Current-state counts vs. the dormant move (confounder).** `weaponised` on the report card is
+> CURRENT state and is labelled so; it drops as offline clones move to `dormant` (~63 on the first
+> runs, i.e. during September 2026). `weaponisedAfterDecline` is now computed from timestamps
+> (`weaponised_at > netcraft_declined_at`, `clone-metrics.ts weaponisedAfterDecline`) so its
+> membership never erodes as sites die. The month-over-month line (#1247) compares clones, not
+> weaponised, and nothing user-facing compares weaponised month-over-month (checked: trend-copy,
+> the caption, `/clone-watch/[period]`); the September 2026 caption still carries a one-line
+> caveat (`weaponisedStateCaveat`, outcome-copy.ts) so a reader holding August's edition does not
+> read the lower figure as fewer attacks.
+>
+> **No-threat-on-phishing escalation.** 76 weaponised alerts had Netcraft grading them clean after
+> its own path ran out (49 "Already reported and rejected.", 27 with our issue on the current
+> submission unanswered ≥ 72 h) and **zero** enforcement cases (`shopfront_takedown_attempts` is
+> empty — `FF_CLONE_ENFORCEMENT` is dark) or onward reports. The reconcile lane pages the operator
+> (≤ 50/run, defanged domains, each with what our DNS last saw — resolves / inconclusive / not yet
+> read) and only then stamps `submitted_to.vendor_gap`, once per alert. A failed send returns an
+> error in the Outcome Row and stamps nothing, so the rows re-list next run; it never throws.
+> Every escalated row is listed on `/admin/clone-watch` (the page names the top 10). The v250
+> resubmit lane no longer re-files the "Already reported and rejected." URLs (worklist predicate;
+> counted as `rejected_excluded`).
+> 72 h because 4 of the 9 issue → malicious conversions ever recorded landed within 71 h.
+>
+> **#1148 min-age gate — answered with Netcraft's own flag.** Receipt → end of processing over 30
+> submissions: 0 min to 12.1 h (median ≈ 5 min; 5 of 30 over 1.5 h). A fixed worklist min-age
+> would need ≥ 12 h and delay every filing by it. The issue lane instead defers a submission whose
+> `state` is still `processing` (24 h, its own `processing` deferral reason — not the shared
+> `transient_state` rounds) before any POST — and before the
+> no-escalatable pre-filter, which used to DRAIN such a batch terminally because its
+> `state_counts` read only `processing`.
+>
+> ```sql
+> -- the whole outcome picture in one call
+> select * from clone_watch_takedown_stats(30);
+> -- weaponised clones handed to the operator
+> select id, candidate_domain, submitted_to->'vendor_gap' from shopfront_clone_alerts
+>  where submitted_to ? 'vendor_gap' order by (submitted_to->'vendor_gap'->>'escalated_at') desc;
+> ```
+
 The per-URL flow (PRs #701/#702/#703, all default-OFF) that reads
 `GET /submission/{uuid}/urls` (keyless — no API key), drives the lifecycle, and
 files false-negative `report_issue` escalations. Plans:

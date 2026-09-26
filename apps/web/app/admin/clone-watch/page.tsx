@@ -12,6 +12,12 @@ import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
 import EnforcementCasesPanel, {
   type EnforcementCase,
 } from "./EnforcementCasesPanel";
+import {
+  formatDurationMinutes,
+  parseTakedownStats,
+  type TakedownStats,
+} from "@/lib/clone-watch/takedown-stats";
+import { defang, dnsLastLabel } from "@/lib/clone-watch/vendor-gap-escalation";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +37,8 @@ export default async function CloneWatchAdminPage() {
   let pendingBatches: PendingBatch[] = [];
   let weekly: WeeklySnapshot = EMPTY_WEEKLY;
   let brandBreakdown: BrandBreakdownRow[] = [];
-  let takedown: TakedownStats = EMPTY_TAKEDOWN;
+  let takedown: TakedownStats | null = null;
+  let vendorGapRows: VendorGapAdminRow[] = [];
   let disputes: DisputeRow[] = [];
   // Alerts no automated lane will retry (v272, union added v274). Null = not read.
   let stranded: {
@@ -50,6 +57,7 @@ export default async function CloneWatchAdminPage() {
       takedownRes,
       pendingBatchesRes,
       disputesRes,
+      vendorGapRes,
     ] = await Promise.all([
       supabase.rpc("list_clone_alerts_pending_triage", {
         p_limit: 200,
@@ -72,7 +80,21 @@ export default async function CloneWatchAdminPage() {
         .select("id, subject_type, subject, disputant, claim, resolution, created_at, resolved_at")
         .order("created_at", { ascending: false })
         .limit(50),
+      // v329 (#1254, lead's decision c): every alert the reconcile lane
+      // escalated to the operator is listed HERE — the Telegram page names
+      // only the top 10. ~76 rows at first; still weaponised only.
+      supabase
+        .from("shopfront_clone_alerts")
+        .select(
+          "id, candidate_domain, target_brand_normalized, inferred_target_domain, weaponised_at, liveness_last_verdict, submitted_to->vendor_gap, submitted_to->netcraft->>url_state",
+        )
+        .not("submitted_to->vendor_gap", "is", null)
+        .eq("lifecycle_state", "weaponised")
+        .order("weaponised_at", { ascending: false })
+        .limit(500),
     ]);
+    if (vendorGapRes.error) loadErrors.push("vendor-gap escalations");
+    vendorGapRows = (vendorGapRes.data ?? []) as unknown as VendorGapAdminRow[];
     // Each of these legs previously degraded to an empty panel via an
     // `Array.isArray(res.data)` guard — which is true of a FAILED read as well
     // as an empty one, so a broken RPC rendered the KPI row as a quiet zero.
@@ -142,9 +164,7 @@ export default async function CloneWatchAdminPage() {
     if (Array.isArray(brandRes.data)) {
       brandBreakdown = brandRes.data as BrandBreakdownRow[];
     }
-    if (Array.isArray(takedownRes.data) && takedownRes.data[0]) {
-      takedown = takedownRes.data[0] as TakedownStats;
-    }
+    takedown = parseTakedownStats(takedownRes.data);
     if (Array.isArray(pendingBatchesRes.data)) {
       pendingBatches = groupPendingBatches(
         pendingBatchesRes.data as PendingBatchRow[],
@@ -220,6 +240,8 @@ export default async function CloneWatchAdminPage() {
       <WeeklyKpis snapshot={weekly} pendingCount={pendingTotal} />
 
       <TakedownStatsRow stats={takedown} />
+
+      <VendorGapList rows={vendorGapRows} />
 
       <CloneWatchTriage
         initialPending={pending}
@@ -325,50 +347,48 @@ function WeeklyKpis({
   );
 }
 
-interface TakedownStats {
-  window_days: number;
-  takedowns_total: number;
-  median_minutes: number;
-  p90_minutes: number;
-  fastest_minutes: number;
-  slowest_minutes: number;
-}
-
-const EMPTY_TAKEDOWN: TakedownStats = {
-  window_days: 30,
-  takedowns_total: 0,
-  median_minutes: 0,
-  p90_minutes: 0,
-  fastest_minutes: 0,
-  slowest_minutes: 0,
-};
-
-function TakedownStatsRow({ stats }: { stats: TakedownStats }) {
-  if (stats.takedowns_total === 0) {
+// v329 (#1234): each duration is on ONE clock and a null is "not measured",
+// never "0 min" — see lib/clone-watch/takedown-stats.ts. The old tiles
+// subtracted our submitted_at from Netcraft's classification time and showed
+// a median of 0 and a fastest of −2 min.
+function TakedownStatsRow({ stats }: { stats: TakedownStats | null }) {
+  // Only a FAILED read hides the row. A month with zero blocklistings still
+  // shows every tile with its explicit zero and n (#1254 review) — the
+  // weaponised cohort is exactly what matters when Netcraft blocked nothing.
+  if (!stats) {
     return (
       <div className="mb-6 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-500">
-        Netcraft takedown data populates once the first TP-confirmed row clears
-        Netcraft processing. Outcomes are read per-URL by the lifecycle
-        reconciler — see
-        <code className="ml-1 px-1.5 py-0.5 bg-white border border-slate-200 rounded">
-          shopfront-clone-netcraft-reconcile
-        </code>
-        .
+        Takedown stats unavailable — the <code>clone_watch_takedown_stats</code>{" "}
+        read failed (see the load-error band above).
       </div>
     );
   }
-  const fmt = (m: number) =>
-    m < 60 ? `${m} min` : `${(m / 60).toFixed(1)}h`;
+  const fmt = formatDurationMinutes;
+  const d = stats.detectToBlock;
+  const t = stats.triageMinutes;
+  const c = stats.cohort;
   const tiles: Array<{ label: string; value: string }> = [
-    { label: "Takedowns recorded (30d)", value: stats.takedowns_total.toLocaleString() },
-    { label: "Median time-to-takedown", value: fmt(stats.median_minutes) },
-    { label: "P90 time-to-takedown", value: fmt(stats.p90_minutes) },
-    { label: "Fastest", value: fmt(stats.fastest_minutes) },
+    { label: `Blocklisted by Netcraft (${stats.windowDays}d)`, value: stats.blocklisted.toLocaleString() },
+    { label: `Detection → blocklist, median (n=${d?.n ?? 0})`, value: fmt(d?.median ?? null) },
+    { label: `Detection → blocklist, P90 (n=${d?.n ?? 0})`, value: fmt(d?.p90 ?? null) },
+    { label: `Netcraft triage, its own clock (n=${t?.n ?? 0})`, value: fmt(t?.median ?? null) },
   ];
+  // Always rendered: explicit zeros when measured, "—" when the RPC predates
+  // v329 (no cohort columns) — never hidden.
+  const cv = (v: number | undefined) => (c && v !== undefined ? v.toLocaleString() : "—");
+  tiles.push(
+    { label: `Weaponised (${stats.windowDays}d cohort)`, value: cv(c?.weaponised) },
+    { label: "…now blocklisted / offline", value: c ? `${c.blocklisted} / ${c.offline}` : "—" },
+    { label: "…still weaponised (no-threat verdict)", value: c ? `${c.open} (${c.vendorGap})` : "—" },
+    { label: "…escalated to operator", value: cv(c?.escalated) },
+  );
   return (
     <div className="mb-6 bg-white border border-border-light rounded-xl shadow-sm p-4">
       <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400 mb-3">
-        Takedown stats · last {stats.window_days} days
+        Takedown stats · last {stats.windowDays} days
+        {stats.blockedBeforeDetection
+          ? ` · ${stats.blockedBeforeDetection} already blocked before we saw phishing (not counted)`
+          : ""}
       </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {tiles.map((t) => (
@@ -383,6 +403,56 @@ function TakedownStatsRow({ stats }: { stats: TakedownStats }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+interface VendorGapAdminRow {
+  id: number;
+  candidate_domain: string;
+  target_brand_normalized: string | null;
+  inferred_target_domain: string | null;
+  weaponised_at: string | null;
+  liveness_last_verdict: string | null;
+  vendor_gap: { escalated_at?: string; basis?: string } | null;
+  url_state: string | null;
+}
+
+// Every operator escalation (v329), so none exists only in a Telegram message.
+function VendorGapList({ rows }: { rows: VendorGapAdminRow[] }) {
+  return (
+    <div className="mb-6 bg-white border border-border-light rounded-xl shadow-sm p-4">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400 mb-3">
+        Escalated to operator · Netcraft won&apos;t act · still weaponised ({rows.length})
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-xs text-slate-500">None open.</p>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="text-left text-slate-400">
+            <tr>
+              <th className="py-1">Domain</th>
+              <th>Brand</th>
+              <th>Netcraft</th>
+              <th>Basis</th>
+              <th>DNS (last read)</th>
+              <th>Escalated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100">
+                <td className="py-1 font-mono">{defang(r.candidate_domain)}</td>
+                <td>{r.target_brand_normalized ?? r.inferred_target_domain ?? "—"}</td>
+                <td>{r.url_state ?? "—"}</td>
+                <td>{r.vendor_gap?.basis ?? "—"}</td>
+                <td>{dnsLastLabel(r.liveness_last_verdict).replace(/^DNS: /, "")}</td>
+                <td>{r.vendor_gap?.escalated_at?.slice(0, 10) ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

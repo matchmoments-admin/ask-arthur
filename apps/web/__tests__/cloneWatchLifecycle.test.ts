@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLONE_LIFECYCLE_STATES,
   LIFECYCLE_EDGES,
+  TERMINAL_EXITS,
   TERMINAL_STATES,
   canTransition,
   isTerminal,
@@ -29,9 +30,18 @@ describe("clone lifecycle spec", () => {
     // taken_down and dormant are where alerts go to stop moving. An outbound
     // edge here would mean a resolved clone could silently re-enter the
     // enforcement lanes.
+    // ONE sanctioned exception (v329 review): an offline weaponised clone that
+    // resolves again re-enters as weaponised. Pinned exactly, so a second exit
+    // cannot slip in under it. Go-red: adding a `taken_down → weaponised` edge
+    // fails this test (verified 2026-09-26).
     for (const t of TERMINAL_STATES) {
-      expect(nextStates(t), `${t} should be terminal`).toEqual([]);
+      const exits = nextStates(t);
+      if (t === "dormant") expect(exits).toEqual(["weaponised"]);
+      else expect(exits, `${t} should be terminal`).toEqual([]);
     }
+    expect(TERMINAL_EXITS.map((e) => `${e.from}->${e.to}:${e.trigger}`)).toEqual([
+      "dormant->weaponised:liveness_sweep",
+    ]);
   });
 
   it("weaponised only ever moves forward, never back to a benign state", () => {
@@ -39,7 +49,9 @@ describe("clone lifecycle spec", () => {
     // complexity on, and that classifyByUrlState mirrors. A weaponised clone
     // that a later vendor pass grades benign must NOT become `declined` again
     // — that would erase the observation the escalation lane is built on.
-    expect(nextStates("weaponised")).toEqual(["taken_down"]);
+    // v329 added the second exit: witnessed offline → dormant (never
+    // taken_down, which every reader renders as "actioned by Netcraft").
+    expect(nextStates("weaponised").sort()).toEqual(["dormant", "taken_down"]);
     expect(canTransition("weaponised", "declined")).toBe(false);
     expect(canTransition("weaponised", "monitoring")).toBe(false);
     expect(canTransition("weaponised", "detected")).toBe(false);

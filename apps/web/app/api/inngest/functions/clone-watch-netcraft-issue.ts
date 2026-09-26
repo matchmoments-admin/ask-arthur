@@ -26,6 +26,7 @@ import {
 } from "@/lib/clone-watch/netcraft-issue-report";
 import {
   fetchNetcraftSubmissionUrls,
+  isSubmissionProcessing,
   NETCRAFT_URL_STATE,
   selectFalseNegativeCandidates,
   type PendingAlert,
@@ -116,6 +117,7 @@ const {
   deadRecheckMs: DEAD_RECHECK_MS,
   unavailableRecheckMs: UNAVAILABLE_RECHECK_MS,
   transientRecheckMs: TRANSIENT_RECHECK_MS,
+  processingRecheckMs: PROCESSING_RECHECK_MS,
 } = NETCRAFT_DEFERRAL.issue;
 // Autobrake: trip on this many permanent 4xx rejects in a run, OR >50% of live
 // POSTs rejected once there are at least AUTOBRAKE_MIN_LIVE_POSTS of them.
@@ -296,6 +298,8 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         hasIssues: 0,
         transientErrors: 0,
         notYetDeferred: 0,
+        // #1148: uuids Netcraft was still processing — deferred, never POSTed.
+        processingDeferred: 0,
         permanentRejects: 0,
         drained: 0,
         livePosts: 0,
@@ -396,6 +400,26 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             status: fetched.status,
           });
           continue; // transient — retried next run (no stamp)
+        }
+
+        // #1148 — Netcraft has not finished this submission. Checked BEFORE
+        // the no-escalatable pre-filter: a still-processing batch's
+        // state_counts reads only `processing`, which that filter drained as a
+        // terminal `no_escalatable_state` before Netcraft had graded anything.
+        // report_issue would 400 "wait until fully processed" anyway — the one
+        // body behind every autobrake trip this lane has had (#1157). Its OWN
+        // deferral reason (`processing`, 24h, bounded rounds), not
+        // `transient_state`, so the two causes never drain each other's
+        // rounds and stay distinguishable in `rounds`; processing measured 0 min – 12.1 h, so the next daily run sees it
+        // done. No POST, no liveness probe, no stamp that could drain it.
+        if (isSubmissionProcessing(fetched.submissionState)) {
+          counts.processingDeferred++;
+          if (!dryRun) {
+            await step.run(`defer-processing-${uuid}`, () =>
+              bulkDefer(allIds, "processing", PROCESSING_RECHECK_MS),
+            );
+          }
+          continue;
         }
 
         // state_counts pre-filter said the batch has no escalatable state.

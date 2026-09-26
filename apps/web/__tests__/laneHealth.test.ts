@@ -623,6 +623,38 @@ describe("classifyLaneHealth", () => {
     expect(classifyLaneHealth(noReconcile, { now: NOW })).toEqual([]);
   });
 
+  // v329 review (#1254): the weaponised outcome steps soft-fail into FIELDS,
+  // so without this shape a missing v329 or a broken RPC was silent forever.
+  // Go-red: `silentZero: () => false` (the pre-review shape) fails all three
+  // "pages" cases.
+  it("reconcile pages on a soft-failed v329 step, not on a quiet worklist", () => {
+    const base = healthyRows().filter((r) => r.operation !== "lifecycle_reconcile");
+    const judge = (outcome: LaneOutcome["shopfront-clone-netcraft-reconcile"]) =>
+      classifyLaneHealth(
+        [...base, outcomeRow("shopfront-clone-netcraft-reconcile", 3, 0, outcome)],
+        { now: NOW },
+      );
+    const paged = [
+      expect.objectContaining({
+        lane: "shopfront-clone-netcraft-reconcile",
+        kind: "silent_zero",
+      }),
+    ];
+    // v329 not applied: the list RPC does not exist.
+    expect(
+      judge({ uuids: 0, liveness_checked: null, liveness_error: "list: function not found" }),
+    ).toEqual(paged);
+    // The operator page failed to send (Telegram 5xx) — nothing was stamped.
+    expect(
+      judge({ uuids: 0, liveness_checked: 3, vendor_gap_escalated: 0, vendor_gap_error: "page: send_failed" }),
+    ).toEqual(paged);
+    // Work was due and nothing was read.
+    expect(judge({ uuids: 0, liveness_due: 142, liveness_checked: 0 })).toEqual(paged);
+    // Healthy: work due and read; or nothing due at all.
+    expect(judge({ uuids: 0, liveness_due: 142, liveness_checked: 142, vendor_gap_escalated: 50 })).toEqual([]);
+    expect(judge({ uuids: 0, liveness_due: 0, liveness_checked: 0 })).toEqual([]);
+  });
+
   it("ignores rows for features outside the roster", () => {
     const rows = [
       ...healthyRows(),

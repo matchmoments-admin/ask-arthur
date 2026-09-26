@@ -402,8 +402,10 @@ export default function BrandStewardshipReport({
                             — <strong>
                               {cloneDetections.weaponisedAfterDecline}
                             </strong>{" "}
-                            had earlier been graded &ldquo;no&nbsp;threat&rdquo;,
-                            confirming that &ldquo;no&nbsp;threat&rdquo; did not
+                            {/* v329: from timestamps, not a subset of the
+                                current-state count above. */}
+                            lookalikes served phishing after being graded
+                            &ldquo;no&nbsp;threat&rdquo;, confirming that &ldquo;no&nbsp;threat&rdquo; did not
                             mean safe
                           </>
                         )}
