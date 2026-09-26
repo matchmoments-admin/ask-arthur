@@ -1,3 +1,4 @@
+import { describeTotalMove, threeMonthLine } from "@/lib/clone-watch/trend-copy";
 import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
 import {
   buildClassifierCaveat,
@@ -195,18 +196,14 @@ export function generateCloneWatchCaption(
   const scamwatchCta = `Got a "${b1}" or "${b2}" text sitting in your phone right now? Report it — to us and to Scamwatch. Every report sharpens next month's map.`;
 
   // ── Series hook: month-one baseline vs an honest MoM delta ────────────────
-  let seriesLine: string;
-  if (!card.mom.available) {
-    seriesLine = `This is month one. Next month you'll see whether ${card.total} is the floor or the trend.`;
-  } else {
-    const { totalPct, priorTotal, priorLabel } = card.mom;
-    // "flat" when the move rounds to <1% either way, so we never print "up 0%".
-    const flat = card.mom.totalDelta === 0 || totalPct == null || totalPct === 0;
-    const dir = card.mom.totalDelta > 0 ? "up" : "down";
-    seriesLine = flat
-      ? `That's essentially flat on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`
-      : `That's ${dir} ${Math.abs(totalPct)}% on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`;
-  }
+  // Worded by trend-copy.ts (#1226) — the ONE home for "more or less than
+  // last month", shared with the public page.
+  const move = describeTotalMove(card.mom);
+  const trend3 = threeMonthLine(card.mom);
+  const seriesLine =
+    move === null
+      ? `This is month one. Next month you'll see whether ${card.total} is the floor or the trend.`
+      : `${move}${trend3 ? ` Three months: ${trend3}.` : ""} We publish this every month — the trend is the story.`;
 
   // ── Vendor outcomes (F5) — only once the month's cohort has witnessed
   // gradings; all-zero months keep the pre-F5 caption shape exactly.

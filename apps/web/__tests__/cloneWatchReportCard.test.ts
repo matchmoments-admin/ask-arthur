@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { LEXICAL_MATCHER_VERSION } from "@askarthur/shopfront-glue";
+import type { FrozenMonth } from "@/lib/clone-watch/report-card";
+import { foldFrozenMonths } from "@/lib/clone-watch/monthly-brand-store";
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 import type { BrandCoverage } from "@/lib/clone-watch/brand-coverage";
 import { monthWindow, priorWindow } from "@/lib/clone-watch/month-window";
@@ -133,7 +136,8 @@ describe("buildReportCard — the month-on-month gate", () => {
 });
 
 describe("buildReportCard — the coverage gate feeds the ladder", () => {
-  const rows = clones("bonds.com.au", 28, "cur");
+  // 16 -> 40 (+3.2σ): beyond counting noise, so a mover (#1226).
+  const rows = clones("bonds.com.au", 40, "cur");
   const priorRows = clones("bonds.com.au", 16, "pri");
 
   it("publishes a mover when the brand was monitored across both months", () => {
@@ -148,7 +152,7 @@ describe("buildReportCard — the coverage gate feeds the ladder", () => {
       kind: "mover",
       brand: "bonds.com.au",
       priorClones: 16,
-      delta: 12,
+      delta: 24,
     });
   });
 
@@ -250,5 +254,125 @@ describe("buildTrendRows folds the SAME rows the card does", () => {
     expect(byBrand["apple.com"]).toBe(false);
     // Gov is not a "brand" for ranking purposes, on either surface.
     expect(byBrand["servicesaustralia.gov.au"]).toBe(false);
+  });
+});
+
+// ── #1226 — honest month-over-month ─────────────────────────────────────────
+
+const frozen = (byBrand: Record<string, number>, over: Partial<FrozenMonth> = {}): FrozenMonth => {
+  const m = new Map(Object.entries(byBrand));
+  return {
+    byBrand: m,
+    total: [...m.values()].reduce((a, b) => a + b, 0),
+    brands: [...m.values()].filter((n) => n > 0).length,
+    matcherVersion: LEXICAL_MATCHER_VERSION,
+    sweptDomains: 2_100_000,
+    ...over,
+  };
+};
+
+describe("buildReportCard — month-over-month reads the FROZEN prior month (#1226)", () => {
+  /*
+   * Go-red record:
+   *   - "compares against what July PUBLISHED": use priorByBrand even when a
+   *     frozen month exists → prior 16 (the live recount) instead of 30.
+   *   - "withholds every delta across a matcher change": drop `methodChanged`
+   *     from classifyTrend's input → bonds reads claimable.
+   *   - "flags a feed-volume shift": drop the FEED_SHIFT_THRESHOLD check →
+   *     feedShift is non-null at +5%.
+   */
+  const cov = [coveredThroughout("bonds.com.au")];
+
+  it("compares against what July PUBLISHED, not today's recount of July", () => {
+    const card = buildReportCard(
+      inputs({
+        rows: clones("bonds.com.au", 60, "cur"),
+        priorRows: clones("bonds.com.au", 16, "pri"), // re-triaged since
+        coverage: cov,
+        priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 30 })]]),
+        sweptDomains: 2_100_000,
+      }),
+    );
+    expect(card.mom).toMatchObject({ priorSource: "store", priorTotal: 30, totalDelta: 30 });
+    expect(card.brandTrends.claimable[0]).toMatchObject({ brand: "bonds.com.au", priorClones: 30, delta: 30 });
+  });
+
+  it("falls back to the live recount, and says so, when no frozen month exists", () => {
+    const card = buildReportCard(
+      inputs({ rows: clones("bonds.com.au", 60, "cur"), priorRows: clones("bonds.com.au", 16, "pri"), coverage: cov }),
+    );
+    expect(card.mom.priorSource).toBe("live");
+    expect(card.mom.priorTotal).toBe(16);
+  });
+
+  it("withholds every delta across a matcher change", () => {
+    const card = buildReportCard(
+      inputs({
+        rows: clones("bonds.com.au", 60, "cur"),
+        coverage: cov,
+        priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 20 }, { matcherVersion: "v3" })]]),
+      }),
+    );
+    expect(card.mom.methodChanged).toBe(true);
+    expect(card.mom.available).toBe(false);
+    expect(card.brandTrends.claimable).toEqual([]);
+    expect(card.brandTrends.excluded.methodChanged).toBe(1);
+  });
+
+  it("flags a feed-volume shift over 20%, and not one under", () => {
+    const at = (swept: number) =>
+      buildReportCard(
+        inputs({
+          rows: clones("bonds.com.au", 60, "cur"),
+          coverage: cov,
+          priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 30 })]]),
+          sweptDomains: swept,
+        }),
+      ).mom.feedShift;
+    expect(at(2_205_000)).toBeNull(); // +5%
+    expect(at(1_400_000)).toEqual({ priorSwept: 2_100_000, currentSwept: 1_400_000, pct: -33 });
+  });
+
+  it("carries a three-month series; an unpublished month is null, never 0", () => {
+    const card = buildReportCard(
+      inputs({
+        rows: clones("bonds.com.au", 60, "cur"),
+        coverage: cov,
+        priorStore: new Map([
+          ["2026-07-01", frozen({ "bonds.com.au": 30 })],
+          ["2026-06-01", frozen({ "bonds.com.au": 12 })],
+        ]),
+      }),
+    );
+    expect(card.brandTrends.claimable[0]!.series).toEqual([12, 30, 60]);
+    expect(card.mom.series!.map((p) => p.total)).toEqual([12, 30, 60]);
+    const noJune = buildReportCard(
+      inputs({ rows: clones("bonds.com.au", 60, "cur"), coverage: cov, priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 30 })]]) }),
+    );
+    expect(noJune.mom.series![0]!.total).toBeNull();
+  });
+
+  it("marks the total 'noise' within 2σ and gives no percentage below the floor", () => {
+    const card = buildReportCard(
+      inputs({ rows: clones("bonds.com.au", 33, "cur"), coverage: cov, priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 30 })]]) }),
+    );
+    expect(card.mom.noise).toBe(true);
+    const small = buildReportCard(
+      inputs({ rows: clones("bonds.com.au", 8, "cur"), coverage: cov, priorStore: new Map([["2026-07-01", frozen({ "bonds.com.au": 3 })]]) }),
+    );
+    expect(small.mom.totalPct).toBeNull();
+  });
+});
+
+describe("foldFrozenMonths", () => {
+  it("sums per month, lower-cases brands, counts only targeted brands, keeps provenance", () => {
+    const got = foldFrozenMonths([
+      { period_month: "2026-07-01", brand: "Bonds.com.au", clones: 5, matcher_version: "v4", swept_domains: "2100000" },
+      { period_month: "2026-07-01", brand: "westpac.com.au", clones: 0, matcher_version: "v4", swept_domains: "2100000" },
+      { period_month: "2026-06-01", brand: "bonds.com.au", clones: 2, matcher_version: "v4", swept_domains: null },
+    ]);
+    expect(got.get("2026-07-01")).toMatchObject({ total: 5, brands: 1, matcherVersion: "v4", sweptDomains: 2_100_000 });
+    expect(got.get("2026-07-01")!.byBrand.get("bonds.com.au")).toBe(5);
+    expect(got.get("2026-06-01")!.sweptDomains).toBeNull();
   });
 });

@@ -11,6 +11,8 @@ import {
 import { monthWindow, priorWindow } from "@/lib/clone-watch/month-window";
 import type { BrandCoverage } from "@/lib/clone-watch/brand-coverage";
 import {
+  readFrozenMonths,
+  readSweptDomains,
   takedownEventsFromRows,
   type TakedownEvent,
 } from "@/lib/clone-watch/monthly-brand-store";
@@ -228,6 +230,15 @@ export async function loadCardInputs(month?: string): Promise<CardInputs> {
 
   const takedownEvents = await fetchTakedownEvents(sb);
 
+  // #1226: the two earlier months as PUBLISHED (frozen store), and this
+  // month's feed denominator for the feed-shift caveat. Both degrade to
+  // null — the card then says its prior is a live recount / omits the caveat.
+  const twoBack = priorWindow(prevWin.startIso);
+  const [priorStore, sweptDomains] = await Promise.all([
+    readFrozenMonths(sb, [prevWin.periodMonth, twoBack.periodMonth]),
+    readSweptDomains(sb, window),
+  ]);
+
   return {
     window,
     priorWindow: prevWin,
@@ -237,6 +248,8 @@ export async function loadCardInputs(month?: string): Promise<CardInputs> {
     priorSpotlightBrand,
     watchlistFallbackSize: AU_BRAND_WATCHLIST.length,
     takedownEvents,
+    priorStore,
+    sweptDomains,
   };
 }
 

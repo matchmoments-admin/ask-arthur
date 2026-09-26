@@ -52,8 +52,11 @@ import {
   type TargetingIntel,
 } from "@/lib/clone-watch/targeting-intelligence";
 import {
+  NOISE_Z,
+  TREND_FLOOR,
   brandsCoveredForMonth,
   classifyTrend,
+  moveSigma,
   domainCoveredForMonth,
   domainsWatchedInMonth,
   summariseTrendExclusions,
@@ -63,7 +66,7 @@ import {
 import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 import { SUPER_FUND_DOMAINS } from "@/lib/clone-watch/brand-display";
 import { pickSpotlight, type Spotlight } from "@/lib/clone-watch/spotlight";
-import type { MonthWindow } from "@/lib/clone-watch/month-window";
+import { priorWindow, type MonthWindow } from "@/lib/clone-watch/month-window";
 import {
   brandKeyForDomain,
   classifierVersionByBrand,
@@ -125,9 +128,25 @@ export interface MonthOverMonth {
   priorBrands: number;
   /** current.total - prior.total (can be negative). */
   totalDelta: number;
-  /** Rounded percentage change vs prior; null when prior total is 0. */
+  /** Rounded percentage change vs prior; null when prior total is 0, or
+   *  when either month is below TREND_FLOOR. */
   totalPct: number | null;
   brandsDelta: number;
+  // ── #1226 — honest month-over-month ──────────────────────────────────────
+  /** Where the prior figure came from: the prior month's FROZEN store (what
+   *  was published) or a live recount (drifts as alerts are re-triaged). */
+  priorSource?: "store" | "live";
+  /** |Δ| / √(this + last) for the total. */
+  sigma?: number;
+  /** Within counting noise — say "about the same", never up/down. */
+  noise?: boolean;
+  /** The lexical matcher changed between the months: no delta is honest. */
+  methodChanged?: boolean;
+  /** The NRD feed swept a materially different volume (>20%): part of any
+   *  change is feed size, not attackers. null = comparable or unknown. */
+  feedShift?: { priorSwept: number; currentSwept: number; pct: number } | null;
+  /** Totals for the last three months, oldest first; null = not published. */
+  series?: Array<{ label: string; total: number | null }>;
 }
 
 export interface CloneWatchReportCard {
@@ -283,7 +302,15 @@ function sumMetric(
 
 export interface BrandTrendGate {
   /** Brands whose movement may be published, largest rise first. */
-  claimable: Array<{ brand: string; clones: number; priorClones: number; delta: number; pct: number | null }>;
+  claimable: Array<{
+    brand: string;
+    clones: number;
+    priorClones: number;
+    delta: number;
+    pct: number | null;
+    /** Three months oldest first; null = month not published (#1226). */
+    series?: Array<number | null>;
+  }>;
   /** Why the rest were withheld — the caveat's numbers. */
   excluded: ReturnType<typeof summariseTrendExclusions>;
   /**
@@ -420,7 +447,31 @@ export interface CardInputs {
   stockSnapshots?: StockSnapshotRow[] | null;
   /** NRD domains swept in the month (nrd_daily_ingest telemetry). */
   sweptDomains?: number | null;
+  /**
+   * The FROZEN monthly store for earlier months, keyed by period_month
+   * ("YYYY-MM-01") — the prior month and the one before (#1226). The card
+   * compares against what was PUBLISHED: the live recount of last month
+   * drifts as alerts are re-triaged, so the same edition read twice could
+   * report two different deltas. Absent / null / a missing month → the live
+   * recount (priorRows) is used and `mom.priorSource` says so.
+   */
+  priorStore?: Map<string, FrozenMonth> | null;
 }
+
+/** One published month of the store, as the MoM comparison reads it. */
+export interface FrozenMonth {
+  /** clones per brand (targeted brands; a missing brand had 0). */
+  byBrand: Map<string, number>;
+  /** Sum of clones — the same per-brand sum `total` uses. */
+  total: number;
+  /** Brands with clones > 0. */
+  brands: number;
+  matcherVersion: string | null;
+  sweptDomains: number | null;
+}
+
+/** Feed-volume change above which a delta carries a "feed changed" caveat. */
+export const FEED_SHIFT_THRESHOLD = 0.2;
 
 
 /** The published card: one pure fold over `CardInputs`. */
@@ -431,6 +482,15 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
 
   const byBrand = aggregateClonesByDomain(rows);
   const priorByBrand = aggregateClonesByDomain(priorRows);
+  // #1226: last month as PUBLISHED, when it was.
+  const priorFrozen = input.priorStore?.get(prevWin.periodMonth) ?? null;
+  const priorClonesOf = (brand: string): number =>
+    priorFrozen
+      ? (priorFrozen.byBrand.get(brand) ?? 0)
+      : (priorByBrand.get(brand)?.detected ?? 0);
+  const methodChanged =
+    priorFrozen?.matcherVersion != null &&
+    priorFrozen.matcherVersion !== LEXICAL_MATCHER_VERSION;
 
   let total = 0;
   let reportedToNetcraft = 0;
@@ -438,7 +498,9 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
     total += m.detected;
     reportedToNetcraft += m.netcraftReported;
   }
-  const prior = totalsOf(priorByBrand);
+  const prior = priorFrozen
+    ? { total: priorFrozen.total, brands: priorFrozen.brands }
+    : totalsOf(priorByBrand);
 
   // Coverage keyed by brand domain — the key byBrand uses. ALL rows per domain,
   // never a merged window (see brandsCoveredForMonth).
@@ -477,22 +539,36 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   const priorYm = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
   priorYm.setUTCMonth(priorYm.getUTCMonth() - 1);
   const priorPeriod = priorYm.toISOString().slice(0, 7);
+  const twoBack = priorWindow(prevWin.startIso);
+  const twoBackFrozen = input.priorStore?.get(twoBack.periodMonth) ?? null;
   const verdicts: TrendVerdict[] = [];
   const verdictByBrand = new Map<string, TrendVerdict>();
   const claimable: BrandTrendGate["claimable"] = [];
   for (const [brand, m] of byBrand) {
-    const priorClones = priorByBrand.get(brand)?.detected ?? 0;
+    const priorClones = priorClonesOf(brand);
     const v = classifyTrend({
       currentClones: m.detected,
       priorClones,
       currentMonth: periodMonth.slice(0, 7),
       priorMonth: priorPeriod,
       coverage: coverageByBrand.get(brand),
+      methodChanged,
     });
     verdicts.push(v);
     verdictByBrand.set(brand, v);
-    if (v.kind === "claimable" && v.delta !== 0) {
-      claimable.push({ brand, clones: m.detected, priorClones, delta: v.delta, pct: v.pct });
+    if (v.kind === "claimable") {
+      claimable.push({
+        brand,
+        clones: m.detected,
+        priorClones,
+        delta: v.delta,
+        pct: v.pct,
+        series: [
+          twoBackFrozen ? (twoBackFrozen.byBrand.get(brand) ?? 0) : null,
+          priorClones,
+          m.detected,
+        ],
+      });
     }
   }
   claimable.sort((a, b) => b.delta - a.delta || a.brand.localeCompare(b.brand));
@@ -503,17 +579,40 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
     publishable: coverageReadOk && coverageByBrand.size > 0,
   };
 
+  const totalSigma = moveSigma(total, prior.total);
+  const priorSwept = priorFrozen?.sweptDomains ?? null;
+  const currentSwept = input.sweptDomains ?? null;
+  const feedShift =
+    priorSwept && currentSwept && Math.abs(currentSwept / priorSwept - 1) > FEED_SHIFT_THRESHOLD
+      ? {
+          priorSwept,
+          currentSwept,
+          pct: Math.round((currentSwept / priorSwept - 1) * 100),
+        }
+      : null;
   const mom: MonthOverMonth = {
-    available: momAvailable,
+    // A matcher change makes the total incomparable, like a missing month.
+    available: momAvailable && !methodChanged,
     priorLabel: prevWin.label,
     priorTotal: prior.total,
     priorBrands: prior.brands,
     totalDelta: total - prior.total,
+    // Same floor rule as a brand's percentage (TREND_FLOOR in both months).
     totalPct:
-      prior.total > 0
+      prior.total >= TREND_FLOOR && total >= TREND_FLOOR
         ? Math.round(((total - prior.total) / prior.total) * 100)
         : null,
     brandsDelta: byBrand.size - prior.brands,
+    priorSource: priorFrozen ? "store" : "live",
+    sigma: Math.round(totalSigma * 10) / 10,
+    noise: totalSigma < NOISE_Z,
+    methodChanged,
+    feedShift,
+    series: [
+      { label: twoBack.label, total: twoBackFrozen ? twoBackFrozen.total : null },
+      { label: prevWin.label, total: priorFrozen || prior.total > 0 ? prior.total : null },
+      { label, total },
+    ],
   };
 
   // Registrar leaderboard: reuse the digest's rollup (single source of truth),
@@ -548,7 +647,7 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
   // brain and needed to be reachable by a test without a Supabase client.
   const spotlight = pickSpotlight({
     auOrFund,
-    priorClonesOf: (brand) => priorByBrand.get(brand)?.detected ?? 0,
+    priorClonesOf,
     // BOTH comparative rungs must pass the coverage gate, not merely the volume
     // thresholds. Without this the gate is decorative: it was fully tested, its
     // caveat was printed in the caption, and the publisher beside it applied

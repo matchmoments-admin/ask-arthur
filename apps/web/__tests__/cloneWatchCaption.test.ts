@@ -73,7 +73,7 @@ const JUNE: CloneWatchReportCard = {
   },
   brandTrends: {
     claimable: [],
-    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
+    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0, methodChanged: 0 },
     publishable: true,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
@@ -195,14 +195,14 @@ describe("generateCloneWatchCaption", () => {
     expect(c.body).not.toContain("2. ");
   });
 
-  it("MoM that rounds to 0%: 'essentially flat', never 'up 0%'", () => {
+  it("MoM within counting noise: 'about the same', never 'up 0%' (#1226)", () => {
     const barelyUp: CloneWatchReportCard = {
       ...JULY,
       total: 1001,
       mom: { available: true, priorLabel: "June 2026", priorTotal: 1000, priorBrands: 129, totalDelta: 1, totalPct: 0, brandsDelta: 0 },
     };
     const c = generateCloneWatchCaption(barelyUp);
-    expect(c.body).toContain("That's essentially flat on June 2026 (1000 → 1001)");
+    expect(c.body).toContain("That's about the same as June 2026 (1000 → 1001)");
     expect(c.body).not.toMatch(/up 0%|down 0%/);
   });
 
@@ -459,7 +459,7 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
         coverageStarted: 7,
         coverageEnded: 2,
         belowFloor: 108,
-        unknown: 3,
+        unknown: 3, methodChanged: 0,
       },
       publishable: true,
     },
