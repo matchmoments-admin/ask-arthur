@@ -1842,6 +1842,72 @@ curl -X POST "https://inn.gs/e/$KEY" -H "Content-Type: application/json" \
   -d '{"name":"report/brand-stewardship.manual-trigger.v1","data":{"periodMonth":"2026-08-01"}}'
 ```
 
+### Readiness scorecard — the gate before any brand is contacted (v335, #1237)
+
+Founder decision #1227 (2026-09-26): no brand is contacted until Clone Watch is
+stable AND accurate, **measured**, holding for consecutive months; then
+AU/curated brands with monthly batch approval, in shadow until #371.
+`clone_watch_readiness` holds one row per closed month; the send paths read it.
+
+**Where it is computed.** `clone-watch-report-summary`, step
+`compute-readiness`, on the 1st at 11:00 UTC for the month just closed — after
+the store is frozen and ten hours after the month-end liveness run. No new cron.
+**On demand:** send `clone-watch/report-summary.manual-trigger.v1` with
+`{ "periodMonth": "YYYY-MM" }`. On a frozen month that restates nothing but the
+scorecard row (upsert). A failed compute leaves no row → the gate reads NOT ready.
+
+**The seven components** (thresholds: `READINESS_THRESHOLDS` in
+`apps/web/lib/clone-watch/readiness.ts` — the ONE home; founder-adjustable; each
+row records the thresholds in force when computed):
+
+| Component            | Source (existing)                                                                                                                           | Pass when                                                                       | Insufficient when                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Weaponised precision | human `tp_confirmed`/`fp` on weaponised or likely_phishing alerts, `triage_at` in month (`clone_watch_readiness_inputs`)                    | ≥ 0.95                                                                          | n < 10                                                               |
+| Lookalike FP share   | human fp ÷ all human-triaged (tp/fp/needs_investigation) in month; classifier reject share shown as context                                 | ≤ 0.25                                                                          | n < 10                                                               |
+| Not-a-clone FN rate  | `clone_watch_not_a_clone_audit_summary()` cohorts first sampled before month end                                                            | ≤ 0.05                                                                          | no sample drawn, or scanned < 30                                     |
+| Lane health          | `alert_delivery_log` health-digest rows: days with `silent_zero`/`absent`/`brake_unknown`/`cap_bound`/`quota_exhausted` (`braked` excluded) | ≤ 2 problem days                                                                | measured days < 80% of the month (fails early once problem days > 2) |
+| Report correctness   | frozen `clone_watch_monthly_brand_stats.clones` vs `loadCardInputs` → `buildTrendRows` recount                                              | max per-brand diff ≤ 1 and ≤ 2% of brands differ                                | month not frozen / unreadable                                        |
+| Takedown validity    | `clone_watch_takedown_stats(days-in-month)` (v329), trailing window ending at compute time                                                  | no negative duration in any column, every median present exactly when its n > 0 | unreadable, or a pre-v329 row (no per-clock n)                       |
+| Month-end stock      | `clone_liveness_runs` (v325)                                                                                                                | completed, unverified ≤ 20% of stock                                            | no completed run                                                     |
+
+`ready` = all seven pass (enforced by CHECK `ready_iff_all_pass`).
+**Insufficient ≠ fail**: the admin page labels it "Insufficient data" (go
+measure), but it keeps the month not ready.
+
+**Human verdicts** are `triage_status` set through the admin triage route.
+`triage_by` is NULL for every row in prod (HMAC admin), so machine writers are
+excluded by note marker: `auto-park:`, `auto-triage:`, `[matcher-v4-audit]`. A
+new machine writer MUST use a note marker and be added to v335's exclusion list.
+
+**Lane-health record.** The daily health digest (`/api/cron/health-digest`) writes
+one `alert_delivery_log` row per firing; its `metadata.lane_problems` (strings
+`kind:lane`) is the durable per-day record — on issue days since 2026-09-18, and
+on all-clear days as an explicit `[]` since #1237. A day with no row, or a row
+without the key, is NOT measured (never "healthy").
+
+**The gate** (`readReadinessGate` → `evaluateReadinessGate`): a real send needs
+`ready = true` for each of the last `READINESS_REQUIRED_MONTHS` (2) closed
+months (UTC). A missing month, a not-ready month or an unreadable table refuses.
+Enforced at:
+
+- `apps/web/app/api/admin/brand-stewardship/[id]/send/route.ts` — real sends
+  only (after `FF_BRAND_STEWARDSHIP_SEND`); the `BRAND_STEWARDSHIP_SHADOW_RECIPIENT`
+  shadow path is unchanged and stays available.
+- `apps/web/app/api/admin/clone-watch/batches/[batchId]/send/route.ts` — every
+  send (it mails the real contact; there is no shadow mode). 403 `not_ready`.
+- `clone-watch-notify-brand-prepare` — auto-send = `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND`
+  AND the gate (`check-readiness` step); otherwise batches are prepared for
+  manual approval, which runs the same gate. The lane is parked (#1230).
+
+Not gated: `/api/admin/brand-outreach/send` (the founder's hand-composed pilot
+outreach — a sales email, not a Clone Watch report) and onward abuse reports.
+
+**Measured 2026-09-27 (read-only, prod):** August — not ready (precision,
+fp share, FN rate, lane health insufficient; report diff 0 of 148 brands,
+takedown valid, stock 5.1% unverified pass). September to date — not ready
+(lane health FAIL: 5 problem days in 8 measured; human triage 0 since
+2026-06-06; no audit sample; month not yet frozen / stock not yet run).
+
 ### Weekly digest
 
 Sun 10:00 UTC — `shopfront-clone-weekly-digest` Telegram-pages admin with KPI summary + LinkedIn-post draft (anonymised; never names a specific operator domain). Operator copy-pastes the draft to LinkedIn manually for v1.

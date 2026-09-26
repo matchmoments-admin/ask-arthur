@@ -201,6 +201,23 @@ The
 rate is derived (`clone_watch_not_a_clone_audit_summary`), not stored. Not the
 same thing as the **Vendor Gap**, which measures Netcraft, not our classifier.
 
+**Readiness scorecard** (`clone_watch_readiness`, v335, #1237):
+The measured answer to "is Clone Watch stable and accurate enough to contact
+brands?" (founder decision #1227). One row per closed month, seven components,
+each read from an existing source and scored `pass` / `fail` / `insufficient`
+against a threshold in `apps/web/lib/clone-watch/readiness.ts`: weaponised
+precision (human verdicts), lookalike false-positive share, the Not-a-clone
+Audit's false-negative rate, lane-health problem days, monthly report
+correctness (frozen store vs live recount), takedown-metric validity and
+month-end stock measured. The month is **ready** only when all seven pass
+(a SQL CHECK). _Insufficient_ is not _fail_ — it asks for measurement, not a
+fix — but it still keeps the month not ready. The **readiness gate**: a real
+brand send (stewardship report, brand-notify batch or auto-send) needs the last
+`READINESS_REQUIRED_MONTHS` closed months ready; a missing or unreadable
+scorecard is not ready. It is checked in addition to the send's own flag and
+the #371 legal sign-off, never instead of them.
+_Avoid_: "health score", "go-live check", "KPI".
+
 **AU Brand Watchlist**:
 The static `BrandEntry[]` array at `packages/shopfront-glue/src/au-brand-watchlist.ts` — ~50 Australian retail, bank, telco, and logistics brand names + their `legitimate_domains` exclusion lists. Per-entry: `{ brand: string, legitimate_domains: string[] }`. Used by Layer 0 (`lexicalMatch()` runs every newly-registered domain against the full list) and reused by Phase A (unioned with installed `shopfront_shops` brand names) and Phase B (corpus-mining adds dynamic patterns to the same matcher). The file IS the seam — opt-out and lawyer-vetting happen by editing this file, not by adding a feature flag.
 
