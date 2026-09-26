@@ -96,7 +96,11 @@ export async function getDomainCreatedDate(
 
   const whois = await lookupWhois(domain, { priority: "interactive" });
 
-  if (supabase) {
+  // #1253: an unanswered lookup (quota guard, non-200, no key) is NOT a cache
+  // entry. Writing it would null any registrar/created date already on the
+  // domain's rows AND stamp whois_lookup_at, so the read above would serve
+  // that null as "fresh" for CACHE_MAX_AGE_MS (180 days).
+  if (supabase && !whois.deferral) {
     // Best-effort write-back onto rows that already exist for this domain.
     // Never INSERT — a domain with no scam_urls row was never reported.
     // Awaited, not fire-and-forget: getDomainCreatedDate runs inside an

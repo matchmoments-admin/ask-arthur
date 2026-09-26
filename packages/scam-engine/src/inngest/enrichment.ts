@@ -64,14 +64,23 @@ async function enrichDomain(entry: {
     const { error } = await supabase
       .from("scam_urls")
       .update({
-        whois_registrar: whois.registrar,
-        whois_registrant_country: whois.registrantCountry,
-        whois_created_date: whois.createdDate,
-        whois_expires_date: whois.expiresDate,
-        whois_name_servers: whois.nameServers,
-        whois_is_private: whois.isPrivate,
-        whois_raw: whois.raw,
-        whois_lookup_at: attemptedAt,
+        // #1253: an unanswered lookup (quota guard / non-200 / no key) writes
+        // no whois_* columns — not nulls over existing values, and no
+        // whois_lookup_at, which whois-cached.ts and /api/scam-urls/report
+        // read as "this domain has WHOIS data". The row is still marked
+        // completed (no re-offer for scam_urls yet — see #1253's PR).
+        ...(whois.deferral
+          ? {}
+          : {
+              whois_registrar: whois.registrar,
+              whois_registrant_country: whois.registrantCountry,
+              whois_created_date: whois.createdDate,
+              whois_expires_date: whois.expiresDate,
+              whois_name_servers: whois.nameServers,
+              whois_is_private: whois.isPrivate,
+              whois_raw: whois.raw,
+              whois_lookup_at: attemptedAt,
+            }),
         ssl_valid: ssl.valid,
         ssl_issuer: ssl.issuer,
         ssl_days_remaining: ssl.daysRemaining,

@@ -14,8 +14,17 @@ import {
 } from "@askarthur/utils/concurrency";
 import {
   enrichCloneAttribution,
+  whoisRetryAfter,
   type HostingInfo,
 } from "@/lib/clone-watch/enrich-attribution";
+import { lookupDomainRegistration } from "@askarthur/scam-engine/domain-registration";
+import {
+  NO_REOFFER,
+  WHOIS_REOFFER_RUN_CAP,
+  runWhoisReoffer,
+  type ReofferRow,
+  type WhoisReofferOutcome,
+} from "@/lib/clone-watch/whois-reoffer";
 import {
   ENRICH_CONCURRENCY,
   ENRICH_FLUSH_EVERY,
@@ -109,21 +118,39 @@ const KIT_PIVOT_WALL_CLOCK_MS = 120_000;
  */
 const ENRICH_WALL_CLOCK_MS = 200_000;
 
+/**
+ * In-step wall-clock budget for the WHOIS re-offer (#1253), in milliseconds.
+ *
+ * IN-STEP (budgetedStep), like enrich-batch. Sized from the pacing:
+ * WHOIS_REOFFER_RUN_CAP (20) rows started ENRICH_MIN_START_INTERVAL_MS (3s)
+ * apart need ~57s; 90s lets a full re-offer finish. A re-offer row is cheaper
+ * than an enrich row — ONLY the registration lookup, worst case ~21s (RDAP 8s
+ * → rdap.org 8s → whoisjson 5s) — so the last row can start at 90s and finish
+ * with the final flush by ~115s, far inside the 300s request.
+ *
+ * Stopping early is safe: an unreached row keeps its attribution_retry_after
+ * and is the oldest in the next run's re-offer worklist.
+ */
+const WHOIS_REOFFER_WALL_CLOCK_MS = 90_000;
+
 interface PendingAlert {
   id: number;
   candidate_domain: string;
   urlscan_evidence: { server?: HostingInfo } | null;
 }
 
-// inngest-finish-budget: 5 boundaries — select-pending, enrich-batch
-// (budgetedStep), kit-pivots (budgetedStep), backfill-campaign-keys,
-// log-outcome. Was 64: the 60 per-alert `enrich-${id}` steps are folded into
-// ONE bounded-concurrency step (#1229; #1074 named this the largest per-item
-// fan-out in the fleet). budgetedStep's step.run is invisible to the static
-// count, so the declaration names all five.
+// inngest-finish-budget: 6 boundaries — select-pending, enrich-batch
+// (budgetedStep), whois-reoffer (budgetedStep, #1253), kit-pivots
+// (budgetedStep), backfill-campaign-keys, log-outcome. Was 64: the 60
+// per-alert `enrich-${id}` steps are folded into ONE bounded-concurrency step
+// (#1229; #1074 named this the largest per-item fan-out in the fleet).
+// budgetedStep's step.run is invisible to the static count, so the
+// declaration names all six.
 //
-// Floor = 5 x 30s queue wait + 320s inline (ENRICH_WALL_CLOCK_MS 200s +
-// KIT_PIVOT_WALL_CLOCK_MS 120s) + 60s slack = 530s. 15m, not 10m (review of
+// Floor = 6 x 30s queue wait + 410s inline (ENRICH_WALL_CLOCK_MS 200s +
+// WHOIS_REOFFER_WALL_CLOCK_MS 90s + KIT_PIVOT_WALL_CLOCK_MS 120s) + 60s slack
+// = 650s, inside 15m (900s). #1253 added the re-offer's 30s + 90s; the
+// headroom argument below still holds (~810s healthy worst case). 15m, not 10m (review of
 // #1252): the floor ignores enrich-batch's tail past its budget (~40 s: the
 // check precedes a row, then the worst row + final flush), 60 s queue waits
 // under contention (~690 s healthy worst case), and the case the read-back
@@ -285,7 +312,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       // costs no step. Every counter lives inside the step and comes back as
       // its return value: nothing here is a handler-level accumulator for an
       // Inngest replay to reset.
-      const enrich: EnrichBatchOutcome =
+      const enrich: EnrichBatchOutcome & { whoisDeferred: number } =
         pending.length === 0
           ? { ...NO_ENRICH }
           : await budgetedStep(
@@ -296,7 +323,10 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
                 const sb = createServiceClient();
                 if (!sb) return { ...NO_ENRICH, pending: pending.length };
                 const byId = new Map(pending.map((a) => [a.id, a]));
-                return runEnrichBatch({
+                // #1253: lookups whose WHOIS got no answer. Inside the step,
+                // returned with the batch outcome — replay safe.
+                let whoisDeferred = 0;
+                const batch = await runEnrichBatch({
                   rows: pending,
                   budget,
                   concurrency: ENRICH_CONCURRENCY,
@@ -339,12 +369,20 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
                     // predicate below and is never re-selected. null leaves
                     // the column alone (flag off), as the old per-row update
                     // did by omitting the key.
+                    //
+                    // #1253: a deferred WHOIS (quota guard / http error / no
+                    // key) is still WRITTEN — an unwritten row would re-present
+                    // at the head of this oldest-first capped worklist every
+                    // run and pin it — and is stamped for the re-offer below.
+                    const retryAfter = whoisRetryAfter(dossier);
+                    if (retryAfter) whoisDeferred++;
                     return {
                       id: alert.id,
                       attribution: dossier,
                       campaign_key: featureFlags.cloneCampaigns
                         ? (campaignKeyFromDossier(dossier) ?? "insufficient")
                         : null,
+                      attribution_retry_after: retryAfter,
                     };
                   },
                   // Bulk write (v331): fills only `attribution IS NULL`, so a
@@ -368,6 +406,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
                       error: message,
                     }),
                 });
+                return { ...batch, whoisDeferred };
               },
             );
       // Worklist rows that now carry a dossier: written by this attempt, or by
@@ -381,6 +420,98 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         enrich.notReachedBudget > 0
       ) {
         logger.warn("clone-watch enrich: rows left unenriched", { ...enrich });
+      }
+
+      // WHOIS re-offer (#1253). Rows whose WHOIS lookup got no answer carry
+      // `attribution_retry_after` (v336); once it is due, re-run ONLY the
+      // registration lookup and merge ONLY attribution.whois (kit_siblings
+      // and the rest are kept by the RPC). No 35-day window: a row deferred on
+      // the 20th is due on the 1st, when it may be 40 days old, and it is
+      // exactly the row the monthly report is missing a registrar for.
+      //
+      // Runs AFTER enrich-batch (sequential steps), so the two share the
+      // whoisjson pace instead of adding to it, and BEFORE kit-pivots, whose
+      // write replaces the whole attribution object from what it read — it
+      // then reads the merged dossier (concurrency 1 serialises runs).
+      //
+      // Every re-offered row leaves the predicate: answered → cleared,
+      // deferred again → pushed forward, repeated http errors → cleared
+      // (whois-reoffer.ts). The monthly guard is respected by construction:
+      // lookupWhois checks it before any request, and a guarded re-ask comes
+      // back deferred to the 1st of next month.
+      const reoffer: WhoisReofferOutcome & {
+        backlog: number | null;
+        selectFailed?: boolean;
+      } = await budgetedStep(
+        step,
+        "whois-reoffer",
+        WHOIS_REOFFER_WALL_CLOCK_MS,
+        async (budget) => {
+          const sb = createServiceClient();
+          if (!sb) return { ...NO_REOFFER, backlog: null };
+          const nowIso = new Date().toISOString();
+          const [{ data, error }, backlogRes] = await Promise.all([
+            sb
+              .from("shopfront_clone_alerts")
+              .select("id, candidate_domain, attribution")
+              .not("attribution_retry_after", "is", null)
+              .lte("attribution_retry_after", nowIso)
+              .order("attribution_retry_after", { ascending: true })
+              .limit(WHOIS_REOFFER_RUN_CAP),
+            sb
+              .from("shopfront_clone_alerts")
+              .select("id", { count: "exact", head: true })
+              .not("attribution_retry_after", "is", null)
+              .lte("attribution_retry_after", nowIso),
+          ]);
+          // A failed head count returns count=null AND error=null (204).
+          const backlog =
+            typeof backlogRes.count === "number" ? backlogRes.count : null;
+          if (error) {
+            // Not thrown: a re-offer that cannot read its worklist must not
+            // cost the kit pivots and the Outcome Row. The Outcome Row
+            // records whois_reoffer_due = null (unknown, never 0).
+            logger.warn("clone-watch enrich: whois re-offer select failed", {
+              error: error.message,
+            });
+            return { ...NO_REOFFER, backlog, selectFailed: true };
+          }
+          const rows = (data ?? []) as ReofferRow[];
+          if (rows.length === 0) return { ...NO_REOFFER, backlog };
+          const outcome = await runWhoisReoffer({
+            rows,
+            budget,
+            lookup: (domain) =>
+              lookupDomainRegistration(domain, { priority: "batch" }),
+            flush: async (writes) => {
+              const { data: n, error: wErr } = await sb.rpc(
+                "apply_clone_alert_whois_reoffers",
+                { p_rows: writes },
+              );
+              if (wErr) return { error: wErr.message };
+              return { written: typeof n === "number" ? n : 0 };
+            },
+            campaignKey: featureFlags.cloneCampaigns
+              ? (d) => campaignKeyFromDossier(d as DossierShape)
+              : undefined,
+            onFlushError: (alertIds, message) =>
+              logger.error("clone-watch enrich: whois re-offer write failed", {
+                alertIds,
+                error: message,
+              }),
+            concurrency: ENRICH_CONCURRENCY,
+            minStartIntervalMs: ENRICH_MIN_START_INTERVAL_MS,
+            flushEvery: ENRICH_FLUSH_EVERY,
+          });
+          return { ...outcome, backlog };
+        },
+      );
+      if (reoffer.due > 0 && reoffer.reoffered === 0) {
+        // The silent-zero shape (laneHealth.ts) — logged at warn so it ships
+        // to Axiom unsampled on the run it happens.
+        logger.warn("clone-watch enrich: whois re-offer due but none started", {
+          ...reoffer,
+        });
       }
 
       // Kit pivots: for confirmed likely_phishing clones, search urlscan for
@@ -591,6 +722,15 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
           cap: ENRICH_RUN_CAP,
           cap_reached: pending.length >= ENRICH_RUN_CAP,
           backlog: "backlog" in selected ? (selected.backlog ?? null) : null,
+          // #1253: deferred WHOIS, and the re-offer that answers it.
+          whois_deferred: enrich.whoisDeferred,
+          whois_reoffer_due: reoffer.selectFailed ? null : reoffer.due,
+          whois_reoffer_backlog: reoffer.backlog,
+          whois_reoffered: reoffer.reoffered,
+          whois_resolved: reoffer.resolved,
+          whois_redeferred: reoffer.redeferred,
+          whois_abandoned: reoffer.abandoned,
+          whois_reoffer_write_failed: reoffer.writeFailed,
           backfilled: backfill.written,
           kit_pivoted: kitPivots.written,
         }),
@@ -602,6 +742,9 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         enrichLookupFailed: enrich.lookupFailed,
         enrichWriteFailed: enrich.writeFailed,
         enrichNotReachedBudget: enrich.notReachedBudget,
+        whoisDeferred: enrich.whoisDeferred,
+        whoisReoffered: reoffer.reoffered,
+        whoisResolved: reoffer.resolved,
         backfilled: backfill.written,
         backfillFailed: backfill.failed,
         kitPivoted: kitPivots.written,
@@ -614,17 +757,19 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
   ),
 );
 
-const NO_ENRICH: Readonly<EnrichBatchOutcome> = Object.freeze({
-  pending: 0,
-  alreadyEnriched: 0,
-  attempted: 0,
-  written: 0,
-  lookupFailed: 0,
-  writeFailed: 0,
-  writeSkipped: 0,
-  notReachedBudget: 0,
-  deadlineHit: false,
-});
+const NO_ENRICH: Readonly<EnrichBatchOutcome & { whoisDeferred: number }> =
+  Object.freeze({
+    whoisDeferred: 0,
+    pending: 0,
+    alreadyEnriched: 0,
+    attempted: 0,
+    written: 0,
+    lookupFailed: 0,
+    writeFailed: 0,
+    writeSkipped: 0,
+    notReachedBudget: 0,
+    deadlineHit: false,
+  });
 
 /** Derive the campaign-fingerprint inputs from a stored/fresh attribution
  *  dossier. Tolerant of partial dossiers (returns null → caller stamps the

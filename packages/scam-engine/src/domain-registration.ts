@@ -5,7 +5,10 @@
 // persisted through one retry (registries 404 transiently under bursts — .shop
 // fallbacks found data 41% of the time, 2026-09-26). An RDAP record, even one
 // without a registrar, is final (it carries statuses + name servers). The
-// fallback is subject to whoisjson's monthly guard at the caller's priority. Gated by
+// fallback is subject to whoisjson's monthly guard at the caller's priority;
+// a fallback that got no answer (guard spent, non-200, no key) comes back as
+// `source: "deferred"` + `retryAfter`, never as a final empty record (#1253).
+// Gated by
 // FF_RDAP_LOOKUP so it's a no-op (whoisjson only, byte-identical to before)
 // until canaried.
 //
@@ -14,7 +17,12 @@
 // resolution without duplicating it. whois-cached.ts (shop-signal /
 // charity-check) intentionally stays on whoisjson this wave.
 
-import { lookupWhois, type WhoisPriority, type WhoisResult } from "./whois";
+import {
+  lookupWhois,
+  type WhoisDeferralReason,
+  type WhoisPriority,
+  type WhoisResult,
+} from "./whois";
 import { lookupRdapOutcome, type RdapResult } from "./rdap";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
@@ -23,19 +31,37 @@ export interface DomainRegistration extends WhoisResult {
   statuses: string[];
   registrarIanaId: string | null;
   abuseContact: { email: string | null; phone: string | null } | null;
-  source: "rdap" | "whoisjson" | "none";
+  /**
+   * `deferred` (#1253): RDAP had no record AND whoisjson gave no answer (its
+   * monthly guard is spent, it errored, or no key) — ask again at
+   * `retryAfter`. Distinct from `whoisjson` with a null registrar, which is a
+   * served answer and final.
+   */
+  source: "rdap" | "whoisjson" | "none" | "deferred";
+  /** Only when source is `deferred`: ISO time a retry may get an answer. */
+  retryAfter?: string;
+  /** Only when source is `deferred`: why (whois.ts WhoisDeferralReason). */
+  deferralReason?: WhoisDeferralReason;
 }
 
-/** A WhoisResult (whoisjson) widened to the DomainRegistration shape. */
+/** A WhoisResult (whoisjson) widened to the DomainRegistration shape. An
+ *  unanswered lookup keeps its deferral as `source: "deferred"`. */
 function fromWhois(w: WhoisResult): DomainRegistration {
+  const { deferral, ...rest } = w;
   return {
-    ...w,
+    ...rest,
     statuses: [],
     registrarIanaId: null,
     abuseContact: w.registrarAbuseEmail
       ? { email: w.registrarAbuseEmail, phone: null }
       : null,
-    source: "whoisjson",
+    ...(deferral
+      ? {
+          source: "deferred" as const,
+          retryAfter: deferral.retryAfter,
+          deferralReason: deferral.reason,
+        }
+      : { source: "whoisjson" as const }),
   };
 }
 
@@ -94,7 +120,9 @@ export async function lookupDomainRegistration(
     // not_found (after one retry) / no_server / error → whoisjson may answer.
   }
 
-  const whois = await lookupWhois(domain, { priority: opts.priority }).catch(() => null);
+  const whois = await lookupWhois(domain, { priority: opts.priority }).catch(
+    () => null,
+  );
   if (!whois) return NONE;
   return fromWhois(whois);
 }

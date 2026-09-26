@@ -356,6 +356,27 @@ describe("classifyLaneHealth", () => {
       expect(kinds(rows)).toEqual(["clone-watch-enrich-attribution:cap_bound"]);
     });
 
+    // #1253. Go-red (2026-09-27): drop the `whois_reoffer_due` disjunct from
+    // the enrich shape → "a stalled WHOIS re-offer" is silent.
+    const reofferRow = (h: number, due: number | null, reoffered: number) =>
+      outcomeRow("clone-watch-enrich-attribution", h, 0, {
+        reason: "nothing_pending",
+        pending: 0,
+        enriched: 0,
+        whois_reoffer_due: due,
+        whois_reoffered: reoffered,
+      });
+
+    it("a stalled WHOIS re-offer (due rows, none started) is silent_zero on a quiet enrich day", () => {
+      const rows = withEnrich([reofferRow(1, 20, 0), reofferRow(25, 20, 0)]);
+      expect(kinds(rows)).toEqual(["clone-watch-enrich-attribution:silent_zero"]);
+    });
+
+    it("a working re-offer, or an unknown due count (null), does not page", () => {
+      expect(kinds(withEnrich([reofferRow(1, 20, 20), reofferRow(25, 20, 20)]))).toEqual([]);
+      expect(kinds(withEnrich([reofferRow(1, null, 0), reofferRow(25, null, 0)]))).toEqual([]);
+    });
+
     it("silent_zero outranks cap_bound (a capped retrieve holding an unnotified weaponised alert)", () => {
       const rows = withRetrieve(
         [1, 4, 7, 10, 13].map((h) =>

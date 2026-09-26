@@ -201,14 +201,20 @@ export async function POST(req: NextRequest) {
               checkSSL(norm.domain),
             ]);
 
-            updateData.whois_registrar = whois.registrar;
-            updateData.whois_registrant_country = whois.registrantCountry;
-            updateData.whois_created_date = whois.createdDate;
-            updateData.whois_expires_date = whois.expiresDate;
-            updateData.whois_name_servers = whois.nameServers;
-            updateData.whois_is_private = whois.isPrivate;
-            updateData.whois_raw = whois.raw;
-            updateData.whois_lookup_at = new Date().toISOString();
+            // #1253: an unanswered lookup (quota guard / non-200 / no key)
+            // is not WHOIS data. whois_lookup_at non-null is this route's
+            // domain-level cache key (the select above), so stamping it here
+            // would hand the empty result to every later report of the domain.
+            if (!whois.deferral) {
+              updateData.whois_registrar = whois.registrar;
+              updateData.whois_registrant_country = whois.registrantCountry;
+              updateData.whois_created_date = whois.createdDate;
+              updateData.whois_expires_date = whois.expiresDate;
+              updateData.whois_name_servers = whois.nameServers;
+              updateData.whois_is_private = whois.isPrivate;
+              updateData.whois_raw = whois.raw;
+              updateData.whois_lookup_at = new Date().toISOString();
+            }
             updateData.ssl_valid = ssl.valid;
             updateData.ssl_issuer = ssl.issuer;
             updateData.ssl_days_remaining = ssl.daysRemaining;

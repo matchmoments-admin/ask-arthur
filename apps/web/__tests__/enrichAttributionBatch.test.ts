@@ -287,6 +287,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   log: vi.fn(),
   enrich: vi.fn(),
+  lookupReg: vi.fn(),
 }));
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({
   inngest: {
@@ -310,8 +311,14 @@ vi.mock("@askarthur/utils/feature-flags", () => ({
 vi.mock("@askarthur/scam-engine/urlscan-search", () => ({
   searchURLScan: vi.fn(),
 }));
-vi.mock("@/lib/clone-watch/enrich-attribution", () => ({
+vi.mock("@/lib/clone-watch/enrich-attribution", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/lib/clone-watch/enrich-attribution")
+  >()),
   enrichCloneAttribution: mocks.enrich,
+}));
+vi.mock("@askarthur/scam-engine/domain-registration", () => ({
+  lookupDomainRegistration: mocks.lookupReg,
 }));
 vi.mock(
   "@/lib/clone-watch/enrich-attribution-batch",
@@ -337,6 +344,7 @@ function query(result: unknown) {
     "is",
     "not",
     "gte",
+    "lte",
     "order",
     "limit",
     "in",
@@ -397,7 +405,8 @@ describe("clone-watch-enrich-attribution (function)", () => {
     expect(names.filter((n) => n.startsWith("enrich"))).toEqual([
       "enrich-batch",
     ]);
-    expect(names.length).toBeLessThanOrEqual(5);
+    // select-pending, enrich-batch, whois-reoffer (#1253), backfill, log-outcome.
+    expect(names.length).toBeLessThanOrEqual(6);
     expect(mocks.enrich).toHaveBeenCalledTimes(60);
     const writes = mocks.rpc.mock.calls.filter(
       ([n]) => n === "apply_clone_alert_attributions",
@@ -442,5 +451,145 @@ describe("clone-watch-enrich-attribution (function)", () => {
     });
     expect(names).not.toContain("enrich-batch");
     expect(mocks.enrich).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #1253 at the function level: a deferred WHOIS is written AND stamped, and
+ * the re-offer step merges only `whois` for due rows through its own RPC.
+ *
+ * Go-red record (2026-09-27, each reverted → failed → restored):
+ *   - `attribution_retry_after: retryAfter` dropped from the enrich write:
+ *     "stamps a deferred WHOIS" fails (undefined, not the retry instant).
+ *   - the whois-reoffer step short-circuited to NO_REOFFER (as if removed):
+ *     "re-offers due rows" fails (no apply_clone_alert_whois_reoffers call).
+ */
+describe("clone-watch-enrich-attribution — WHOIS deferral (#1253)", () => {
+  const run = (step: unknown) =>
+    (
+      cloneWatchEnrichAttribution as unknown as (
+        ctx: unknown,
+      ) => Promise<Record<string, unknown>>
+    )({ event: { ts: Date.now(), data: {} }, step });
+  const step = {
+    run: async (_name: string, fn: () => unknown) => fn(),
+  };
+  const outcomeRow = () =>
+    mocks.log.mock.calls
+      .map(
+        (c) => c[0] as { feature?: string; metadata?: Record<string, unknown> },
+      )
+      .find((r) => r.feature === "shopfront_clone_enrich")?.metadata;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.rpc.mockImplementation(
+      async (_name: string, args: { p_rows: unknown[] }) => ({
+        data: args.p_rows.length,
+        error: null,
+      }),
+    );
+  });
+
+  it("stamps a deferred WHOIS with its retry instant — and still writes the dossier", async () => {
+    const pending = [
+      { id: 1, candidate_domain: "a.example", urlscan_evidence: null },
+      { id: 2, candidate_domain: "b.example", urlscan_evidence: null },
+    ];
+    mocks.enrich.mockImplementation(async (domain: string) => ({
+      whois:
+        domain === "a.example"
+          ? {
+              registrar: null,
+              nameServers: [],
+              source: "deferred",
+              retryAfter: "2026-10-01T00:00:00.000Z",
+              deferralReason: "quota_deferred",
+            }
+          : { registrar: "reg", nameServers: [], source: "rdap" },
+      ct: null,
+      ip_rep: null,
+      hosting: { ip: null, country: null, asn: null },
+      enriched_at: "2026-09-27T00:00:00Z",
+    }));
+    mocks.from
+      .mockReturnValueOnce(query({ data: pending, error: null }))
+      .mockReturnValueOnce(query({ count: 2, error: null }))
+      .mockReturnValueOnce(query({ data: [{ id: 1 }, { id: 2 }], error: null }))
+      .mockReturnValue(query({ data: [], count: 0, error: null }));
+    await run(step);
+
+    const rows = mocks.rpc.mock.calls
+      .filter(([n]) => n === "apply_clone_alert_attributions")
+      .flatMap(
+        ([, a]) =>
+          (a as { p_rows: Array<Record<string, unknown>> }).p_rows,
+      );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(1)?.attribution_retry_after).toBe(
+      "2026-10-01T00:00:00.000Z",
+    );
+    expect(byId.get(1)?.attribution).toBeTruthy(); // written, not held back
+    expect(byId.get(2)?.attribution_retry_after).toBeNull();
+    expect(outcomeRow()).toMatchObject({ whois_deferred: 1, enriched: 2 });
+  });
+
+  it("re-offers due rows, merging only whois through its own RPC", async () => {
+    mocks.lookupReg.mockResolvedValue({
+      registrar: "NameCheap",
+      registrarAbuseEmail: null,
+      registrantCountry: null,
+      createdDate: "2026-09-01",
+      expiresDate: null,
+      nameServers: [],
+      isPrivate: false,
+      raw: null,
+      statuses: [],
+      registrarIanaId: null,
+      abuseContact: null,
+      source: "rdap",
+    });
+    const due = [
+      {
+        id: 7,
+        candidate_domain: "late.example",
+        attribution: {
+          whois: { registrar: null, nameServers: [], source: "whoisjson" },
+          kit_siblings: { siblings: ["x"] },
+        },
+      },
+    ];
+    mocks.from
+      .mockReturnValueOnce(query({ data: [], error: null })) // enrich worklist
+      .mockReturnValueOnce(query({ count: 0, error: null })) // its backlog
+      .mockReturnValueOnce(query({ data: due, error: null })) // re-offer rows
+      .mockReturnValueOnce(query({ count: 1, error: null })) // re-offer backlog
+      .mockReturnValue(query({ data: [], error: null }));
+    const res = await run(step);
+
+    expect(mocks.lookupReg).toHaveBeenCalledWith("late.example", {
+      priority: "batch",
+    });
+    const call = mocks.rpc.mock.calls.find(
+      ([n]) => n === "apply_clone_alert_whois_reoffers",
+    );
+    const el = (call![1] as { p_rows: Array<Record<string, unknown>> })
+      .p_rows[0]!;
+    expect(el.id).toBe(7);
+    expect(el.retry_after).toBeNull(); // answered → mark cleared
+    expect((el.whois as { registrar: string }).registrar).toBe("NameCheap");
+    // Only the whois block travels; the RPC merges it (kit_siblings kept).
+    expect(el).not.toHaveProperty("attribution");
+    expect(el).not.toHaveProperty("kit_siblings");
+    expect(res).toMatchObject({ whoisReoffered: 1, whoisResolved: 1 });
+    expect(outcomeRow()).toMatchObject({
+      reason: "nothing_pending",
+      whois_reoffer_due: 1,
+      whois_reoffer_backlog: 1,
+      whois_reoffered: 1,
+      whois_resolved: 1,
+      whois_redeferred: 0,
+      whois_abandoned: 0,
+    });
   });
 });

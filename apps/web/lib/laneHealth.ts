@@ -344,8 +344,14 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
       test: (o) => o.cap_reached === true,
       backlog: (o) => (typeof o.backlog === "number" ? o.backlog : null),
     },
-    shape: "pending>0 ∧ enriched=0",
-    silentZero: (o) => n(o, "pending") > 0 && n(o, "enriched") === 0,
+    // Second disjunct (#1253): deferred-WHOIS rows were due and the re-offer
+    // started none — the re-offer is the only path that ever gives those rows
+    // a registrar, so a stalled one is the same silent loss the issue found.
+    shape:
+      "(pending>0 ∧ enriched=0) ∨ (whois_reoffer_due>0 ∧ whois_reoffered=0)",
+    silentZero: (o) =>
+      (n(o, "pending") > 0 && n(o, "enriched") === 0) ||
+      (n(o, "whois_reoffer_due") > 0 && n(o, "whois_reoffered") === 0),
   },
   "shopfront-clone-notify-brand-prepare": {
     crons: ["30 9 * * *"],
