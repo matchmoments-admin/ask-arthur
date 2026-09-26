@@ -22,7 +22,10 @@
  * @see report-card-data.ts — the I/O half (five reads, no computation)
  * @see spotlight.ts — the ladder, extracted so it can be tested directly
  */
-import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
+import {
+  AU_BRAND_WATCHLIST,
+  LEXICAL_MATCHER_VERSION,
+} from "@askarthur/shopfront-glue";
 import {
   summariseCampaigns,
   type CampaignSummary,
@@ -51,6 +54,8 @@ import {
 import {
   brandsCoveredForMonth,
   classifyTrend,
+  domainCoveredForMonth,
+  domainsWatchedInMonth,
   summariseTrendExclusions,
   type BrandCoverage,
   type TrendVerdict,
@@ -61,10 +66,16 @@ import { pickSpotlight, type Spotlight } from "@/lib/clone-watch/spotlight";
 import type { MonthWindow } from "@/lib/clone-watch/month-window";
 import {
   brandKeyForDomain,
+  classifierVersionByBrand,
+  foldStockSnapshot,
+  stockForBrand,
   takedownsInMonthByBrand,
   weaponisedEverByBrand,
+  type StockSnapshotRow,
   type TakedownEvent,
 } from "@/lib/clone-watch/monthly-brand-store";
+import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import type { StockStatus } from "@/lib/clone-watch/clone-metrics";
 
 export type { Spotlight };
 export type SpotlightKind = Spotlight["kind"];
@@ -319,6 +330,27 @@ export interface BrandTrendRow {
   taken_down_in_month: number | null;
   /** Cohort membership — first alert id per candidate domain. */
   alert_ids: number[];
+  // ── monthly store v2 (v325) — NULL means "not measured", never 0 ─────────
+  /** FLOW: lookalikes first seen this month (= clones). */
+  new_registered: number;
+  /** Of those, the pre-classifier's deliberate clones (= deliberate_clones). */
+  new_deliberate: number;
+  /** STOCK: lookalikes from ANY month still up (live_phishing / live /
+   *  parked) at the month-end snapshot. null = no trusted snapshot for the
+   *  month, or too many of the brand's rows unverified. */
+  active_stock_eom: number | null;
+  stock_by_status: Record<StockStatus, number> | null;
+  /** NRD domains swept in the month (feed denominator). null = not recorded. */
+  swept_domains: number | null;
+  /** Watched for the whole month with no composition change. null = coverage
+   *  unreadable. */
+  coverage_full_month: boolean | null;
+  matcher_version: string;
+  /** Pre-classifier model_id(s) in the brand's cohort, "+"-joined, most
+   *  frequent first (a month straddling a swap shows both). */
+  classifier_version: string | null;
+  /** When the month-end snapshot ran. null = no snapshot. */
+  liveness_checked_at: string | null;
 }
 export interface RegistrarTrendRow {
   registrar: string;
@@ -379,6 +411,15 @@ export interface CardInputs {
    * `taken_down_in_month: null` ("not measured"), never to 0.
    */
   takedownEvents?: TakedownEvent[];
+  /**
+   * The month-end liveness snapshot (clone_liveness_snapshots, v325) for this
+   * period. Optional like `takedownEvents`: only the monthly store reads it.
+   * Absent, null or empty all fold to active_stock_eom NULL — see
+   * `foldStockSnapshot` for why an empty snapshot is not a zero.
+   */
+  stockSnapshots?: StockSnapshotRow[] | null;
+  /** NRD domains swept in the month (nrd_daily_ingest telemetry). */
+  sweptDomains?: number | null;
 }
 
 
@@ -576,7 +617,12 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
  */
 export function buildTrendRows(
   input: Pick<CardInputs, "window" | "rows"> &
-    Partial<Pick<CardInputs, "coverage" | "takedownEvents">>,
+    Partial<
+      Pick<
+        CardInputs,
+        "coverage" | "takedownEvents" | "stockSnapshots" | "sweptDomains"
+      >
+    >,
 ): CloneWatchTrendRows {
   const { periodMonth } = input.window;
   const rows = input.rows;
@@ -604,6 +650,29 @@ export function buildTrendRows(
     keys.push(r.target_brand_normalized);
     alertKeysByBrand.set(b, keys);
   }
+
+  // v325 — stock, versions, coverage. Shared by the targeted rows and the
+  // zero rows, so both halves of the month carry identical provenance.
+  const stock = foldStockSnapshot(input.stockSnapshots);
+  const classifierByBrand = classifierVersionByBrand(rows);
+  const coverage = input.coverage ?? null;
+  const v2 = (brand: string) => {
+    const st = stock ? stockForBrand(stock, brand) : null;
+    return {
+      active_stock_eom: st && st.measured ? st.active : null,
+      stock_by_status: st ? st.byStatus : null,
+      swept_domains: input.sweptDomains ?? null,
+      // An EMPTY coverage table is "unknown" like a failed read, not "no
+      // brand was covered" (same as the v325 backfill).
+      coverage_full_month:
+        coverage && coverage.length > 0
+          ? domainCoveredForMonth(coverage, brand, periodMonth)
+          : null,
+      matcher_version: LEXICAL_MATCHER_VERSION,
+      classifier_version: classifierByBrand.get(brand) ?? null,
+      liveness_checked_at: stock ? stock.checkedAt : null,
+    };
+  };
 
   const brandRows: BrandTrendRow[] = [...byBrand.entries()]
     .map(([brand, m]) => {
@@ -647,9 +716,70 @@ export function buildTrendRows(
           ? (takedownsInMonth.get(brand) ?? 0)
           : null,
         alert_ids: m.alertIds,
+        new_registered: m.detected,
+        new_deliberate: intel?.tactics.total ?? 0,
+        ...v2(brand),
       };
     })
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
+
+  // ── Zero rows (v325) ──────────────────────────────────────────────────────
+  // A brand we watched and found nothing for used to have NO row, so "0 this
+  // month, and we were looking" was indistinguishable from "not watched".
+  // Every domain on the watchlist at any point in the month gets a row, plus
+  // any brand with month-end stock but no new lookalike (its squats are from
+  // earlier months — still a fact about the brand this month). Denylisted
+  // generic brands are skipped: the cohort never counts them, so a 0 would be
+  // a claim we did not measure.
+  const zeroDomains = new Set<string>();
+  if (coverage) {
+    for (const d of domainsWatchedInMonth(coverage, periodMonth)) zeroDomains.add(d);
+  }
+  if (stock) for (const d of stock.byBrand.keys()) zeroDomains.add(d);
+  const zeroRows: BrandTrendRow[] = [...zeroDomains]
+    .filter((d) => !byBrand.has(d) && !isFpBrand(d))
+    .sort()
+    .map((brand) => ({
+      brand,
+      is_au: isAuBrand(brand),
+      clones: 0,
+      reported_to_netcraft: 0,
+      likely_phishing: 0,
+      parked: 0,
+      taken_down: 0,
+      declined: 0,
+      escalated: 0,
+      weaponised: 0,
+      deliberate_clones: 0,
+      tactic_mix: emptyMix,
+      intent_mix: emptyMix,
+      tld_mix: emptyMix,
+      hosting_mix: {
+        asns: emptyMix,
+        countries: emptyMix,
+        frontedN: 0,
+        unattributedN: 0,
+        originVisibleN: 0,
+        total: 0,
+      },
+      clusters: [],
+      fingerprinted_clones: 0,
+      largest_cluster: 0,
+      brand_normalized: brandKeyForDomain(brand, [], coverage),
+      weaponised_ever: 0,
+      weaponised_after_decline: 0,
+      re_taken_down: 0,
+      // Event-dated: a squat first seen in an EARLIER month can be taken down
+      // this month, so a zero row can carry a non-zero value here.
+      taken_down_in_month: takedownsInMonth
+        ? (takedownsInMonth.get(brand) ?? 0)
+        : null,
+      alert_ids: [],
+      new_registered: 0,
+      new_deliberate: 0,
+      ...v2(brand),
+    }));
+  brandRows.push(...zeroRows);
 
   // Full canonicalised registrar list (not sliced) + drop the Unknown bucket —
   // its count already lives in clone_watch_report_summary.unknown_registrar_count.

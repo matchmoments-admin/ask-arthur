@@ -19,6 +19,7 @@ const m = vi.hoisted(() => ({
   upsertSummary: vi.fn(),
   readMonthFrozenAt: vi.fn(),
   writeMonthlyStats: vi.fn(),
+  loadStoreV2Inputs: vi.fn(),
   sendEvent: vi.fn(),
 }));
 
@@ -65,6 +66,7 @@ vi.mock("@/lib/clone-watch/monthly-brand-store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/clone-watch/monthly-brand-store")>()),
   readMonthFrozenAt: m.readMonthFrozenAt,
   writeMonthlyStats: m.writeMonthlyStats,
+  loadStoreV2Inputs: m.loadStoreV2Inputs,
 }));
 
 import { cloneWatchReportSummary } from "@/app/api/inngest/functions/clone-watch-report-summary";
@@ -101,6 +103,11 @@ beforeEach(() => {
   m.buildReportCard.mockImplementation((i: { ym: string }) => ({ ...card, periodMonth: `${i.ym}-01` }));
   m.buildTrendRows.mockReturnValue({ periodMonth: "2026-08-01", brandRows: [], registrarRows: [] });
   m.readMonthFrozenAt.mockResolvedValue(null);
+  m.loadStoreV2Inputs.mockResolvedValue({
+    stockSnapshots: [{ brand: "a.com.au", status: "live", checked_at: "2026-09-01T01:05:00Z" }],
+    sweptDomains: 2_100_000,
+    stockReadError: null,
+  });
   m.writeMonthlyStats.mockResolvedValue({
     status: "written",
     frozenAt: "2026-09-01T11:02:00Z",
@@ -126,6 +133,13 @@ describe("clone-watch-report-summary — the one producer", () => {
       data: expect.objectContaining({ status: "written", frozenAt: "2026-09-01T11:02:00Z" }),
     });
     expect(out.emitted).toBe(true);
+    // v325: the snapshot + denominator reach the fold on the write path.
+    expect(m.buildTrendRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stockSnapshots: [expect.objectContaining({ status: "live" })],
+        sweptDomains: 2_100_000,
+      }),
+    );
   });
 
   it("a manual re-run of a frozen month writes nothing and triggers nothing", async () => {
@@ -135,6 +149,7 @@ describe("clone-watch-report-summary — the one producer", () => {
       data: { periodMonth: "2026-07" },
     });
     expect(m.loadCardInputs).not.toHaveBeenCalled();
+    expect(m.loadStoreV2Inputs).not.toHaveBeenCalled();
     expect(m.upsertSummary).not.toHaveBeenCalled();
     expect(m.writeMonthlyStats).not.toHaveBeenCalled();
     expect(m.sendEvent).not.toHaveBeenCalled();

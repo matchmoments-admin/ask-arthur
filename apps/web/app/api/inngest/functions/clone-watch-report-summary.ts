@@ -16,6 +16,7 @@ import {
 import { upsertSummary } from "@/lib/clone-watch/report-summary";
 import {
   MONTHLY_STORE_WRITTEN_EVENT,
+  loadStoreV2Inputs,
   readMonthFrozenAt,
   shouldEmitStoreWritten,
   writeMonthlyStats,
@@ -226,7 +227,25 @@ export const cloneWatchReportSummary = inngest.createFunction(
         await upsertSummary(sb, card);
         // The monthly per-brand + per-registrar store, through the ONE SQL
         // writer: atomic, and it refuses a frozen month unless `republish`.
-        const trendRows = buildTrendRows(inputs);
+        //
+        // v325: the month-end liveness snapshot (written at 01:00 on the 1st
+        // by clone-watch-month-end-liveness) and the feed denominator. Read
+        // here, on the write path only; a missing or partial snapshot
+        // (no clone_liveness_runs row / row count mismatch) persists
+        // active_stock_eom NULL — never a fabricated 0.
+        const v2 = await loadStoreV2Inputs(sb, inputs.window);
+        const trendRows = buildTrendRows({ ...inputs, ...v2 });
+        const stockMeasured = trendRows.brandRows.some(
+          (r) => r.active_stock_eom !== null,
+        );
+        if (!stockMeasured) {
+          logger.warn("clone-watch-report-summary: no month-end liveness snapshot", {
+            period: card.periodMonth,
+            stockState: v2.stockState,
+            readError: v2.stockReadError,
+            consequence: "active_stock_eom NULL for every brand this month",
+          });
+        }
         const store = await writeMonthlyStats(sb, trendRows, { republish });
         if (store.status === "republished") {
           // Rare and deliberate — always-ship so the restatement is on record.
@@ -252,6 +271,10 @@ export const cloneWatchReportSummary = inngest.createFunction(
           brands: card.brands,
           brandRows: store.brandRows,
           registrarRows: store.registrarRows,
+          zeroRows: trendRows.brandRows.filter((r) => r.clones === 0).length,
+          stockMeasured,
+          stockState: v2.stockState,
+          sweptDomains: v2.sweptDomains,
           // false = taken_down_in_month persisted as null (not measured).
           takedownEventsRead: inputs.takedownEvents !== undefined,
           // Vendor-gap clock medians for the month cohort (null = leg empty).
@@ -296,6 +319,17 @@ export const cloneWatchReportSummary = inngest.createFunction(
             brand_rows: "brandRows" in result ? (result.brandRows ?? 0) : 0,
             store_status: result.storeStatus,
             emitted,
+            // v325 — how much of the month's store is "watched, nothing
+            // found", and whether the stock figure exists at all (false =
+            // no month-end snapshot → active_stock_eom NULL, never 0).
+            ...("zeroRows" in result
+              ? {
+                  zero_rows: result.zeroRows,
+                  stock_measured: result.stockMeasured,
+                  stock_state: result.stockState,
+                  swept_domains: result.sweptDomains,
+                }
+              : {}),
           },
         ),
       );

@@ -139,6 +139,11 @@ export const LANES = {
     provider: "internal",
     operation: "monthly_snapshot",
   },
+  "clone-watch-month-end-liveness": {
+    feature: "clone_watch_month_end_liveness",
+    provider: "internal",
+    operation: "stock_snapshot",
+  },
   "report-brand-stewardship": {
     feature: "brand_stewardship",
     provider: "internal",
@@ -282,6 +287,23 @@ export interface LaneOutcome {
     reason?: "frozen" | "no_clones";
     total: number;
     brand_rows: number;
+    /** v325 — false = no month-end snapshot, active_stock_eom NULL. Absent on
+     *  frozen / no-clone runs (nothing was written). */
+    stock_measured?: boolean;
+    /** Why: measured | no_run | partial | read_error (v325). */
+    stock_state?: "measured" | "no_run" | "partial" | "read_error";
+  };
+  "clone-watch-month-end-liveness": {
+    reason?: "no_stock";
+    /** Active-stock alerts the snapshot had to cover. */
+    stock: number;
+    /** Rows written with a real DNS verdict (excludes `unverified`). */
+    probed: number;
+    /** Rows written as `unverified` — resolver proved nothing, or never
+     *  reached (the latter also counted in `not_probed`). */
+    unverified: number;
+    /** Rows written as `unverified` because the run ran out of chunks. */
+    not_probed: number;
   };
   "report-brand-stewardship": {
     reason?: "no_activity";

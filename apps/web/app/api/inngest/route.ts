@@ -84,6 +84,7 @@ import { redditBrandsDiscover } from "./functions/reddit-brands-discover";
 import { brandRegisterRefresh } from "./functions/brand-register-refresh";
 import { cloneWatchInternalDigest } from "./functions/clone-watch-internal-digest";
 import { cloneWatchReportSummary } from "./functions/clone-watch-report-summary";
+import { cloneWatchMonthEndLiveness } from "./functions/clone-watch-month-end-liveness";
 // Platform housekeeping (retention / rollup / push) — moved out of
 // @askarthur/scam-engine in #588 (finding 2): these are platform jobs, not
 // scam-analysis, so they don't belong in the engine package's module identity.
@@ -148,6 +149,7 @@ const appFunctions = [
   brandRegisterRefresh,
   cloneWatchInternalDigest,
   cloneWatchReportSummary,
+  cloneWatchMonthEndLiveness,
   // Brand Stewardship Report (WS2-cap)
   reportBrandStewardship,
   // Monthly intel-driven blog draft (replaces the retired weekly-blog cron)

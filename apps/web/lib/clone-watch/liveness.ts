@@ -292,6 +292,32 @@ export async function submitPrecheck(hostname: string): Promise<SubmitPrecheck> 
   }
 }
 
+/**
+ * The month-end STOCK probe (v325): A, then AAAA only when A has no records,
+ * and ALWAYS NS — the NS answer both confirms absence and names the parking
+ * provider. Returns the raw lookups; the verdict is `stockStatus` in
+ * clone-metrics.ts (pure). `null` = the resolver itself could not be built or
+ * threw outside a query — the caller records "unverified". DNS only: no HTTP,
+ * no paid calls. Cheap (~ms, 4 s cap per query).
+ */
+export async function probeStockDns(hostname: string): Promise<{
+  a: DnsLookup;
+  aaaa: DnsLookup | null;
+  ns: DnsLookup;
+} | null> {
+  if (!hostname) return null;
+  const r = resolver();
+  try {
+    const a = await lookup(() => r.resolve4(hostname));
+    const needAaaa = !("records" in a && a.records.length > 0);
+    const aaaa = needAaaa ? await lookup(() => r.resolve6(hostname)) : null;
+    const ns = await lookup(() => r.resolveNs(hostname));
+    return { a, aaaa, ns };
+  } catch {
+    return null;
+  }
+}
+
 /** One bounded GET. Returns the status, or throws for the caller to classify
  *  (the error carries the transport `code` errorCodeOf reads). Goes through
  *  safeFetch: guard + SSRF-safe dispatcher on every connect + per-hop

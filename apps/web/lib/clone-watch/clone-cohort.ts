@@ -78,6 +78,9 @@ export interface CloneAlertRow {
      * classifier's whole input is {brand, candidate_domain, candidate_url}.
      */
     clone_tactic?: string | null;
+    /** Which pre-classifier produced this row (e.g. jev-1.13.0, a Haiku id) —
+     *  the monthly store's classifier_version (v325). */
+    model_id?: string | null;
   } | null;
   submitted_to: Record<string, unknown> | null;
   lifecycle_state?: string | null;
@@ -95,7 +98,7 @@ export interface CloneAlertRow {
  * missing one is a distribution that reads as 100% unknown.
  */
 export const CLONE_COHORT_SELECT =
-  "id, candidate_domain, candidate_url, inferred_target_domain, target_brand_normalized, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)";
+  "id, candidate_domain, candidate_url, inferred_target_domain, target_brand_normalized, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic, model_id)";
 
 /** The NRD daily sweep — the only source these reporting surfaces count. */
 export const CLONE_COHORT_SOURCE = "nrd";

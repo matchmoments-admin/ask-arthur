@@ -1377,6 +1377,63 @@ export type Database = {
           },
         ]
       }
+      clone_liveness_runs: {
+        Row: {
+          completed_at: string
+          not_probed: number
+          period_month: string
+          stock: number
+          unverified: number
+          written: number
+        }
+        Insert: {
+          completed_at?: string
+          not_probed: number
+          period_month: string
+          stock: number
+          unverified: number
+          written: number
+        }
+        Update: {
+          completed_at?: string
+          not_probed?: number
+          period_month?: string
+          stock?: number
+          unverified?: number
+          written?: number
+        }
+        Relationships: []
+      }
+      clone_liveness_snapshots: {
+        Row: {
+          alert_id: number
+          brand: string
+          candidate_domain: string
+          checked_at: string
+          dns: Json | null
+          period_month: string
+          status: string
+        }
+        Insert: {
+          alert_id: number
+          brand: string
+          candidate_domain: string
+          checked_at?: string
+          dns?: Json | null
+          period_month: string
+          status: string
+        }
+        Update: {
+          alert_id?: number
+          brand?: string
+          candidate_domain?: string
+          checked_at?: string
+          dns?: Json | null
+          period_month?: string
+          status?: string
+        }
+        Relationships: []
+      }
       clone_watch_classifications: {
         Row: {
           alert_id: number
@@ -1477,67 +1534,115 @@ export type Database = {
       }
       clone_watch_monthly_brand_stats: {
         Row: {
+          active_stock_eom: number | null
+          alert_ids: number[] | null
           brand: string
+          brand_normalized: string | null
+          classifier_version: string | null
           clones: number
           clusters: Json | null
+          coverage_full_month: boolean | null
           declined: number
           deliberate_clones: number | null
           escalated: number
           fingerprinted_clones: number | null
+          frozen_at: string | null
           hosting_mix: Json | null
           intent_mix: Json | null
           is_au: boolean
           largest_cluster: number | null
           likely_phishing: number
+          liveness_checked_at: string | null
+          matcher_version: string | null
+          new_deliberate: number | null
+          new_registered: number | null
           parked: number
           period_month: string
+          re_taken_down: number | null
           reported_to_netcraft: number
+          stock_by_status: Json | null
+          swept_domains: number | null
           tactic_mix: Json | null
           taken_down: number
+          taken_down_in_month: number | null
           tld_mix: Json | null
           weaponised: number
+          weaponised_after_decline: number | null
+          weaponised_ever: number | null
         }
         Insert: {
+          active_stock_eom?: number | null
+          alert_ids?: number[] | null
           brand: string
+          brand_normalized?: string | null
+          classifier_version?: string | null
           clones?: number
           clusters?: Json | null
+          coverage_full_month?: boolean | null
           declined?: number
           deliberate_clones?: number | null
           escalated?: number
           fingerprinted_clones?: number | null
+          frozen_at?: string | null
           hosting_mix?: Json | null
           intent_mix?: Json | null
           is_au?: boolean
           largest_cluster?: number | null
           likely_phishing?: number
+          liveness_checked_at?: string | null
+          matcher_version?: string | null
+          new_deliberate?: number | null
+          new_registered?: number | null
           parked?: number
           period_month: string
+          re_taken_down?: number | null
           reported_to_netcraft?: number
+          stock_by_status?: Json | null
+          swept_domains?: number | null
           tactic_mix?: Json | null
           taken_down?: number
+          taken_down_in_month?: number | null
           tld_mix?: Json | null
           weaponised?: number
+          weaponised_after_decline?: number | null
+          weaponised_ever?: number | null
         }
         Update: {
+          active_stock_eom?: number | null
+          alert_ids?: number[] | null
           brand?: string
+          brand_normalized?: string | null
+          classifier_version?: string | null
           clones?: number
           clusters?: Json | null
+          coverage_full_month?: boolean | null
           declined?: number
           deliberate_clones?: number | null
           escalated?: number
           fingerprinted_clones?: number | null
+          frozen_at?: string | null
           hosting_mix?: Json | null
           intent_mix?: Json | null
           is_au?: boolean
           largest_cluster?: number | null
           likely_phishing?: number
+          liveness_checked_at?: string | null
+          matcher_version?: string | null
+          new_deliberate?: number | null
+          new_registered?: number | null
           parked?: number
           period_month?: string
+          re_taken_down?: number | null
           reported_to_netcraft?: number
+          stock_by_status?: Json | null
+          swept_domains?: number | null
           tactic_mix?: Json | null
           taken_down?: number
+          taken_down_in_month?: number | null
           tld_mix?: Json | null
           weaponised?: number
+          weaponised_after_decline?: number | null
+          weaponised_ever?: number | null
         }
         Relationships: []
       }
@@ -10823,6 +10928,10 @@ export type Database = {
       request_newsletter_confirmation: {
         Args: { p_email: string; p_source: string; p_token_hash: string }
         Returns: boolean
+      }
+      reset_clone_alert_dead_dormancy: {
+        Args: { p_alert_ids: number[] }
+        Returns: number[]
       }
       resolve_brand: { Args: { p_raw: string }; Returns: string }
       review_verdict_severity: { Args: { v: string }; Returns: number }

@@ -179,6 +179,9 @@ export async function collectMonthlyIntelFacts(
           .from("clone_watch_monthly_brand_stats")
           .select("brand, clones, reported_to_netcraft")
           .eq("period_month", `${periodMonth}-01`)
+          // v325 writes a zero row for every watched brand (the "watched,
+          // nothing found" fact); the blog reports brands that WERE targeted.
+          .gt("clones", 0)
           .order("clones", { ascending: false })
           .order("brand", { ascending: true })
           .range(from, to),

@@ -9,6 +9,7 @@ export {
   urlHash,
 } from "./canonicalise";
 export {
+  LEXICAL_MATCHER_VERSION,
   lexicalMatch,
   type MatchResult,
   type SignalType,

@@ -39,6 +39,18 @@ import punycode from "node:punycode";
 
 import { AU_BRAND_WATCHLIST, type BrandEntry } from "./au-brand-watchlist";
 
+/**
+ * The matcher's methodology version, stamped on every monthly brand-store row
+ * (clone_watch_monthly_brand_stats.matcher_version, v325) so a month-over-month
+ * delta across a version change reads as OUR change, not the attackers'.
+ *
+ * Bump it in the same commit as any change to what this Module matches.
+ * v4 = #1082 (gated confusable rule + 5-char Levenshtein neighbourhood) and
+ * #1085 (separator strip before the contiguity check); June–August 2026 were
+ * re-classified under v4 on 2026-09-04, so the v325 backfill stamps them 'v4'.
+ */
+export const LEXICAL_MATCHER_VERSION = "v4";
+
 export type SignalType = "confusable" | "substring" | "levenshtein";
 
 export interface MatchResult {
