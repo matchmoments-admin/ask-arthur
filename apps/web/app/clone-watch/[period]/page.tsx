@@ -195,8 +195,9 @@ export default async function CloneWatchMonthPage({
       </div>
       {momLine && (
         <p className="text-sm text-gov-slate mb-8">
-          Month on month: <span className="font-semibold text-deep-navy">{momLine}</span>{" "}
-          lookalike domains ({mom!.brandsDelta >= 0 ? "+" : ""}
+          Lookalike domains, month on month:{" "}
+          <span className="font-semibold text-deep-navy">{momLine}</span> (
+          {mom!.brandsDelta >= 0 ? "+" : ""}
           {mom!.brandsDelta} brands).
         </p>
       )}
