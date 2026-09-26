@@ -46,7 +46,7 @@ export interface BrandEntry {
   // 1-edit label that is not an ordinary word matches (short-brand-neighbour-
   // words.ts is the floor). Set it ONLY on evidence — a confirmed threat in the
   // brand's gated neighbourhood — and re-measure with the #1150 harness; each
-  // brand costs ~3-9 alerts a month (apple 26, bonds 8, coles 14 per 90 days of
+  // brand costs ~3-9 alerts a month (apple 26, bonds 8 per 90 days of
   // the raw feed). No effect on a brand whose tokens are all ≥6 chars.
   openShortNeighbourhood?: true;
 }
@@ -55,8 +55,11 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   // Retail — big-box
   { brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] },
   { brand: "Woolworths", legitimate_domains: ["woolworths.com.au"] },
-  // openShortNeighbourhood: woles.net (weaponised 2026-08-10) — #1150.
-  { brand: "Coles", legitimate_domains: ["coles.com.au"], openShortNeighbourhood: true },
+  // NOT openShortNeighbourhood (#1150 decision, 2026-09-27): its only evidence
+  // is woles.net, shaped exactly like koles.fi / noles.net, and opting in
+  // took Coles 11 → 20 in 90 days for that one threat. Accuracy before any
+  // brand contact. woles.net is a KNOWN MISS; c0les-style homoglyphs still match.
+  { brand: "Coles", legitimate_domains: ["coles.com.au"] },
   { brand: "Aldi", legitimate_domains: ["aldi.com.au"] },
   { brand: "IGA", legitimate_domains: ["iga.com.au"] },
   { brand: "Kmart", legitimate_domains: ["kmart.com.au"] },

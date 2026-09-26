@@ -4,8 +4,10 @@
 // this Module's history is guards that passed while asserting nothing (the
 // "does not flood on EY" test never reached the branch it named):
 //
-//   G1 nine threats      — deleted `openShortNeighbourhood` from Apple/Bonds/
-//                          Coles AND the homoglyph return → 9/9 red.
+//   G1 eight threats     — deleted `openShortNeighbourhood` from Apple/Bonds
+//                          AND the homoglyph return → 8/8 red.
+//   G9 Coles stays shut  — set `openShortNeighbourhood: true` back on Coles
+//                          → woles.net / colex.ca / coleg.ru match, red.
 //   G2 word floor        — commented out the SHORT_BRAND_NEIGHBOUR_WORDS check
 //                          in shortBrandRecovery → bonus/bands/gonds/apply/
 //                          bondi/cowes red (the open brands re-admit them).
@@ -41,10 +43,9 @@ const fiveCharTokens = (list: readonly BrandEntry[]) =>
       .map((token) => ({ entry: e, token })),
   );
 
-describe("G1 — the nine confirmed threats v4 missed are matched", () => {
+describe("G1 — eight of the nine confirmed threats v4 missed are matched", () => {
   // Every one is weaponised, likely_phishing, or taken down in prod.
   const cases: Array<[string, string]> = [
-    ["woles.net", "Coles"],
     ["appve.vu", "Apple"],
     ["bonos.buzz", "Bonds"],
     ["bnds.cl", "Bonds"],
@@ -72,7 +73,7 @@ describe("G2 — the precision failures stay dead, including on open brands", ()
     "ponds.net", "gonds.quest", "gonds.co", "bondi.ink",
     // apple (OPEN)
     "apply.wiki", "ample.io",
-    // coles (OPEN)
+    // coles (closed since the #1150 decision; words stay dead regardless)
     "codes.net", "holes.net", "roles.world", "cowes.yachts",
     // closed brands — word neighbours
     "mart.services", "bank.camera", "stage.tours", "snake.io",
@@ -163,5 +164,22 @@ describe("G8 — candidateLabelKey (the #1084 bulk-registration key)", () => {
   it("decodes IDN and folds confusables like the matcher does", () => {
     expect(candidateLabelKey("xn--auspst-9ya.com")).toBe(candidateLabelKey("xn--auspst-9ya.shop"));
     expect(candidateLabelKey("аpple.com")).toBe("apple"); // Cyrillic а
+  });
+});
+
+describe("G9 — Coles is NOT an open neighbourhood (#1150 decision, 2026-09-27)", () => {
+  // Accuracy before any brand contact: opting Coles in took it 11 → 20 in 90
+  // days for one threat (woles.net) shaped like koles.fi / noles.net.
+  it("woles.net is a KNOWN MISS, and Coles' non-word neighbours stay out", () => {
+    for (const d of ["woles.net", "colex.ca", "coleg.ru", "koles.fi", "noles.net"]) {
+      expect(lexicalMatch(d), d).toBeNull();
+    }
+  });
+  it("the flag is off on the Coles entry", () => {
+    const coles = AU_BRAND_WATCHLIST.find((e) => e.brand === "Coles");
+    expect(coles?.openShortNeighbourhood).toBeUndefined();
+  });
+  it("the homoglyph path still covers Coles", () => {
+    expect(lexicalMatch("c0les.net")?.evidence.short_brand_gate).toBe("homoglyph");
   });
 });
