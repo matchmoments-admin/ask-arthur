@@ -103,7 +103,8 @@
 -- touches more than the 3.6k-row alerts table. Not applied by this PR.
 --
 -- REVERSE: DROP FUNCTION the six new functions; re-run v320 §2 for
--- record_netcraft_url_verdicts, v253 for list_clone_alerts_pending_netcraft_resubmit,
+-- record_netcraft_url_verdicts, the LIVE v289 body for list_clone_alerts_pending_netcraft_resubmit (NOT v253 — v289's
+-- uuid-collision age bypass was applied to prod without its file reaching main),
 -- and v145 §2 + v160's grants for clone_watch_takedown_stats; ALTER TABLE …
 -- DROP COLUMN offline_since, offline_cause, liveness_checked_at,
 -- liveness_last_verdict (only after reverting the reconcile code). Alerts
@@ -602,7 +603,7 @@ COMMENT ON FUNCTION public.mark_netcraft_vendor_gap_escalated(bigint[], integer)
 -- counts the exclusion for the lane's Outcome Row — worklist-starvation rule:
 -- exclude by predicate AND count, never silently.
 --
--- Body is v253's verbatim except the one added predicate and the
+-- Body is the live v289 body (v253 + v289's uuid-collision bypass) except the one added predicate and the
 -- function-level statement_timeout (supabase/CLAUDE.md §4). Signature
 -- unchanged → CREATE OR REPLACE keeps the ACL; the REVOKE is restated anyway.
 CREATE OR REPLACE FUNCTION public.list_clone_alerts_pending_netcraft_resubmit(
@@ -652,6 +653,11 @@ AS $function$
       OR (sca.submitted_to -> 'netcraft' ->> 'submitted_at') IS NULL
       OR (sca.submitted_to -> 'netcraft' ->> 'submitted_at')::timestamptz
            < pg_catalog.now() - pg_catalog.make_interval(days => p_min_age_days)
+      -- v289 (live in prod, applied without its file reaching main): a clone
+      -- blocked by uuid COLLISION skips the age wait. Netcraft allows one
+      -- issue per submission uuid; this row shares a uuid whose issue was
+      -- spent on a different alert, so waiting cannot give it a route.
+      OR sca.submitted_to -> 'netcraft_issue' ->> 'skipped' = 'submission_has_issue'
     )
     AND (sca.submitted_to -> 'netcraft' ->> 'takedown_at') IS NULL
     AND (sca.submitted_to -> 'netcraft_resubmit' ->> 'skipped') IS NULL

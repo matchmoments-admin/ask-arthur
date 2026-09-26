@@ -642,4 +642,24 @@ describe("resubmit lane stops re-filing explicit rejections (lead's decision d)"
     const n = await one<{ n: number }>("SELECT count_netcraft_resubmit_rejected() AS n");
     expect(n.n).toBe(1);
   });
+  it("keeps v289's uuid-collision bypass: a clone whose issue was spent on another alert skips the age wait", async () => {
+    // Re-creating this worklist from v253 silently dropped v289 (live in prod,
+    // file never on main) — review of #1254. Go-red: remove the
+    // `submission_has_issue` disjunct → the 5-day-old collision row is not due.
+    const recent = iso(ago(5 * 24 * 60));
+    await insert({
+      id: 3,
+      weaponisedAt: ago(300),
+      submittedTo: {
+        netcraft: { submitted_at: recent, url_state: "no threats" },
+        netcraft_issue: { skipped: "submission_has_issue" },
+      },
+    });
+    await insert({
+      id: 4,
+      weaponisedAt: ago(400),
+      submittedTo: { netcraft: { submitted_at: recent, url_state: "no threats" } },
+    });
+    expect(await due()).toEqual([3]);
+  });
 });
