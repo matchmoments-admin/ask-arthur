@@ -3,11 +3,17 @@
 // scam_reports. Drops the embedded vector into feed_items.embedding so the
 // hybrid retrieval RPCs can fold regulator narratives into search results.
 //
-// Cron-triggered rather than event-triggered because the producer
+// PARKED 2026-09-27 — event-only, no cron. See the trigger block below for
+// the restore condition. The vector this writes has exactly one reader,
+// match_feed_items_narrative, reached only through /api/v1/intel/search with
+// scope=narratives|all, FF_REGULATOR_INTEL_SEARCH, FF_REDDIT_INTEL_B2B_API
+// and a B2B API key — and api_keys holds zero rows (measured 2026-09-27). Six
+// runs a day were write-only work on the account's five Inngest slots, and a
+// sixth caller on the unpaid Voyage tier's shared 3 RPM ceiling.
+//
+// It was cron-triggered rather than event-triggered because the producer
 // (Python scrapers in pipeline/scrapers/) writes via psycopg and has no
-// Inngest client. A 30-min poll is fast enough for the 3h scraper cadence
-// and cheap — the get_unembedded_narrative_feed_items RPC is index-bounded
-// to a few hundred rows max.
+// Inngest client — so while parked, nothing fires it automatically.
 //
 // Idempotency: the RPC only returns rows where embedding IS NULL; once the
 // UPDATE writes a vector, subsequent polls ignore the row.
@@ -32,6 +38,8 @@ interface UnembeddedRow {
   impersonated_brand: string | null;
   category: string | null;
 }
+
+export const FEED_ITEMS_EMBED_EVENT = "news-intel.feed-items-embed.v1" as const;
 
 const BATCH_LIMIT = 40;
 // embed + write + log-cost run inside ONE step (v308/#1156): they were three
@@ -84,13 +92,17 @@ export const feedItemsEmbed = inngest.createFunction(
     name: "News Intel: Embed narrative feed_items",
     retries: 3,
   },
-  // Every 4h (was hourly). Embeds power /intel semantic search; a few hours of
-  // index-freshness lag is acceptable and lossless — get_unembedded_narrative_
-  // feed_items re-selects any not-yet-embedded rows each run, so a transient
-  // backlog (inflow > BATCH_LIMIT in one window) simply drains over the next
-  // runs. No feed_items are ever skipped, only embedded slightly later.
-  // :20, not :00 — off the account-concurrency pileup (v308/#1156).
-  { cron: "20 */4 * * *" },
+  // PARKED (event-only, no cron) — 2026-09-27. Same shape as the other parked
+  // Lanes (apps/web/__tests__/inngestParkedLanes.test.ts enforces it).
+  //
+  // **Restore `{ cron: "20 */4 * * *" }` when the first B2B API key exists**
+  // (`select count(*) from api_keys` > 0) and narratives search is on for it.
+  // Nothing is lost while parked: get_unembedded_narrative_feed_items returns
+  // every row with embedding IS NULL, so the first run after restore drains
+  // the backlog at BATCH_LIMIT per tick. To embed by hand before then, send
+  // FEED_ITEMS_EMBED_EVENT. Keep :20 on restore — off the account-concurrency
+  // pileup at :00 (v308/#1156).
+  { event: FEED_ITEMS_EMBED_EVENT },
   withAxiomLogging({ fnId: "feed-items-embed" }, async ({ step }) => {
     // Cost brake — this is a paid Voyage call. cost-daily-check sets the
     // `news_intel_embed` brake when the day's embed spend exceeds its cap;
