@@ -8,14 +8,20 @@
 // this cutover is verified). DO NOT write to the parent column from this
 // function — every new embedding goes to the sibling.
 //
-// Two trigger paths:
-//   1. Cron: daily at 04:00 UTC. Handles deltas — the ACNC scraper runs
-//      earlier in the day, so by 04:00 any newly-added charities are
-//      ready to embed. Daily delta is typically <50 rows.
-//   2. Event: acnc.charity-embed.backfill.v1 — manual trigger for the
-//      initial 63k-row backfill. Operator fires this ~13 times (each run
-//      embeds up to 5000 rows = ~25 batches × 200) until the sibling
-//      table is fully populated. Cost: ~$0.11 total at voyage-3.5 generic.
+// PARKED 2026-09-27 — event-only, no cron. See the trigger block below for
+// the restore condition. The daily 04:00 tick failed 100% of its runs from
+// at least 2026-08-31 to 2026-09-26 on a Voyage 429 ("You have not yet added
+// your payment method … reduced rate limits of 3 RPM and 10K TPM"), then
+// re-fired the next day: ~7 slot-min/day spent producing one error. The work
+// itself is done — 66,745 of 66,864 charities are embedded, and the 119
+// remaining only matter once Charity Check's consumer surface is live
+// (`NEXT_PUBLIC_FF_CHARITY_CHECK` is OFF).
+//
+// Trigger path (one, since the park):
+//   Event: acnc.charity-embed.backfill.v1 — manual trigger for a backfill or
+//   to catch up deltas. Each run embeds up to 5000 rows (~25 batches × 200);
+//   the original 63k backfill took ~13 fires. Cost: ~$0.11 total at
+//   voyage-3.5 generic.
 //
 // Embedding text: charity_legal_name + other_names joined with " | ". We
 // deliberately exclude purposes/beneficiaries — they're similar across
@@ -134,10 +140,28 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
     // spanning budget's queue wait.
     timeouts: { finish: "23m" },
   },
-  [
-    { cron: "0 4 * * *" }, // daily 04:00 UTC
-    { event: ACNC_CHARITY_EMBED_BACKFILL_EVENT },
-  ],
+  // PARKED (event-only, no cron) — 2026-09-27. Same shape as the four lanes
+  // parked by the earlier sweep (`scam-alert-push`, `enrich-vulnerabilities-cron`,
+  // `regulator-alert-push`, `report-onward-auto-report`).
+  //
+  // The daily tick failed EVERY run on a Voyage 429: the account is on the
+  // unpaid tier (3 RPM / 10K TPM) and one 200-row batch is ~10 chunked
+  // requests, so batch-0 is rate-limited before it can finish. Nothing was
+  // embedded; the run just cost a slot and an error, daily.
+  //
+  // **Restore `{ cron: "0 4 * * *" }` when BOTH hold:**
+  //   1. Charity Check's consumer surface is live (`NEXT_PUBLIC_FF_CHARITY_CHECK`),
+  //      so a stale delta actually costs a user something. 119 of 66,864 rows
+  //      are unembedded today and nothing reads them.
+  //   2. The Voyage account has a payment method, OR this fn's request rate is
+  //      sized to the free tier.
+  //
+  // Do NOT "fix" this by lowering BATCH_SIZE alone: at 3 RPM even one request
+  // per batch × MAX_BATCHES_PER_RUN breaches the ceiling within a run, and the
+  // only in-run remedy would be sleeping inside `step.run`, which holds one of
+  // the account's five slots (ADR-0019). Pay for the tier or fire the event by
+  // hand.
+  { event: ACNC_CHARITY_EMBED_BACKFILL_EVENT },
   withAxiomLogging(
     { fnId: "acnc-charity-backfill-embed" },
     async ({ event, step }) => {

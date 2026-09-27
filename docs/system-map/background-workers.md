@@ -134,9 +134,9 @@ finish-cancelled the single-statement URL sweep every day Sep 14–17 and left
 
 ### Charity Check
 
-| Function                      | Trigger                         | Purpose                                   |
-| ----------------------------- | ------------------------------- | ----------------------------------------- |
-| `acnc-charity-backfill-embed` | `0 4 * * *` (nightly 04:00 UTC) | Backfill ACNC embeddings to sibling table |
+| Function                      | Trigger                                              | Purpose                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `acnc-charity-backfill-embed` | **event only — PARKED 2026-09-27** (was `0 4 * * *`) | Backfill ACNC embeddings to sibling table. Cron removed: the daily tick failed 100% of runs on a Voyage 429 (unpaid tier, 3 RPM) while 66,745/66,864 rows were already embedded and `NEXT_PUBLIC_FF_CHARITY_CHECK` is OFF. Fire `acnc.charity-embed.backfill.v1` by hand; restore the cron per the condition in the fn header. |
 
 ### Phone Footprint
 
@@ -360,9 +360,13 @@ every 12h pipeline-enrichment-fanout (:35), risk-scorer (Inngest)
 
 Event-only — NO schedule (cron removed; 0 scheduled executions until re-enabled):
        scam-alert-push, regulator-alert-push, enrich-vulnerabilities-cron,
-       report-onward-auto-report. pushAlerts /
+       report-onward-auto-report, acnc-charity-backfill-embed. pushAlerts /
        Netcraft submission / onward-auto-report are dark in prod, so the old
-       schedules only burned executions on early-return.
+       schedules only burned executions on early-return; the ACNC backfill
+       (parked 2026-09-27) failed every run on a Voyage 429 instead.
+       The guard that keeps them parked is
+       apps/web/__tests__/inngestParkedLanes.test.ts — unparking means
+       deleting the entry there in the same commit.
 every 6h bot-queue-sweep, cost-daily-check    (Vercel)
 every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRACT)
 
@@ -374,7 +378,6 @@ every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRA
 03:30 scam-reports-retention                  (Vercel)
 03:45 reddit-processed-posts-retention        (Inngest)
 04:00 bot-queue-cleanup                       (Vercel)
-04:00 acnc-charity-backfill-embed             (Inngest)
 04:00 pipeline-cluster-builder                (Inngest)
 04:00 cost-telemetry-retention                (Inngest)
 04:30 reddit-intel-retention                  (Vercel)
