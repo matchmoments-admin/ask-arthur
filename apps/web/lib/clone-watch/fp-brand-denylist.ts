@@ -6,8 +6,11 @@
  * "clones" of them. They were removed from the watchlist (v176), but stale
  * detections linger in shopfront_clone_alerts — so every consumer of clone
  * detections must exclude them too. The single source of truth for the TS
- * side; the SQL RPC list_clone_alerts_pending_netcraft_auto keeps an
- * equivalent literal list (SQL can't import this).
+ * side. SQL can't import this, so two worklist RPCs keep a literal copy —
+ * list_clone_alerts_pending_netcraft_auto and _netcraft_issue — and
+ * __tests__/fpBrandDenylistSqlDrift.test.ts fails if either one's latest
+ * migration definition disagrees with this set. Changing it = edit here AND
+ * ship a migration re-creating both functions.
  *
  * Consumers:
  *  - the netcraft-auto worklist (never report these to Netcraft)
