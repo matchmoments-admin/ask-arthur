@@ -24,8 +24,11 @@
 // the ledger is cost_telemetry and not a new table.
 //
 // The (feature, provider, operation) triples are a contract with /admin/costs
-// and with the recheck / issue cooldowns, which read "this feature's latest
-// row" — never rename one here without grepping both.
+// and with the Lane cooldowns. The cooldowns read through `laneRanWithin`
+// below, so they follow a rename here automatically. /admin/costs does not:
+// grep it before renaming.
+
+import type { createServiceClient } from "@askarthur/supabase/server";
 
 import { logCost } from "./cost-log";
 
@@ -520,6 +523,42 @@ export async function recordLaneError<L extends LaneId>(
       ),
     },
   });
+}
+
+type Sb = NonNullable<ReturnType<typeof createServiceClient>>;
+
+/**
+ * Same-window cooldown read: did this Lane write a cost_telemetry row under its
+ * roster `feature` within the last `windowMs`? CLAUDE.md requires a cooldown on
+ * any cron that also has a manual trigger (the 2026-07-12 stacked-manual-fire
+ * urlscan breach), and each copy used to read a hand-typed feature string, so
+ * the write side was typed (`LaneId`) and the read side was not. Reading
+ * through the roster means a cooldown cannot point at a feature its Lane no
+ * longer writes.
+ *
+ * It matches on `feature` alone, not the full triple. That is deliberate and
+ * preserves the pre-extraction behaviour: any row the Lane writes under its
+ * feature counts as activity, including vendor rows that share it.
+ *
+ * Fails OPEN: an unreadable log returns false and the run proceeds. The cooldown
+ * only smooths operator ergonomics. The quota backstops are the Lane's throttle
+ * and its daily cap, so a skipped cooldown cannot breach a vendor ceiling alone.
+ */
+export async function laneRanWithin(
+  sb: Sb,
+  lane: LaneId,
+  windowMs: number,
+): Promise<boolean> {
+  const { data } = await sb
+    .from("cost_telemetry")
+    .select("created_at")
+    .eq("feature", LANES[lane].feature)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const at = (data as { created_at?: string } | null)?.created_at;
+  if (!at) return false;
+  return Date.now() - new Date(at).getTime() < windowMs;
 }
 
 /** The distinct `feature` values the roster writes — the detector's fetch filter. */

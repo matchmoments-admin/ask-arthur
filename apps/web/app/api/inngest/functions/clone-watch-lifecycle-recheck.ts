@@ -1,6 +1,7 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import {
   LANES,
+  laneRanWithin,
   recordLaneError,
   recordLaneOutcome,
 } from "@askarthur/scam-engine/lane-outcome";
@@ -477,19 +478,9 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // 50-submit runs into one hour and breach urlscan's 100/hour unlisted cap
       // (which happened 2026-07-12 00:00 UTC). The throttle is the structural
       // backstop; this is the operator-ergonomics one.
-      const recentRun = await step.run("check-cooldown", async () => {
-        const { data } = await sb
-          .from("cost_telemetry")
-          .select("created_at")
-          .eq("feature", "shopfront_clone_recheck")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (!data?.created_at) return false;
-        return (
-          Date.now() - new Date(data.created_at).getTime() < RECHECK_COOLDOWN_MS
-        );
-      });
+      const recentRun = await step.run("check-cooldown", () =>
+        laneRanWithin(sb, "shopfront-clone-lifecycle-recheck", RECHECK_COOLDOWN_MS),
+      );
       if (recentRun) {
         return { skipped: true, reason: "cooldown_active" };
       }
