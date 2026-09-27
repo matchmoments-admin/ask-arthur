@@ -120,15 +120,28 @@ export const enrichmentFanOut = inngest.createFunction(
     // Step 1: Fetch pending URLs (newest-first) and extract unique domains.
     // Also read the total pending backlog so its size is observable (the queue
     // vastly exceeds per-run throughput; surface it rather than let it hide).
-    const { domains: pendingDomains, backlog } = await step.run(
+    //
+    // The backlog gauge is `count: "planned"`, NOT "exact", and that is the
+    // whole reason this step works. PostgREST logs in as `authenticator`
+    // (`statement_timeout = 8s`) and that is the only real cap a supabase-js
+    // caller runs under — an in-body `SET LOCAL` never re-arms the timer
+    // (v310/#1161). Measured on prod 2026-09-22: the row fetch below is 78 ms,
+    // but `count: "exact"` over the ~250k-row pending set costs **7.8 s**
+    // (238,164 heap fetches on idx_scam_urls_enrichment_queue) — so the step
+    // failed on EVERY run from 2026-07-29 to 2026-09-27, twice a day, with
+    // "Failed to fetch pending URLs" + 57014, and no URL was ever enriched in
+    // that window. A gauge does not need an exact number; "planned" answers
+    // from the planner's estimate at no scan cost. The guard is
+    // `apps/web/__tests__/inngestHotTableCounts.test.ts`.
+    const { domains: pendingDomains, backlogEstimate } = await step.run(
       "fetch-pending-domains",
       async () => {
         const supabase = createServiceClient();
-        if (!supabase) return { domains: [], backlog: 0 };
+        if (!supabase) return { domains: [], backlogEstimate: 0 };
 
         const { data, error, count } = await supabase
           .from("scam_urls")
-          .select("id, domain", { count: "exact" })
+          .select("id, domain", { count: "planned" })
           .eq("enrichment_status", "pending")
           .eq("is_active", true)
           .order("created_at", { ascending: false }) // newest-first (see header)
@@ -153,7 +166,7 @@ export const enrichmentFanOut = inngest.createFunction(
           domains: Array.from(domainMap.entries())
             .slice(0, MAX_DOMAINS_PER_RUN)
             .map(([domain, urlIds]) => ({ domain, urlIds })),
-          backlog: count ?? 0,
+          backlogEstimate: count ?? 0,
         };
       },
     );
@@ -168,11 +181,11 @@ export const enrichmentFanOut = inngest.createFunction(
     // alert-fatigue anti-pattern). INFO keeps the ceiling queryable in Axiom for
     // the enrich-what-users-check scoping decision without paging on a
     // permanent state. The raw backlog is also directly queryable from scam_urls.
-    if (backlog > 5000) {
+    if (backlogEstimate > 5000) {
       logger.info(
         "pipeline-enrichment-fanout: pending backlog far exceeds throughput",
         {
-          backlog,
+          backlogEstimate,
           perRunCap: MAX_DOMAINS_PER_RUN,
           hint: "queue is ~all source_type='feed' (blocklist dumps); newest-first enriches fresh threats, stale tail sheds via staleness. Permanent by design — on-demand enrichment (D3) covers user-checked URLs.",
         },
