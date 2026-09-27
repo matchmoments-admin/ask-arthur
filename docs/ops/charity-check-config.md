@@ -101,6 +101,20 @@ be true for the scraper to actually run on a scheduled or dispatched job.
 - `match_charities_by_embedding(p_query_embedding VECTOR(1024), p_match_count INT, p_min_similarity REAL)` — semantic NN over `acnc_charity_embeddings` (sibling, v121). JOINs back to `acnc_charities` for the human-readable columns + filters `is_delisted=true`. Granted to `anon, authenticated, service_role`.
 - `get_acnc_charities_missing_embedding(p_limit INT)` — backfill helper used by the `acnc-charity-backfill-embed` Inngest function. Returns live (non-delisted) charities whose row is absent from the sibling table. Granted to `service_role` only.
 
+> **The embed backfill is PARKED (2026-09-27).** `acnc-charity-backfill-embed` is
+> event-only — its daily 04:00 cron was removed because it failed 100% of runs on
+> a Voyage 429 (unpaid tier, 3 RPM — see
+> [voyage-embeddings-config.md §0](./voyage-embeddings-config.md)). State at the
+> park: **66,745 of 66,864** charities embedded, **119 unembedded**, and nothing
+> reads them while `NEXT_PUBLIC_FF_CHARITY_CHECK` is OFF.
+>
+> **Before flipping `NEXT_PUBLIC_FF_CHARITY_CHECK` on, drain the 119** — fire
+> `acnc.charity-embed.backfill.v1` from the Inngest dashboard (repeat until
+> `get_acnc_charities_missing_embedding(200)` returns zero rows), or restore the
+> cron once Voyage is on a paid tier. Leaving them unembedded means those
+> charities are invisible to `match_charities_by_embedding`, i.e. to semantic
+> typosquat detection — a silent recall gap, not an error.
+
 ### HNSW build (one-shot, pre-launch)
 
 The v121 migration creates the sibling table without the HNSW index — at 63k × 1024-dim vectors the build exceeds the migration runner's timeout (and the MCP-imposed timeout). Build it manually via the Supabase **SQL Editor** (the dashboard editor has a longer query budget than the MCP) **before** flipping `NEXT_PUBLIC_FF_CHARITY_CHECK` to `true`:

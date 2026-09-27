@@ -306,7 +306,7 @@ GH Action: pipeline/scrapers/acnc_register.py  (daily 16:00 UTC, gated ENABLE_CH
   └─ Chunked UPDATE/INSERT acnc_charities (≤5K rows/iteration, statement_timeout='300s')
   └─ TOUCH_LAST_SEEN_SQL via row_hash to skip unchanged rows  (reference pattern post-PR #187)
 
-Inngest: acnc-charity-backfill-embed  (nightly 04:00 UTC)
+Inngest: acnc-charity-backfill-embed  (event only — PARKED 2026-09-27, was nightly 04:00 UTC)
   └─ SELECT acnc_charities WHERE NOT EXISTS (acnc_charity_embeddings.abn = …)
   └─ Voyage embed name + mission (chunked, cost-brake gated CHARITY_CHECK_CAP_USD)
   └─ INSERT acnc_charity_embeddings (sibling table; HNSW lives here, not on parent)

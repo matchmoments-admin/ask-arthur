@@ -11,6 +11,40 @@ Single source of truth for the Voyage retrieval stack: env vars, feature flags, 
 
 ---
 
+## 0. Account tier — read this before adding a Voyage caller
+
+**Measured 2026-09-27: the Voyage account has no payment method, so every key on
+it is capped at 3 RPM / 10K TPM** ("You have not yet added your payment method in
+the billing page and will have reduced rate limits…"). That ceiling is shared by
+every caller, and it is a _request-rate_ cap, not a spend cap — the spend is
+negligible (7-day actual across all callers: **US$0.0015**), so the cap has
+nothing to do with cost control. It is purely an unpaid-tier restriction.
+
+What the cap has already cost:
+
+| Caller                                 | Cadence                | Effect of the 3 RPM cap                                                                                                                                                                            |
+| -------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acnc-charity-backfill-embed`          | was daily 04:00        | **failed 100% of runs** — one 200-row batch is ~10 chunked requests, so batch-0 was rate-limited before finishing. **PARKED 2026-09-27** (event-only; see `docs/system-map/background-workers.md`) |
+| `reddit-intel-embed`                   | event + `25 2,8,14,20` | intermittent `voyage embeddings timed out after 20000ms` — first seen 2026-09-14, 8 occurrences to 2026-09-26. **This is a live feature failing**, unlike the dark Charity Check backfill          |
+| `feed-items-embed`                     | `20 */4`               | fits (40 rows/run)                                                                                                                                                                                 |
+| `scam-report-embed`                    | event                  | fits (1 text/run)                                                                                                                                                                                  |
+| `scam-reports-backfill-embed`          | `30 5`                 | fits at current volume                                                                                                                                                                             |
+| `themes-retrieval`, `/api/v1/*/search` | request-time           | single query embed — fits                                                                                                                                                                          |
+
+**Adding a payment method removes all of the above** and costs effectively
+nothing at this volume. Until then:
+
+- Size any new caller so its **request count per minute** (not its row count)
+  stays under 3. `EMBED_CHUNK_TEXTS = 20` in `packages/scam-engine/src/embeddings.ts`
+  means a batch of N rows is `ceil(N/20)` requests.
+- Do **not** work around it by sleeping inside `step.run` — that holds one of
+  the Inngest account's five concurrency slots (ADR-0019).
+- `callVoyage` (`embeddings.ts`) throws a plain `Error` on 429, so Inngest
+  retries the identical oversized batch and breaches the cap again. Making the
+  429 a typed, rate-aware failure is a tracked deepening candidate, not done.
+
+---
+
 ## 1. Production migration state (as of 2026-05-04)
 
 | Migration | Applied | What it adds                                                                                                      |
