@@ -43,7 +43,7 @@ const CARRIERS = [
 const MARKER = "allhomes.com.au";
 
 const FUNCTION_RE =
-  /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?([a-z_0-9]+)\s*\(.*?\bas\s+(\$[a-z_]*\$)(.*?)\2/gis;
+  /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?([a-z_0-9]+)\s*\([\s\S]*?\bas\s+(\$[a-z_]*\$)([\s\S]*?)\2/gi;
 
 function migrationVersion(file: string): number {
   const m = /^migration-v(\d+)/.exec(file);
