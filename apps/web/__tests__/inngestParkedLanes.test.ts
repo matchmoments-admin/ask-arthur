@@ -52,6 +52,14 @@ const PARKED_LANES: ParkedLane[] = [
       "NEXT_PUBLIC_FF_CHARITY_CHECK is live AND Voyage is on a paid tier (or this fn's request rate fits 3 RPM)",
   },
   {
+    id: "feed-items-embed",
+    file: join(ENGINE_FNS, "feed-items-embed.ts"),
+    // Parked 2026-09-27: 6 runs/day writing feed_items.embedding, whose only
+    // reader (match_feed_items_narrative via /api/v1/intel/search) needs a B2B
+    // API key — and api_keys held zero rows.
+    restoreWhen: "the first B2B API key exists and narratives search is enabled for it",
+  },
+  {
     id: "scam-alert-push",
     file: join(ENGINE_FNS, "scam-alerts.ts"),
     restoreWhen: "push alerts launch (featureFlags.pushAlerts on in prod)",

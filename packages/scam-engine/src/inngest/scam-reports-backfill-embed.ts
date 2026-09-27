@@ -24,6 +24,14 @@
 // "synchronous", but it needs a new event + wiring storeVerifiedScam + a new fn
 // registration; the cron reuses this already-correct batch logic. Tracked as a
 // follow-up if verified_scam volume ever makes daily latency matter.)
+//
+// Reader check (2026-09-27): the verified_scams leg writes a vector with ONE
+// reader — match_verified_scams, called only by /api/v1/scams/search behind
+// FF_SCAMS_SEARCH_B2B_API and a B2B API key, and api_keys held zero rows. The
+// leg is kept rather than removed because it rides a run that already happens
+// (the scam_reports leg feeds live similar-reports search) and costs ~nothing;
+// feed-items-embed, which had no such live leg, was parked instead. If this
+// cron is ever parked, the verified_scams tail re-selects on `embedding IS NULL`.
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
