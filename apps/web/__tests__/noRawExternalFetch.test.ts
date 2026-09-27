@@ -52,12 +52,6 @@ const FIXED_HOST: Allowlist = {
       "const res = await fetch(",
     ],
   },
-  "packages/scam-engine/src/ct-lookup.ts": {
-    reason: "crt.sh API; domain is a query param.",
-    calls: [
-      "const res = await fetch(",
-    ],
-  },
   "packages/scam-engine/src/deepfake-detect.ts": {
     reason: "Reality Defender / Resemble APIs (upload, fixed hosts).",
     calls: [

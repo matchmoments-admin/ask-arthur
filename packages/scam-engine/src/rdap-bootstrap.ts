@@ -25,7 +25,7 @@ import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
 
 const BOOTSTRAP_URL = "https://data.iana.org/rdap/dns.json";
 const BOOTSTRAP_CACHE_KEY = "askarthur:rdap-bootstrap";
-const BOOTSTRAP_TTL = 43_200; // 12h Redis TTL (matches ct-lookup)
+const BOOTSTRAP_TTL = 43_200; // 12h Redis TTL
 const MEMO_TTL_MS = 60 * 60 * 1000; // 1h in-process memo freshness
 const BOOTSTRAP_FETCH_TIMEOUT_MS = 5000;
 

@@ -1,7 +1,7 @@
 // Entity enrichment — every 8h, finds entities with report_count >= 2 that need
 // enrichment, and runs type-specific lookups combining local intelligence (DNS,
 // libphonenumber) with external checks (WHOIS, SSL, Safe Browsing, geolocation).
-// Tier 1 external APIs (AbuseIPDB, HIBP, crt.sh, Twilio) run inline via
+// Tier 1 external APIs (AbuseIPDB, HIBP, Twilio) run inline via
 // Promise.allSettled — one failure never blocks others.
 // Capped at 30 entities per run to stay within serverless limits.
 
@@ -23,7 +23,6 @@ import {
 } from "../local-intel";
 import { checkAbuseIPDB } from "../abuseipdb";
 import { checkHIBP } from "../hibp";
-import { lookupCT } from "../ct-lookup";
 import { lookupPhoneNumber } from "../twilio-lookup";
 import { checkIPQS } from "../ipqualityscore";
 import { withAxiomLogging } from "./with-axiom-logging";
@@ -86,55 +85,47 @@ async function enrichPhone(value: string): Promise<Record<string, unknown>> {
 }
 
 async function enrichDomain(value: string): Promise<Record<string, unknown>> {
-  const checks: Promise<unknown>[] = [
+  // Destructured by NAME, not read back by index. The previous shape pushed an
+  // optional Certificate-Transparency leg onto a `checks` array and then read
+  // `results[3]`, so the meaning of every index depended on a feature flag —
+  // the shape where removing a leg silently misattributes its neighbour's
+  // result. The CT leg is gone (crt.sh is dead, ADR-0016) and these three are
+  // unconditional, so there is no index left to get wrong.
+  const [localIntelResult, whoisResult, sslResult] = await Promise.allSettled([
     analyzeDomain(value),
     lookupWhois(value, { priority: "batch" }),
     checkSSL(value),
-  ];
+  ]);
 
-  // Certificate Transparency — gated by ctLookup flag
-  const useCT = featureFlags.ctLookup;
-  if (useCT) {
-    checks.push(lookupCT(value));
-  }
-
-  const results = await Promise.allSettled(checks);
+  // Real types, not `Record<string, unknown>` casts. The casts existed only
+  // because the old `checks` array was typed `Promise<unknown>[]` to hold the
+  // optional CT leg; with a fixed tuple, `WhoisResult` and `SSLResult` flow
+  // through and each field below is checked against its source.
   const localIntel =
-    results[0].status === "fulfilled" ? results[0].value : null;
-  const whois =
-    results[1].status === "fulfilled"
-      ? (results[1].value as Record<string, unknown>)
-      : null;
-  const ssl =
-    results[2].status === "fulfilled"
-      ? (results[2].value as Record<string, unknown>)
-      : null;
+    localIntelResult.status === "fulfilled" ? localIntelResult.value : null;
+  const whois = whoisResult.status === "fulfilled" ? whoisResult.value : null;
+  const ssl = sslResult.status === "fulfilled" ? sslResult.value : null;
 
   const data: Record<string, unknown> = {
     localIntel,
     whois: whois
       ? {
-          registrar: (whois as { registrar?: string }).registrar,
-          registrantCountry: (whois as { registrantCountry?: string })
-            .registrantCountry,
-          createdDate: (whois as { createdDate?: string }).createdDate,
-          expiresDate: (whois as { expiresDate?: string }).expiresDate,
-          nameServers: (whois as { nameServers?: string[] }).nameServers,
-          isPrivate: (whois as { isPrivate?: boolean }).isPrivate,
+          registrar: whois.registrar,
+          registrantCountry: whois.registrantCountry,
+          createdDate: whois.createdDate,
+          expiresDate: whois.expiresDate,
+          nameServers: whois.nameServers,
+          isPrivate: whois.isPrivate,
         }
       : null,
     ssl: ssl
       ? {
-          valid: (ssl as { valid?: boolean }).valid,
-          issuer: (ssl as { issuer?: string }).issuer,
-          daysRemaining: (ssl as { daysRemaining?: number }).daysRemaining,
+          valid: ssl.valid,
+          issuer: ssl.issuer,
+          daysRemaining: ssl.daysRemaining,
         }
       : null,
   };
-
-  if (useCT && results[3]?.status === "fulfilled") {
-    data.ctLookup = results[3].value;
-  }
 
   return data;
 }
@@ -271,7 +262,7 @@ export const entityEnrichmentFanOut = inngest.createFunction(
     name: "Pipeline: Enrich Pending Entities",
     concurrency: { limit: 1 },
     // Each fan-out run triggers up to 30 × (Twilio Lookup + AbuseIPDB + IPQS +
-    // HIBP + WHOIS + SSL + crt.sh) — Twilio Lookup is the most expensive at
+    // HIBP + WHOIS + SSL) — Twilio Lookup is the most expensive at
     // ~A$0.005/call. A manual re-trigger storm could burn through the
     // AbuseIPDB free-tier 1k/day cap in two clicks. Cron-safe (10m < 4h).
     rateLimit: { limit: 1, period: "10m" },

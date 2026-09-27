@@ -3,10 +3,6 @@ import {
   type DomainRegistration,
 } from "@askarthur/scam-engine/domain-registration";
 import {
-  lookupCT,
-  type CTLookupResult,
-} from "@askarthur/scam-engine/ct-lookup";
-import {
   checkAbuseIPDB,
   type AbuseIPDBResult,
 } from "@askarthur/scam-engine/abuseipdb";
@@ -59,6 +55,12 @@ export interface CloneAttribution {
      *  stops asking at WHOIS_HTTP_ERROR_MAX_DEFERRALS. */
     httpErrorDeferrals?: number;
   } | null;
+  /** Certificate-Transparency siblings. **No longer produced** — the crt.sh
+   *  source is dead (ADR-0016, 2026-07-17 amendment) and the leg was removed
+   *  2026-09-27; every new dossier writes `null`. The field stays because 116
+   *  alerts enriched before the removal carry one, and `campaignKeyFromDossier`
+   *  still hashes `ct.issuer` into their `campaign_key` — dropping the READ
+   *  path would re-fingerprint those rows and split them from their clusters. */
   ct: {
     siblings: string[];
     hasWildcard: boolean;
@@ -78,7 +80,6 @@ export interface CloneAttribution {
   enriched_at: string;
 }
 
-const MAX_SIBLINGS = 15;
 
 /** Hosting attribution already captured by urlscan (urlscan_evidence.server). */
 export interface HostingInfo {
@@ -138,31 +139,18 @@ export function whoisRetryAfter(
 export function shapeAttribution(args: {
   domain: string;
   whois: DomainRegistration | null;
-  ct: CTLookupResult | null;
   ipRep: AbuseIPDBResult | null;
   geo: GeoResult | null;
   hosting: HostingInfo;
   auRegistrant?: AuRegistrantBlock | null;
   enrichedAt: string;
 }): CloneAttribution {
-  const { domain, whois, ct, ipRep, geo, hosting, auRegistrant, enrichedAt } =
-    args;
-
-  const ctSection = ct
-    ? {
-        // Other names on the cert, excluding the clone domain itself.
-        siblings: ct.uniqueSubdomains
-          .filter((d) => d.replace(/^\*\./, "") !== domain)
-          .slice(0, MAX_SIBLINGS),
-        hasWildcard: ct.hasWildcard,
-        issuer: ct.certificates[0]?.issuerName ?? null,
-        certificateCount: ct.certificateCount,
-      }
-    : null;
+  const { whois, ipRep, geo, hosting, auRegistrant, enrichedAt } = args;
 
   return {
     whois: shapeWhoisSection(whois),
-    ct: ctSection,
+    // Always null since 2026-09-27 — see the `ct` field's note on the type.
+    ct: null,
     ip_rep: ipRep
       ? {
           abuseConfidenceScore: ipRep.abuseConfidenceScore,
@@ -183,18 +171,21 @@ export function shapeAttribution(args: {
 }
 
 /**
- * Enrich one confirmed clone. Runs the helper calls concurrently; CT + AbuseIPDB
- * are gated by their feature flags (matching entity-enrichment.ts). geolocateIP
- * only fires when urlscan didn't already give us a hosting country.
+ * Enrich one confirmed clone. Runs the helper calls concurrently; AbuseIPDB and
+ * the .au registrant lookup are gated by their feature flags. geolocateIP only
+ * fires when urlscan didn't already give us a hosting country.
+ *
+ * The Certificate-Transparency leg was removed 2026-09-27: crt.sh is dead
+ * (ADR-0016) and every call was spending its full 5s timeout — ~15-20 of those
+ * a day on this lane alone, for a section nothing renders.
  */
 export async function enrichCloneAttribution(
   domain: string,
   hosting: HostingInfo,
   now: Date = new Date(),
 ): Promise<CloneAttribution> {
-  const [whois, ct, ipRep, geo, auRaw] = await Promise.all([
+  const [whois, ipRep, geo, auRaw] = await Promise.all([
     lookupDomainRegistration(domain, { priority: "batch" }).catch(() => null),
-    featureFlags.ctLookup ? lookupCT(domain).catch(() => null) : null,
     hosting.ip && featureFlags.abuseIPDB
       ? checkAbuseIPDB(hosting.ip).catch(() => null)
       : null,
@@ -217,7 +208,6 @@ export async function enrichCloneAttribution(
   return shapeAttribution({
     domain,
     whois,
-    ct,
     ipRep,
     geo,
     hosting,

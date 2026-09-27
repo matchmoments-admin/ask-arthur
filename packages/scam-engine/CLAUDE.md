@@ -5,7 +5,7 @@ Scoped guidance for the scam-engine package — Claude AI integration, threat en
 ## What this package owns
 
 - **Claude integration** — `claude.ts`, `anthropic.ts`, `analyze-core.ts`
-- **Enrichment helpers** — Google Safe Browsing, VirusTotal, AbuseIPDB, IPQS, URLScan, HIBP, CT-log lookups
+- **Enrichment helpers** — Google Safe Browsing, VirusTotal, AbuseIPDB, IPQS, URLScan, HIBP
 - **Pipeline writes** — `pipeline.ts` (scrubs PII, normalises, calls RPCs to persist scam reports / entities / wallets / IPs)
 - **Inngest durable functions** — under `src/inngest/` (28+ functions: enrichment, cron, retention, embeddings, brand alerts)
 - **Sub-domain modules** — `news-intel/`, `phone-footprint/`

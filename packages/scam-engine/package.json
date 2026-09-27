@@ -54,7 +54,6 @@
     "./local-intel": "./src/local-intel.ts",
     "./abuseipdb": "./src/abuseipdb.ts",
     "./hibp": "./src/hibp.ts",
-    "./ct-lookup": "./src/ct-lookup.ts",
     "./twilio-lookup": "./src/twilio-lookup.ts",
     "./urlscan": "./src/urlscan.ts",
     "./hive-ai": "./src/hive-ai.ts",

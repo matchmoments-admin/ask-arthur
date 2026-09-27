@@ -297,9 +297,10 @@ jobs:
       # rows still sweepable. Only now is the scraper genuinely redundant.
       #
       # ADR-0016's 2026-07-17 amendment already found the CT mechanism dead for
-      # discovery; this closes the retention half. crt.sh is ALSO used at runtime
-      # by packages/scam-engine/src/ct-lookup.ts — a separate live path,
-      # unaffected. Kept dispatchable via `-f feed=crtsh` for re-probing.
+      # discovery; this closes the retention half. The runtime crt.sh path
+      # (ct-lookup.ts) was ALSO removed 2026-09-27 — every call was spending its
+      # full 5s timeout, so there is now no live crt.sh caller anywhere. Kept
+      # dispatchable via `-f feed=crtsh` for re-probing.
       - name: crt.sh [retired — 0 new rows since 2026-06-05; findings preserved by v262 exemption]
         if: github.event.inputs.feed == 'crtsh'
         env:
