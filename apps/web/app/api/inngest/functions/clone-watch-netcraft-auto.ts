@@ -93,6 +93,15 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * quiet day and does not by itself indicate a starved lane.
  */
 
+// BATCH SIZE IS LOAD-BEARING FOR ESCALATION (v289, measured 2026-08-24).
+// Netcraft permits ONE issue report per submission uuid and this lane stamps
+// every alert in a batch with the same uuid, so a batch of N leaves N-1 alerts
+// that can never be escalated (`skipped: "submission_has_issue"`). Pre-v284
+// batches of 25-37 URLs stranded 25 live weaponised clones. What keeps batches
+// at 1-2 is the EVIDENCE GATE in the worklist RPC, not DAILY_CAP — loosen that
+// predicate and this bug returns silently. Watch query: docs/ops/
+// clone-watch-config.md "Escalation is gated by BATCH SIZE". (Ported from the
+// closed PR #1040, whose migrations v289/v290 are live.)
 const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
 // ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
 // with its evidence in lib/clone-watch/preclassify-thresholds.ts.
