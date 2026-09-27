@@ -2,7 +2,7 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
@@ -62,7 +62,7 @@ export const monthlyIntelBlog = inngest.createFunction(
     // Tier 3 brake gap (2026-08-07): spend (one Sonnet call/month) now has an
     // operator kill-switch like every other paid path. No cron auto-engages
     // this key — it exists for the human reaching for a handbrake.
-    if (await isFeatureBraked("monthly_intel_blog")) {
+    if (await isFeatureBrakedOrUnknown("monthly_intel_blog")) {
       return { skipped: true, reason: "feature_brakes.monthly_intel_blog engaged" };
     }
 

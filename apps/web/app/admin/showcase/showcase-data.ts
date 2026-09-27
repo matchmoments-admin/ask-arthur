@@ -420,7 +420,7 @@ assertTransition(alert.status, next); // TS side, same table`,
     codeSnippet: {
       lang: "ts",
       title: "the brake is checked before the spend, not after",
-      code: `if (await isFeatureBraked("reddit_intel")) return skipped();
+      code: `if (await isFeatureBrakedOrUnknown("reddit_intel")) return skipped();
 const res = await claude.messages.create(...);
 await logCost({ feature: "reddit-intel", provider: "anthropic", ... });`,
     },

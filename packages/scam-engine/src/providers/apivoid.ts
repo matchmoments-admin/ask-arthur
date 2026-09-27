@@ -19,8 +19,8 @@
 // post-response Inngest fan-out. This module is the adapter + brake check
 // only. Plan: docs/plans/shop-guard-v2.md §4 PR 2. Issue #319.
 
-import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 import type { PaidProviderVerdict } from "@askarthur/types";
 
 const APIVOID_SITE_TRUST_URL = "https://api.apivoid.com/v2/site-trust";
@@ -77,37 +77,6 @@ function extractHost(input: string): string | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Returns true when the shop_signal cost brake is engaged (paused_until in
- * the future). Defence-in-depth alongside the cost-daily-check gate. A null
- * Supabase client (env entirely missing) is treated as "skip the call" —
- * if the DB layer is down we also cannot logCost and the system is broadly
- * degraded, so declining a paid call is the safe default.
- */
-async function isBrakeEngaged(): Promise<boolean> {
-  const supabase = createServiceClient();
-  if (!supabase) {
-    logger.warn(
-      "apivoid: no Supabase client — skipping paid call (brake unverifiable)",
-    );
-    return true;
-  }
-  const { data, error } = await supabase
-    .from("feature_brakes")
-    .select("paused_until")
-    .eq("feature", "shop_signal")
-    .maybeSingle();
-  if (error) {
-    logger.warn("apivoid: feature_brakes lookup failed — skipping paid call", {
-      error: error.message,
-    });
-    return true;
-  }
-  return Boolean(
-    data?.paused_until && new Date(data.paused_until).getTime() > Date.now(),
-  );
 }
 
 /** Coerce an unknown JSON value to a finite number, else fallback. */
@@ -196,7 +165,7 @@ export async function getSiteTrustworthiness(
     return { ok: false, reason: "bad-host" };
   }
 
-  if (await isBrakeEngaged()) {
+  if (await isFeatureBrakedOrUnknown("shop_signal")) {
     logger.warn("apivoid: shop_signal brake engaged — skipping paid call", {
       host,
     });

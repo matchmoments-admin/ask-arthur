@@ -24,7 +24,7 @@ import { vectorToPgString } from "@askarthur/utils/pgvector";
 
 import { inngest } from "./client";
 import { embed } from "../embeddings";
-import { isFeatureBraked } from "../cost-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { budgetedStep } from "./step-budget";
 
@@ -108,7 +108,7 @@ export const feedItemsEmbed = inngest.createFunction(
     // `news_intel_embed` brake when the day's embed spend exceeds its cap;
     // every peer Voyage consumer (reddit-intel-*) has the same guard. No
     // brake row → runs normally (regression-free).
-    if (await isFeatureBraked("news_intel_embed")) {
+    if (await isFeatureBrakedOrUnknown("news_intel_embed")) {
       return { skipped: true, reason: "cost_brake_engaged" };
     }
 

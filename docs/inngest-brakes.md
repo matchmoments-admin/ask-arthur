@@ -195,6 +195,6 @@ A new function should arrive with at least these brakes from day one:
 3. **`rateLimit`** if the function is cron-triggered or accepts user-triggered events — defends against manual-trigger storms. Cron-safe rule of thumb: pick a period < cron cadence (e.g. 5–30m for a 6h cron).
 4. **`idempotency`** if the function is event-triggered and writes to DB — use a deterministic key from the event payload (`event.data.requestId` is the standard).
 5. **`logCost()`** at every paid-API call site if the function touches a metered API. Pricing constants live in `apps/web/lib/cost-telemetry.ts`.
-6. **`feature_brakes` check** at function entry if the function spends real money — pattern in `enrich-vulnerability.ts:isBrakeSet()` and `reddit-intel-daily.ts:isRedditIntelBraked()`. Add a row to the `cost-daily-check` cron for the new feature so it can be auto-paused at threshold.
+6. **`feature_brakes` check** at function entry if the function spends real money — use `isFeatureBrakedOrUnknown("<key>")` from `@askarthur/scam-engine/cost-log` (fail-closed: an unreadable brake stops the spend). The fail-open `isFeatureBraked` is reserved for user-facing request paths listed in `apps/web/__tests__/brakeReadPolicy.test.ts`, which fails on any other caller and on any hand-rolled `feature_brakes` read. Add a row to the `cost-daily-check` cron for the new feature so it can be auto-paused at threshold.
 
 Update this matrix when you add a function. A blank cell where a brake should exist is a P1.

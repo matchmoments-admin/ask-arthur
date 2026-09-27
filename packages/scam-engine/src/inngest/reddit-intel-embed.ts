@@ -29,10 +29,8 @@ import {
   resolveRedditIntelSummarisedData,
 } from "./events";
 import { embed } from "../embeddings";
-import {
-  logFunctionError,
-  isRedditIntelBraked,
-} from "./reddit-intel-error-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
+import { logFunctionError } from "./reddit-intel-error-log";
 
 export interface IntelRowForEmbed {
   id: string;
@@ -173,7 +171,7 @@ export const redditIntelEmbed = inngest.createFunction(
     // step's normal result stays an array, so a replay of a run memoised by
     // the older code still reads correctly.
     const loaded = await step.run("load-unembedded", async () => {
-      if (await isRedditIntelBraked()) return { paused: true as const };
+      if (await isFeatureBrakedOrUnknown("reddit_intel")) return { paused: true as const };
       const supabase = createServiceClient();
       if (!supabase) throw new Error("Supabase service client unavailable");
 

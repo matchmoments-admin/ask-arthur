@@ -59,10 +59,8 @@ import {
   resolveRedditIntelEmbeddedData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
-import {
-  logFunctionError,
-  isRedditIntelBraked,
-} from "./reddit-intel-error-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
+import { logFunctionError } from "./reddit-intel-error-log";
 import { budgetedStep, type BudgetClock } from "./step-budget";
 import { withAxiomLogging } from "./with-axiom-logging";
 
@@ -822,7 +820,7 @@ export const redditIntelCluster = inngest.createFunction(
           // load-posts for why (#1196's un-stepped read re-ran on replay).
           // `paused` is absent from results memoised by older code, so those
           // replays read as not paused.
-          if (await isRedditIntelBraked()) return { paused: true as const };
+          if (await isFeatureBrakedOrUnknown("reddit_intel")) return { paused: true as const };
           const supabase = createServiceClient();
           if (!supabase) throw new Error("Supabase service client unavailable");
 

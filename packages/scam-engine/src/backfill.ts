@@ -43,7 +43,7 @@
  * hypothetical. The four brand backfill scripts deliberately do NOT use it:
  * they make no paid calls, so none of these invariants apply to them.
  */
-import { isFeatureBraked, logCost } from "./cost-log";
+import { isFeatureBrakedOrUnknown, logCost } from "./cost-log";
 
 export interface BackfillBatchResult {
   /** What this batch actually cost. Logged verbatim; do not round. */
@@ -100,7 +100,7 @@ export async function runSpendingBackfill<T>(
   // The brake first, before the dry projection even — an operator should be
   // told the feature is paused rather than shown a cost estimate for a run
   // that would refuse to start.
-  if (await isFeatureBraked(opts.brakeFeature)) {
+  if (await isFeatureBrakedOrUnknown(opts.brakeFeature)) {
     console.log(
       `feature_brakes.${opts.brakeFeature} is engaged — refusing to spend.`,
     );
