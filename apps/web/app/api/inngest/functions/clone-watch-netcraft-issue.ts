@@ -1,5 +1,9 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
-import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
+import {
+  LANES,
+  laneRanWithin,
+  recordLaneOutcome,
+} from "@askarthur/scam-engine/lane-outcome";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { spanningBudget } from "@askarthur/scam-engine/inngest/step-budget";
@@ -211,17 +215,9 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       // back and spend the day's Netcraft GET budget re-reading the same uuids.
       // Mirrors clone-watch-lifecycle-recheck's check-cooldown. The daily cap is
       // the structural backstop; this is the ergonomics one.
-      const recentRun = await step.run("check-cooldown", async () => {
-        const { data } = await sb
-          .from("cost_telemetry")
-          .select("created_at")
-          .eq("feature", "shopfront_clone_netcraft_issue")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (!data?.created_at) return false;
-        return Date.now() - new Date(data.created_at).getTime() < COOLDOWN_MS;
-      });
+      const recentRun = await step.run("check-cooldown", () =>
+        laneRanWithin(sb, "shopfront-clone-netcraft-issue", COOLDOWN_MS),
+      );
       if (recentRun) {
         return { skipped: true, reason: "cooldown_active" };
       }
