@@ -307,7 +307,7 @@ EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
    - Both bites surface as immediate exceptions on the first call,
      regardless of input data — which is what
      `packages/scam-engine/src/__tests__/rpcs.smoke.test.ts` is for.
-     **Know its limits before you rely on it:** it covers 13 of 124 RPCs
+     **Know its limits before you rely on it:** it covers 22 of 124 RPCs
      and self-skips when its env vars are absent (`describe.skipIf(!hasEnv)`),
      so a green CI run is NOT evidence it ran. It is nonetheless the only
      gate between a PL/pgSQL runtime error and production, because
@@ -349,7 +349,7 @@ reverse is `INSERT ... SELECT` from the archive back to the hot table.
 
 ## Environment Variables
 
-**215** env vars defined in `turbo.json` `globalEnv` (recount: `python3 -c "import json;print(len(json.load(open('turbo.json'))['globalEnv']))"`). The full grouped inventory — Supabase, AI, Redis, R2, Email, Bots, Extension, Stripe, Inngest, third-party APIs, cost brakes, operational gates — lives at [docs/system-map/feature-flags.md#environment-variables](./docs/system-map/feature-flags.md#environment-variables).
+**214** env vars defined in `turbo.json` `globalEnv` (recount: `python3 -c "import json;print(len(json.load(open('turbo.json'))['globalEnv']))"`). The full grouped inventory — Supabase, AI, Redis, R2, Email, Bots, Extension, Stripe, Inngest, third-party APIs, cost brakes, operational gates — lives at [docs/system-map/feature-flags.md#environment-variables](./docs/system-map/feature-flags.md#environment-variables).
 
 Two server-only flags worth knowing without opening that page:
 
