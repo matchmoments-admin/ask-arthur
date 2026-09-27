@@ -208,7 +208,7 @@ Automated entity enrichment, external threat intelligence feeds, risk scoring wi
 | --------------------------------------------------------------------------------- | ------- |
 | AbuseIPDB v2 — IP abuse reputation (6h Redis cache)                               | ✅ Done |
 | HIBP v3 — email breach exposure (24h Redis cache)                                 | ⚠️ Built, now DORMANT — paid subscription cancelled 2026-09-27 (zero calls in telemetry's retention window; `/api/breach-check` 503s) |
-| crt.sh — Certificate Transparency log search (12h Redis cache)                    | ✅ Done |
+| crt.sh — Certificate Transparency log search (12h Redis cache)                    | ❌ REMOVED 2026-09-27 (#1269) — the vendor is dead (ADR-0016): every call spent its 5s timeout, ~15–20/day, and the empty result was scored as `no_ct_certificates` **+8** on every enriched entity |
 | Twilio Lookup v2 — migrated from web app to scam-engine package (24h Redis cache) | ✅ Done |
 | URLScan.io — async URL scanning via Inngest (submit → wait → retrieve)            | ✅ Done |
 | Feature flags for each API (independently toggleable)                             | ✅ Done |
