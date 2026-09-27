@@ -34,7 +34,19 @@ const SELF = new Set([
   path.join(REPO, "apps/web/app/api/cron/cost-daily-check/route.ts"),
 ]);
 
+/** Memoised: the repo does not change mid-run, and the walk is not cheap.
+ *
+ *  `writerless()` calls this, and five tests in this file call `writerless()`,
+ *  so the unmemoised version walked `apps/ packages/ pipeline/ supabase/functions`
+ *  and re-read every .ts/.tsx/.py file FIVE times per run. That put the first
+ *  test at ~5.3 s against vitest's 5 s default, i.e. right on the boundary: it
+ *  passed locally and timed out in CI (`Test timed out in 5000ms`, run
+ *  36288983291 on an unrelated PR), making a required check flaky for every PR
+ *  in the repo. One walk, shared. */
+let sourcesCache: { file: string; src: string }[] | null = null;
+
 function sources(): { file: string; src: string }[] {
+  if (sourcesCache) return sourcesCache;
   const out: { file: string; src: string }[] = [];
   const walk = (dir: string) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -55,6 +67,15 @@ function sources(): { file: string; src: string }[] {
     const dir = path.join(REPO, r);
     if (fs.existsSync(dir)) walk(dir);
   }
+  // A walk that found nothing would make every writer check pass vacuously —
+  // the shape that let the db-migration reviewer glob a non-existent directory
+  // for 117 migrations (#1046). Fail here instead.
+  if (out.length === 0) {
+    throw new Error(
+      `source scan found 0 files under ${REPO} — ROOTS or the working directory is wrong`,
+    );
+  }
+  sourcesCache = out;
   return out;
 }
 
