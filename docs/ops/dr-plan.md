@@ -39,7 +39,24 @@ Configured on project `rquomhcgnodxzkhokwni`. WAL archives every ~2 minutes. RPO
 
 PITR retention is currently 7 days. **Revisit when:** any single feature's deployment cycle exceeds a week (today: most features ship within 2-3 days).
 
-### Long-term cold (workflow shipped, gated on R2 setup)
+### Long-term cold (workflow shipped, NEVER ENABLED — deferred by decision)
+
+> **Status 2026-09-27: zero logical backups have ever been produced.**
+> `ENABLE_DR_DUMP` has never been set, so all 83+ scheduled runs since
+> 2026-05-08 skipped. **Founder decision (2026-09-27): deferred deliberately** —
+> the platform is still a prototype, so Supabase PITR (7 days) is accepted as
+> the only backup layer for now. This is a conscious risk acceptance, not an
+> oversight: an account compromise or a corruption discovered after the PITR
+> window would be unrecoverable.
+>
+> **Revive when** there is a first paying B2B customer, or an SPF obligation
+> creates a named buyer who asks about DR — whichever comes first. The setup is
+> ~20 minutes of founder work (steps below) and the workflow is already written.
+>
+> `dr-watchdog.yml` still fails loudly every week rather than being silenced,
+> so the gap stays visible. Its cadence was cut from daily to weekly
+> (2026-09-27) because seven identical red runs a week is alert fatigue, not
+> information — the check itself is unchanged and still unconditional.
 
 Daily logical `pg_dump` via GitHub Actions cron (`.github/workflows/dr-pg-dump.yml`), written to R2 with:
 - Object Lock Compliance mode, 30-day retention (immutable; cannot delete via API)

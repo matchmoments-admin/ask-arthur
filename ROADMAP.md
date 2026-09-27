@@ -207,8 +207,8 @@ Automated entity enrichment, external threat intelligence feeds, risk scoring wi
 | Feature                                                                           | Status  |
 | --------------------------------------------------------------------------------- | ------- |
 | AbuseIPDB v2 — IP abuse reputation (6h Redis cache)                               | ✅ Done |
-| HIBP v3 — email breach exposure (24h Redis cache)                                 | ✅ Done |
-| crt.sh — Certificate Transparency log search (12h Redis cache)                    | ✅ Done |
+| HIBP v3 — email breach exposure (24h Redis cache)                                 | ⚠️ Built, now DORMANT — paid subscription cancelled 2026-09-27 (zero calls in telemetry's retention window; `/api/breach-check` 503s) |
+| crt.sh — Certificate Transparency log search (12h Redis cache)                    | ❌ REMOVED 2026-09-27 (#1269) — the vendor is dead (ADR-0016): every call spent its 5s timeout, ~15–20/day, and the empty result was scored as `no_ct_certificates` **+8** on every enriched entity |
 | Twilio Lookup v2 — migrated from web app to scam-engine package (24h Redis cache) | ✅ Done |
 | URLScan.io — async URL scanning via Inngest (submit → wait → retrieve)            | ✅ Done |
 | Feature flags for each API (independently toggleable)                             | ✅ Done |
@@ -217,7 +217,7 @@ Automated entity enrichment, external threat intelligence feeds, risk scoring wi
 
 | Feature                                                                         | Status  |
 | ------------------------------------------------------------------------------- | ------- |
-| Tier 1 inline enrichment (AbuseIPDB, HIBP, crt.sh, Twilio) in entity-enrichment | ✅ Done |
+| Tier 1 inline enrichment (AbuseIPDB, Twilio) in entity-enrichment | ✅ Done — HIBP dormant (subscription cancelled 2026-09-27); the crt.sh leg was DELETED 2026-09-27 (dead vendor, ADR-0016) |
 | Tier 2 async enrichment (URLScan.io) via separate Inngest function              | ✅ Done |
 | Promise.allSettled — one API failure never blocks others                        | ✅ Done |
 | Extended risk scoring RPC (v27) with new external intel signals                 | ✅ Done |
@@ -245,7 +245,7 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 
 | Feature                                                                                      | Status                                                                                                                                                                                                              |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Premium tier with rate limit tiers (Paddle)                                                  | ✅ Done                                                                                                                                                                                                             |
+| Premium tier with rate limit tiers (Stripe)                                                  | ✅ Done                                                                                                                                                                                                             |
 | User auth + dashboard + API key self-service (Supabase Auth)                                 | ✅ Done                                                                                                                                                                                                             |
 | Family protection plan (shared check routing)                                                | Backend ✅ (v33), UI pending                                                                                                                                                                                        |
 | Push scam alerts (FCM/APNs)                                                                  | Backend ✅ (v32), UI pending                                                                                                                                                                                        |
@@ -445,7 +445,7 @@ Security certifications, SLA infrastructure, and procurement readiness for mid-t
 | AFCX Intel Loop integration format                           | Planned |
 | Sender ID Register verification endpoint                     | Planned |
 | IRAP assessment (when government contracts imminent)         | Planned |
-| Stripe billing migration (replace Paddle)                    | Planned |
+| Stripe billing migration (replace Paddle)                    | ✅ Done (v59) — zero Paddle code refs remain; orphaned `PADDLE*` Vercel env vars pending deletion |
 | Pricing overhaul (Pro $99, Business $449, Enterprise custom) | Planned |
 | Fraud Manager dashboard (entity search, alerts, CSV export)  | Planned |
 

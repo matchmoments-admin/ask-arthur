@@ -89,7 +89,8 @@ ask-arthur/
 ├── pipeline/
 │   └── scrapers/               # Python threat feed scrapers (20+ feeds)
 │
-├── supabase/                   # Migration SQL files (v2–v291+)
+├── supabase/                   # Migration SQL files (v2–v338+; current max:
+│                               #   ls supabase/migration-v*.sql | sed -E 's/.*-v([0-9]+).*/\1/' | sort -n | tail -1)
 ├── docs/                       # OpenAPI spec, setup guides, compliance
 ├── turbo.json                  # Turborepo task config
 ├── pnpm-workspace.yaml         # Workspace manifest
@@ -142,7 +143,7 @@ import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { storeVerifiedScam } from "@askarthur/scam-engine/pipeline";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
-import { toTelegramMessage } from "@askarthur/bot-core/format-telegram";
+import { toTelegramHTML } from "@askarthur/bot-core/format-telegram";
 import { TIER_LIMITS } from "@askarthur/types/billing";
 import type { UnifiedScanResult } from "@askarthur/types/scanner";
 import { scanExtension } from "@askarthur/extension-audit";
@@ -348,7 +349,7 @@ reverse is `INSERT ... SELECT` from the archive back to the hot table.
 
 ## Environment Variables
 
-45+ env vars defined in `turbo.json` `globalEnv`. The full grouped inventory — Supabase, AI, Redis, R2, Email, Bots, Extension, Stripe, Inngest, third-party APIs, cost brakes, operational gates — lives at [docs/system-map/feature-flags.md#environment-variables](./docs/system-map/feature-flags.md#environment-variables).
+**215** env vars defined in `turbo.json` `globalEnv` (recount: `python3 -c "import json;print(len(json.load(open('turbo.json'))['globalEnv']))"`). The full grouped inventory — Supabase, AI, Redis, R2, Email, Bots, Extension, Stripe, Inngest, third-party APIs, cost brakes, operational gates — lives at [docs/system-map/feature-flags.md#environment-variables](./docs/system-map/feature-flags.md#environment-variables).
 
 Two server-only flags worth knowing without opening that page:
 

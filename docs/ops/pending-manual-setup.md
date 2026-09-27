@@ -78,6 +78,11 @@ the user's password against HaveIBeenPwned at signup/change time and
 rejects passwords that have appeared in a known breach. Industry
 standard; SOC 2 / NIST 800-63B aligned.
 
+> **Not the same HIBP as `HIBP_API_KEY`.** This toggle uses HIBP's **free
+> Pwned Passwords** API over k-anonymity (a password-hash prefix, no account
+> and no key). It is completely unaffected by the 2026-09-27 cancellation of
+> the paid Pwned-1 breach-search subscription, and it stays actionable.
+
 **Effort:** ~30 seconds. No migration. No code change.
 
 **Steps:**

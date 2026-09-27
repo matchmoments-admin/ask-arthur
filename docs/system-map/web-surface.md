@@ -171,7 +171,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/api/analyze/similar` | POST   | Retrieve similar verified scams from corpus       |
 | `/api/persona-check`   | POST   | Person / entity reputation lookup                 |
 | `/api/deepfake`        | POST   | Deepfake detection (`deepfakeDetection` flag)     |
-| `/api/breach-check`    | POST   | Email breach exposure check + rotation actions    |
+| `/api/breach-check`    | POST   | Email breach exposure check + rotation actions — **returns 503: the paid HIBP subscription was cancelled 2026-09-27 and `HIBP_API_KEY` is unset.** Only caller is the (mothballed) mobile app's breach tab; no web page calls it |
 | `/api/abn-lookup`      | POST   | Australian Business Number verification (ABR API) |
 
 ### Consumer lookup

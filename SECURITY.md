@@ -99,7 +99,7 @@ All user text is sanitized before Claude analysis:
 - Uses `supabase.auth.getUser()` (server-side JWT validation) not `getSession()` (client-side, spoofable)
 - RLS policies enforce user-scoped data access (api_keys, subscriptions, api_usage_log)
 - Max 5 active API keys per user (enforced in `generate_api_key_record` RPC)
-- Subscription ownership verified in Paddle webhook (prevents subscription theft via customData manipulation)
+- Subscription ownership verified in Stripe webhook (prevents subscription theft via customData manipulation)
 - User profile role column is immutable via RLS WITH CHECK constraint
 - **Revoke all admin sessions:** bump `ADMIN_SESSION_EPOCH` in Vercel (any new value) and redeploy with a `[build]` commit — the epoch is part of the admin-cookie HMAC key, so every outstanding HMAC admin cookie stops verifying. Only the `timestamp:nonce:hmac` cookie format is accepted.
 
@@ -108,19 +108,19 @@ All user text is sanitized before Claude analysis:
 **File:** `apps/web/next.config.ts`
 
 ```
-Content-Security-Policy:
+Content-Security-Policy:      # transcribed 2026-09-27; next.config.ts is the source of truth
   default-src 'self'
-  script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net https://cdn.paddle.com
+  worker-src 'self' blob:
+  script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net https://js.stripe.com https://widget.trustpilot.com https://challenges.cloudflare.com
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net
   font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net
-  img-src 'self' data: blob: https://*.r2.cloudflarestorage.com
-  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://*.paddle.com
-  frame-src https://*.paddle.com
+  img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.stripe.com https://blog.askarthur.au https://*.trustpilot.com https://*.trustpilot.net https://urlscan.io https://www.google.com/s2/favicons
+  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://api.stripe.com https://widget.trustpilot.com https://challenges.cloudflare.com
+  frame-src https://js.stripe.com https://hooks.stripe.com https://widget.trustpilot.com https://challenges.cloudflare.com
   frame-ancestors 'none'
   form-action 'self'
   base-uri 'self'
   object-src 'none'
-  worker-src 'self' blob:
   upgrade-insecure-requests
 
 Strict-Transport-Security: max-age=63072000; includeSubDomains; preload

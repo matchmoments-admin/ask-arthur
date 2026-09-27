@@ -27,7 +27,7 @@ If you fix a phishing-URL display in `format-telegram.ts` and don't touch the ot
 | Export                     | Purpose                                                   | Consumers                               |
 | -------------------------- | --------------------------------------------------------- | --------------------------------------- |
 | `analyzeForBot`            | Shared analysis entry point for bot routes                | `apps/web/app/api/webhooks/*/route.ts`  |
-| `toTelegramMessage`        | Render `AnalysisResult` to Telegram HTML                  | telegram webhook handler                |
+| `toTelegramHTML`           | Render `AnalysisResult` to Telegram HTML                  | telegram webhook handler                |
 | `toWhatsAppMessage`        | Render `AnalysisResult` to WhatsApp markdown              | whatsapp webhook handler                |
 | `toSlackBlocks`            | Render `AnalysisResult` to Slack Block Kit JSON           | slack webhook handler                   |
 | `toMessengerMessage`       | Render `AnalysisResult` to Messenger plain text           | messenger webhook handler               |
@@ -36,7 +36,7 @@ If you fix a phishing-URL display in `format-telegram.ts` and don't touch the ot
 | `verifySlackSignature`     | Slack signing-secret v0 signature verification            | slack route + shortcuts guards          |
 | `verifyMessengerSignature` | Meta App X-Hub-Signature-256 verification (Messenger)     | messenger route guard                   |
 | `safeStrEqual`             | Length-checked timing-safe string compare (no throw)      | verify-token handshakes + messenger sig |
-| `enqueueBotReply`          | Insert a row into `bot_message_queue` for pg_net dispatch | bot route handlers                      |
+| `enqueueMessage`           | Insert a row into `bot_message_queue` for pg_net dispatch | bot route handlers                      |
 
 ## Scoped commands
 
