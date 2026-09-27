@@ -27,7 +27,15 @@ name: DR — backup freshness watchdog
 
 on:
   schedule:
-    - cron: "0 19 * * *"
+    # Weekly (Mondays), not daily — 2026-09-27. DR is deliberately deferred
+    # (docs/ops/dr-plan.md: prototype stage, PITR-only), so this watchdog is a
+    # standing reminder of a KNOWN gap rather than an incident detector. Seven
+    # identical red runs a week is alert fatigue; one is information. The check
+    # is otherwise untouched and still unconditional — it must keep failing
+    # while there is no off-Supabase backup, because a watchdog that goes quiet
+    # when the thing it watches is broken is worse than no watchdog
+    # (memory: proof-of-life-must-not-be-conditional).
+    - cron: "0 19 * * 1"
   workflow_dispatch: {}
 
 # Least privilege: this workflow only reads the repo; it never writes back

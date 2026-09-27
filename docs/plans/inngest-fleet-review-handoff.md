@@ -1,5 +1,17 @@
 # Inngest fleet review — completion handoff (2026-07-13)
 
+> **SUPERSEDED 2026-09-27.** This handoff describes a 73-function fleet as of
+> 2026-07-13. The current measurement is
+> [`docs/ops/inngest-fleet-audit-2026-09-16.md`](../ops/inngest-fleet-audit-2026-09-16.md)
+> (75 functions, slot-seconds per function, retire/park/skip verdicts), and the
+> decisions taken from it live on wayfinder map
+> [#1224](https://github.com/matchmoments-admin/ask-arthur/issues/1224) — which
+> has since retired auto-triage, parked four more lanes, folded the enricher's
+> per-alert steps, and moved the crons off the `:00` pileup. Read this file only
+> for history; anything it says about current cadences, counts or verdicts is
+> out of date.
+
+
 The 73-function Inngest operational review (`docs/plans/inngest-fleet-review.md`)
 is **complete**: every finding fixed and every A–D decision item implemented,
 all merged to `main` and live in production. This is the handoff for the next

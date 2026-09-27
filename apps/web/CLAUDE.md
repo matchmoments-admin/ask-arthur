@@ -19,9 +19,10 @@ app/
 │   ├── cron/              # Vercel cron handlers
 │   └── ...
 ├── app/                   # authenticated consumer pages
-│   ├── dashboard/         # main user dashboard
+│   ├── page.tsx           # main user dashboard (route root — there is no dashboard/ subdir)
 │   ├── billing/           # Stripe portal entry
-│   ├── reports/threats/   # user's own analyses
+│   ├── reports/           # saved reports + exports
+│   ├── threats/           # user's own analyses (Threat Feed)
 │   └── ...
 ├── banking/, telco/, digital-platforms/   # SPF sector landing pages
 ├── blog/                  # MDX blog posts

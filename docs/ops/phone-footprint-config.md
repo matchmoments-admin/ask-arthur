@@ -56,7 +56,7 @@ live before the consumer flip.
 | `TWILIO_ACCOUNT_SID`                         | ✅     | Twilio Lookup v2 (phone provider pillar 5) + Twilio Verify |
 | `TWILIO_AUTH_TOKEN`                          | ✅     | Same                                                       |
 | `IPQUALITYSCORE_API_KEY`                     | ✅     | IPQS phone provider (pillar 3 fallback)                    |
-| `HIBP_API_KEY`                               | ✅     | Email-breach leg of pillar 2 (HIBP dropped phone)          |
+| `HIBP_API_KEY`                               | ❌     | Email-breach leg of pillar 2 (HIBP dropped phone). **Subscription cancelled 2026-09-27** — re-subscribing is a prerequisite if this mothballed feature is ever revived |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN`          | ✅     | Rate limits, provider caches, ownership-proof session      |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | ✅     | Schema writes, RPC calls                                   |
 | `TURNSTILE_SECRET_KEY`                       | ✅     | Anon-tier Turnstile challenge                              |

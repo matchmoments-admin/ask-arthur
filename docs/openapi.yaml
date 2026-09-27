@@ -25,7 +25,7 @@ info:
     - **v2.2.0**: `enrichmentData` now includes additional namespaces from external
       intelligence integrations (all additive, backwards-compatible):
       - `abuseIPDB`: IP abuse reputation (confidence score, total reports, ISP, usage type)
-      - `hibp`: Email breach exposure (breach count, breach names)
+      - `hibp`: Email breach exposure (breach count, breach names) — never populated since 2026-09-27; the paid HIBP subscription was cancelled
       - `ctLookup`: Certificate Transparency logs (certificate count, subdomains, wildcard, date range)
       - `twilioLookup`: Phone number intelligence (line type, carrier, VoIP detection, caller name)
       - `urlscan`: URL scanning results (malicious verdict, score, technologies, server info)

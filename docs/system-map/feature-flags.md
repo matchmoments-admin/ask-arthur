@@ -45,7 +45,7 @@ All feature flags live in `packages/utils/src/feature-flags.ts`. Default is **OF
 | `riskScoring`      | OFF     | 0–100 risk scores per entity          |
 | `abuseIPDB`        | OFF     | IP reputation lookups                 |
 | `urlScanIO`        | OFF     | Async URL scanning                    |
-| `hibpCheck`        | OFF     | Email-breach checking                 |
+| `hibpCheck`        | OFF     | Email-breach checking — **DORMANT: the paid HIBP subscription was cancelled 2026-09-27.** `HIBP_API_KEY` is gone, so the flag cannot do anything even if flipped. Zero `cost_telemetry` rows for `feature='breach-check'` across the table's whole retention window, i.e. it had not been called for months before cancellation |
 | `ipqualityScore`   | OFF     | Phone fraud scoring (IPQualityScore)  |
 
 ## Auth & billing

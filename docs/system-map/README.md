@@ -164,7 +164,7 @@ The arrows show flow of work, not network calls. `[hot ⚠]` marks write-frequen
 │  • analyze-failure       │         │     cleanup}       04:00            │         │     weekly Sun 04:00 │
 │                          │         │   cost-{daily-     every 6h         │         │   ci (push+PR)       │
 │  ENRICHMENT              │         │     check, weekly- Sun 22:00        │         │   promptfoo (PR fil.)│
-│  • enrichment-fanout (6h)│         │     digest}                         │         │   claude-code-review │
+│  • enrichment-fanout(12h)│         │     digest}                         │         │   claude-code-review │
 │  • entity-enrichment (8h)│         │   vuln-retention   03:00            │         │   deep-investigation │
 │  • urlscan-enrich (8h)   │         │   scam-reports-                     │         │   dr-pg-dump         │
 │                          │         │     retention      03:30            │         │   deploy (manual)    │

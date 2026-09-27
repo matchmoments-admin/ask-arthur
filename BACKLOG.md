@@ -618,7 +618,7 @@ Related to Phase 13 in `ROADMAP.md`. Items that need action before (or as) we hi
 - [ ] **`cost_telemetry` retention job** — trigger: table exceeds ~20M rows (~6 GB; Supabase Pro quota is 8 GB). Simple `pg_cron` nightly delete past 180 days, or archive to R2 first if RDTI evidence retention is wanted
 - [ ] **Automated budget caps / kill-switches** — trigger: 2+ weeks of steady-state Tier-2 telemetry gives us a baseline. Hourly cron reads `today_cost_total`, flips a Redis kill-switch at `DAILY_HARD_CAP_USD` that makes `/api/analyze` + `/api/extension/analyze` return 503 until manually reset
 - [ ] **Bot queue live-activation checklist** — when the first bot (Telegram/WhatsApp/Slack/Messenger) goes live: generate `SUPABASE_WEBHOOK_SECRET` (`openssl rand -hex 32`), set it in Vercel + Supabase dashboard, create the Database Webhook on `public.bot_message_queue` INSERT → `https://askarthur.au/api/bot-webhook` with `X-Webhook-Secret` header
-- [ ] **SSL / HIBP enrichment-call telemetry decision** — follow-up to the 2026-07-13 WHOIS instrumentation (WHOIS now logs `feature='whois'` volume against its 1,000/mo cap). Two siblings in `entity-enrichment.ts` / `on-demand-url-enrich.ts` still emit nothing: (1) **`checkSSL`** — a direct TLS handshake with no API quota or `$` cost, so a `cost_telemetry` row would be pure noise; recommend **leave uninstrumented** unless we later want raw call-volume visibility. (2) **`checkHIBP`** — a genuinely paid API (`HIBP_API_KEY`) but gated behind `featureFlags.hibpCheck` + the key, and not currently firing; when HIBP is enabled, add a `logCost({ feature:'hibp', provider:'hibp' })` on the billable branch in `hibp.ts` (mirror the WHOIS pattern) **before** flipping the flag, so its spend is visible from call #1. No action needed while HIBP stays off.
+- [ ] **SSL enrichment-call telemetry decision** (the HIBP half is moot — subscription cancelled 2026-09-27) — follow-up to the 2026-07-13 WHOIS instrumentation (WHOIS now logs `feature='whois'` volume against its 1,000/mo cap). Two siblings in `entity-enrichment.ts` / `on-demand-url-enrich.ts` still emit nothing: (1) **`checkSSL`** — a direct TLS handshake with no API quota or `$` cost, so a `cost_telemetry` row would be pure noise; recommend **leave uninstrumented** unless we later want raw call-volume visibility. (2) **`checkHIBP`** — a genuinely paid API (`HIBP_API_KEY`) but gated behind `featureFlags.hibpCheck` + the key, and not currently firing; when HIBP is enabled, add a `logCost({ feature:'hibp', provider:'hibp' })` on the billable branch in `hibp.ts` (mirror the WHOIS pattern) **before** flipping the flag, so its spend is visible from call #1. No action needed while HIBP stays off.
 
 ## Ops / Infrastructure
 
@@ -698,7 +698,7 @@ rewritten 2026-05-08 after a 26-PR sweep (v100–v118 + 5 ops PRs) closed
 
 ### Advisor scoreboard
 
-> **As of 2026-05-08:** 0 ERROR · 1 security WARN (HIBP toggle, manual)
+> **As of 2026-05-08:** 0 ERROR · 1 security WARN (the FREE Pwned-Passwords toggle, manual — unrelated to the paid HIBP subscription cancelled 2026-09-27)
 > · 5 perf WARN (residual `multiple_permissive_policies`) · 245 INFO
 > (`unused_index`, awaiting 30-day baseline). Down from 664 lints / 1
 > ERROR / 116 security WARN / 270 perf WARN at session start.
@@ -709,7 +709,7 @@ These items have clear scope and no blocking decisions; pick up in any
 order.
 
 1. - [ ] **P1 — Drop ~230 hot-table unused indexes (Phase 1.1 Stage C)** — baseline snapshot landed in `docs/ops/index-baseline-2026-05.md` (PR #153) on 2026-05-08; **Stage C ships AFTER 2026-06-08** with apples-to-apples re-snapshot. Per-domain drop PRs (`vulnerabilities` carries 10; `scam_reports` 12; `breaches` 11; `subscriptions` 8). **Skip `idx_acnc_name_mission_embedding_hnsw` (481 MB)** — feature-flag false negative; documented in baseline doc.
-2. - [ ] **P1 — Enable HIBP leaked-password protection** in Supabase Auth dashboard. The only remaining security advisor WARN. User-action only (no migration).
+2. - [ ] **P1 — Enable leaked-password protection** in the Supabase Auth dashboard (HIBP's **free** Pwned Passwords k-anonymity API — no key, no account, unaffected by the 2026-09-27 cancellation of the paid breach-search plan). The only remaining security advisor WARN. User-action only (no migration).
 3. - [ ] **P2 — Phase 4.3 ENUM consolidation (5 PRs)** — replace free-text `scam_type`, `channel` with `scam_intent_label` + `scam_channel` ENUMs; consolidate `feed_items.category` and `reddit_post_intel.intent_label` onto the shared enum. Decisions resolved 2026-05-08: pipe-delim row → `advance_fee`; drop `delivery_method` column. Plan §Phase 4.3 has the full 5-PR sequence (4.3a value-norm → 4.3b drop column → 4.3c ENUM types → 4.3d type-migrate → 4.3e Zod hardening). **Effort: L (1-2 weeks).**
 4. - [ ] **P2 — Phase 8.1 cluster-builder SQL-isation (3 PRs)** — write tests first (none exist today), then recursive-CTE shadow mode for 14d, then flip. Hard prerequisite for Phase 3.4 partitioning. **Effort: L (3-4 weeks).** Plan §Phase 8.1.
 5. - [ ] **P2 — Wire `logCost()` into every `/api/analyze` path** — `cost_telemetry` was at 3 rows in April, 73 in May. Spot-check whether all paid AI calls now log; if any path bypasses, fix. Code change only. (v112 retention is shipped so cost is bounded; this is about completeness of attribution.)
