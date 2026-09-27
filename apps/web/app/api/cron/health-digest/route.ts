@@ -22,6 +22,11 @@ import {
   type LaneProblem,
   type LaneProblemKind,
 } from "@/lib/laneHealth";
+import {
+  offSpecTransitions,
+  type ObservedTransition,
+  type OffSpecTransition,
+} from "@/lib/clone-watch/lifecycle";
 import { html, joinHtml, type HtmlValue, type SafeHtml } from "@askarthur/utils/html";
 
 export const runtime = "nodejs";
@@ -40,6 +45,10 @@ export const dynamic = "force-dynamic";
  *   4. Clone-watch lanes that ran, did nothing, and reported ok:true — the
  *      silent-zero detector (#1145). Roster + predicates in @/lib/laneHealth;
  *      this route only fetches the lanes' recent cost rows and renders.
+ *   5. Clone Alert lifecycle moves in the last 24h that the spec
+ *      (lib/clone-watch/lifecycle.ts LIFECYCLE_EDGES) calls illegal, read
+ *      from the v339 log-only transition trigger. Reported under its own key,
+ *      NOT in lane_problems — the readiness scorecard (v335) reads that array.
  *
  * Silence-on-perfect-day is deliberate — silence on Telegram = success,
  * ping = action. Vercel's cron dashboard is the meta-monitor for the cron
@@ -92,6 +101,7 @@ function buildMessage(
   laneProblems: LaneProblem[],
   cost: CostSummary,
   mutedCount: number,
+  offSpec: OffSpecTransition[] | "unreadable" = [],
 ): SafeHtml {
   const dateStr = new Date().toLocaleString("en-AU", {
     timeZone: "Australia/Sydney",
@@ -158,6 +168,24 @@ function buildMessage(
       }
       lines.push("");
     }
+  }
+
+  if (offSpec === "unreadable") {
+    lines.push(
+      html`❓ <b>Clone lifecycle transition log unreadable</b> — off-spec moves could not be checked`,
+      "",
+    );
+  } else if (offSpec.length > 0) {
+    lines.push(html`🔀 <b>Clone lifecycle moves the spec calls illegal (last 24h):</b>`);
+    for (const t of offSpec) {
+      lines.push(
+        html`  • ${t.from ?? "null"} → ${t.to ?? "null"} by ${t.writer} — ${t.count}×`,
+      );
+    }
+    lines.push(
+      html`  (spec: lib/clone-watch/lifecycle.ts LIFECYCLE_EDGES — fix the writer, or add the edge if it is legitimate)`,
+      "",
+    );
   }
 
   // Muted feeds are always counted, never hidden. The suppression list this
@@ -325,9 +353,33 @@ export async function GET(req: Request) {
     { now, brakes },
   );
 
+  // ── Check 5: off-spec Clone Alert lifecycle moves (v339 log) ──────────
+  // A failed read is reported, never collapsed into "no violations".
+  const { data: transitionRows, error: transitionError } = await supabase
+    .from("clone_lifecycle_transitions")
+    .select("from_state, to_state, writer")
+    .gte("changed_at", new Date(now - 24 * 60 * 60 * 1000).toISOString())
+    .limit(1000);
+  if (transitionError) {
+    logger.error("health-digest: lifecycle transition query failed", {
+      error: transitionError.message,
+    });
+  }
+  const offSpec: OffSpecTransition[] | "unreadable" = transitionError
+    ? "unreadable"
+    : offSpecTransitions((transitionRows ?? []) as ObservedTransition[]);
+  const offSpecSummary =
+    offSpec === "unreadable"
+      ? "unreadable"
+      : offSpec.map((t) => `${t.from}->${t.to}@${t.writer}x${t.count}`);
+
   // ── Decision: alert or stay silent ────────────────────────────────────
   const issues =
-    errors.length > 0 || problems.length > 0 || laneProblems.length > 0;
+    errors.length > 0 ||
+    problems.length > 0 ||
+    laneProblems.length > 0 ||
+    offSpec === "unreadable" ||
+    offSpec.length > 0;
   if (!issues) {
     logger.info("health-digest: all clear", {
       cost_usd: cost.cost_usd,
@@ -348,6 +400,7 @@ export async function GET(req: Request) {
       // a day the digest never recorded read the same, and an unrecorded day
       // must stay "not measured", never "healthy".
       lane_problems: [],
+      lifecycle_off_spec: [],
       cost_usd: cost.cost_usd,
     });
     return NextResponse.json({
@@ -367,6 +420,7 @@ export async function GET(req: Request) {
     laneProblems,
     cost,
     mutedCount,
+    offSpec,
   );
 
   // Telegram send is gated by FF_LEGACY_DIGEST_TELEGRAM. The signal now rides
@@ -385,6 +439,7 @@ export async function GET(req: Request) {
       problems: problems.map((p) => `${p.kind}:${p.feed_name}`),
       lane_problem_count: laneProblems.length,
       lane_problems: laneProblems.map((p) => `${p.kind}:${p.lane}`),
+      lifecycle_off_spec: offSpecSummary,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
       lanes_checked: LANES_CHECKED,
@@ -416,6 +471,7 @@ export async function GET(req: Request) {
     errors,
     problems,
     lane_problems: laneProblems,
+    lifecycle_off_spec: offSpec,
     feeds_checked: rows.length,
     feeds_muted: mutedCount,
     lanes_checked: LANES_CHECKED,
