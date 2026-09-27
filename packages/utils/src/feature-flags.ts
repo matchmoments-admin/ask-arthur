@@ -72,8 +72,6 @@ export const featureFlags = {
   /** HIBP email breach checking during enrichment */
   hibpCheck: process.env.NEXT_PUBLIC_FF_HIBP === "true",
 
-  /** Certificate Transparency log lookups during enrichment */
-  ctLookup: process.env.NEXT_PUBLIC_FF_CT_LOOKUP === "true",
 
   /** IPQualityScore phone number fraud scoring during enrichment */
   ipqualityScore: process.env.NEXT_PUBLIC_FF_IPQS === "true",
@@ -793,8 +791,9 @@ export const featureFlags = {
   cloneWatchTelegramQuiet: readBoolEnv("FF_CLONE_WATCH_TELEGRAM_QUIET"),
 
   /** Enrich tp_confirmed clones with an attribution dossier — WHOIS (registrar /
-   *  created / registrant country), Certificate-Transparency siblings (campaign
-   *  clustering), and IP abuse reputation — reusing existing scam-engine helpers
+   *  created / registrant country) and IP abuse reputation — reusing existing
+   *  scam-engine helpers. (The Certificate-Transparency leg was removed
+   *  2026-09-27: crt.sh is dead per ADR-0016 and every call timed out.)
    *  (clone-watch-enrich-attribution Inngest fn). Stored in
    *  shopfront_clone_alerts.attribution (v177). Default OFF. Server-side only. */
   cloneWatchAttribution: readBoolEnv("FF_CLONE_WATCH_ATTRIBUTION"),

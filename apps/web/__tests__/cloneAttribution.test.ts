@@ -4,7 +4,7 @@ import { shapeAttribution } from "@/lib/clone-watch/enrich-attribution";
 const AT = "2026-06-07T13:30:00.000Z";
 
 describe("shapeAttribution", () => {
-  it("maps whois + ct + ip_rep + hosting into the dossier", () => {
+  it("maps whois + ip_rep + hosting into the dossier", () => {
     const d = shapeAttribution({
       domain: "nab-login.shop",
       whois: {
@@ -20,16 +20,6 @@ describe("shapeAttribution", () => {
         registrarIanaId: "1068",
         abuseContact: { email: "abuse@namecheap.com", phone: null },
         source: "rdap",
-      },
-      ct: {
-        certificateCount: 3,
-        certificates: [
-          { issuerName: "Let's Encrypt", notBefore: "", notAfter: "", commonName: "nab-login.shop" },
-        ],
-        uniqueSubdomains: ["nab-login.shop", "nab-secure.shop", "*.nab-login.shop"],
-        hasWildcard: true,
-        oldestCertDate: null,
-        newestCertDate: null,
       },
       ipRep: {
         abuseConfidenceScore: 88,
@@ -56,10 +46,13 @@ describe("shapeAttribution", () => {
     });
     expect(d.ip_rep).toMatchObject({ abuseConfidenceScore: 88, isp: "Evil Hosting" });
     expect(d.hosting).toEqual({ ip: "203.0.113.7", country: "RU", asn: "AS12345" });
-    expect(d.ct?.issuer).toBe("Let's Encrypt");
-    expect(d.ct?.hasWildcard).toBe(true);
-    // siblings exclude the clone domain itself (incl. its wildcard form).
-    expect(d.ct?.siblings).toEqual(["nab-secure.shop"]);
+    // The Certificate-Transparency leg was removed 2026-09-27 (crt.sh is dead
+    // per ADR-0016 and every call spent its full 5s timeout). A new dossier must
+    // never carry a ct section again — reinstating the leg fails here. The FIELD
+    // survives on the type because 116 alerts enriched before the removal still
+    // hold one, and their campaign_key hashes ct.issuer.
+    expect(d.ct).toBeNull();
+    expect(shapeAttribution).toHaveLength(1); // one args object, no ct param
     expect(d.enriched_at).toBe(AT);
   });
 
@@ -67,7 +60,6 @@ describe("shapeAttribution", () => {
     const d = shapeAttribution({
       domain: "x.shop",
       whois: null,
-      ct: null,
       ipRep: null,
       geo: { region: "Moscow", countryCode: "RU" },
       hosting: { ip: "203.0.113.7", country: null, asn: null },

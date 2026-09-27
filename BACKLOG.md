@@ -671,6 +671,26 @@ migrations v248–v251). Context: [`docs/plans/clone-watch-brand-value-features.
 
 ## Database Hygiene & SPF Readiness
 
+### `compute_entity_risk_score` still scores a signal that no longer exists (P3)
+
+`supabase/migration-v27-extended-scoring.sql` reads
+`enrichment_data->'ctLookup'` and awards **+5 `recent_cert`** (newest cert
+< 30 days) or **+8 `no_ct_certificates`** (`certificateCount` = 0). The
+Certificate-Transparency leg that produced that key was deleted 2026-09-27
+(crt.sh is dead — ADR-0016), so the branch is now unreachable: it sits inside
+`IF ... ctLookup IS NOT NULL`, a missing key scores 0, and nothing is
+mis-scored today.
+
+It is on this list because of what it did _before_ the removal. While the flag
+was ON and crt.sh was timing out, every lookup returned `EMPTY_RESULT` —
+`certificateCount: 0` — so the scorer read a **timeout as evidence of no
+certificates** and added **+8 to every enriched domain entity**. A dead vendor
+was silently inflating risk scores. Drop the branch at the next
+`compute_entity_risk_score` rewrite (it is a `CREATE OR REPLACE`, so it needs
+no new column), and treat the shape as the lesson: a scoring rule that reads
+an enrichment key must distinguish _absent_ from _zero_, or a broken provider
+becomes a positive signal.
+
 Started as the deferred items from the 2026-04-23 advisor audit. Heavily
 rewritten 2026-05-08 after a 26-PR sweep (v100–v118 + 5 ops PRs) closed
 **412 of 664 advisor lints (62%)**. Full execution plan + deferred work:

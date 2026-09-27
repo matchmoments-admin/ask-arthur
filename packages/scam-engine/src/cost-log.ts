@@ -39,7 +39,6 @@ export const ENGINE_PRICING = {
   // separately by the urlscan-enrichment function's own telemetry.
   URLSCAN_SUBMIT_USD: 0,
   // crt.sh Certificate Transparency search — unmetered / free.
-  CT_LOOKUP_USD: 0,
 } as const;
 
 export interface CostLogArgs {
