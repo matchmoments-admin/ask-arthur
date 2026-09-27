@@ -42,7 +42,7 @@ import { spanningBudget } from "./step-budget";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { SCAM_REPORTS_BACKFILL_EMBED_EVENT } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
-import { isFeatureBraked } from "../cost-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 
 /** Per-domain embed tallies a batch step returns. Named so the budget-stopped
  *  early return can produce a correctly-typed empty array rather than null[]. */
@@ -204,7 +204,7 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
       // exceeds its cap. The manual backfill respects it too (operator can clear
       // the brake to force a drain).
       const braked = await step.run("check-embed-brake", () =>
-        isFeatureBraked("scam_report_embed"),
+        isFeatureBrakedOrUnknown("scam_report_embed"),
       );
       if (braked) {
         return {

@@ -10,7 +10,7 @@ import { getSiteTrustworthiness } from "../../providers/apivoid";
 import { fetchShopPage } from "../../fetch-shop-page";
 import { detectAndFetchReviews } from "../../providers/reviews";
 import { assessReviewLanguage } from "../../providers/reviews/language";
-import { isFeatureBraked } from "../../cost-log";
+import { isFeatureBrakedOrUnknown } from "../../cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 // featureFlags is a mutable mock object so a test can flip the paid feed
@@ -40,7 +40,7 @@ vi.mock("../../providers/reviews/language", () => ({
   assessReviewLanguage: vi.fn(),
 }));
 vi.mock("../../cost-log", () => ({
-  isFeatureBraked: vi.fn().mockResolvedValue(false),
+  isFeatureBrakedOrUnknown: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(),
@@ -113,7 +113,7 @@ beforeEach(() => {
   featureFlagsMock.shopSignalPaidFeed = false;
   featureFlagsMock.shopSignalReviews = false;
   featureFlagsMock.shopSignalReviewsLlm = false;
-  vi.mocked(isFeatureBraked).mockResolvedValue(false);
+  vi.mocked(isFeatureBrakedOrUnknown).mockResolvedValue(false);
 });
 
 describe("runShopSignalEnrich", () => {
@@ -391,7 +391,7 @@ describe("runShopSignalEnrich", () => {
   it("skips the Claude pass when the reviews brake is engaged", async () => {
     featureFlagsMock.shopSignalReviews = true;
     featureFlagsMock.shopSignalReviewsLlm = true;
-    vi.mocked(isFeatureBraked).mockResolvedValue(true);
+    vi.mocked(isFeatureBrakedOrUnknown).mockResolvedValue(true);
     mockImplausibleReviewsShop();
     const { client, insert, rpc } = fakeSupabase();
     vi.mocked(createServiceClient).mockReturnValue(

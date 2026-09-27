@@ -34,7 +34,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { callClaudeJson } from "../anthropic";
-import { isRedditIntelBraked } from "../inngest/reddit-intel-error-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 // Bump when the prompt or output schema changes materially.
@@ -227,7 +227,7 @@ export async function synthesizeWeeklyIntel(
   }
 
   // 2. Respect the shared reddit-intel cost brake.
-  if (await isRedditIntelBraked()) {
+  if (await isFeatureBrakedOrUnknown("reddit_intel")) {
     logger.warn(
       "weekly-synthesis: reddit_intel brake engaged — skipping generation",
     );

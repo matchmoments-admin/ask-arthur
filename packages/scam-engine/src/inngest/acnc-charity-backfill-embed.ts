@@ -41,7 +41,7 @@ import { inngest } from "./client";
 import { spanningBudget } from "./step-budget";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { embed } from "../embeddings";
-import { isFeatureBraked } from "../cost-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 
 // Tuneable per-run limits. 200 rows/batch is well under Voyage's 1000-input
 // per-call limit but keeps a single batch under ~6k tokens (well below the
@@ -169,7 +169,7 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
       // spends on Voyage with logCost but never READ the charity_check brake
       // that cost-daily-check engages — a brake nothing reads is scenery.
       const braked = await step.run("brake-check", () =>
-        isFeatureBraked("charity_check"),
+        isFeatureBrakedOrUnknown("charity_check"),
       );
       if (braked) {
         return {

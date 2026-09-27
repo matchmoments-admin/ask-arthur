@@ -29,7 +29,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { callClaudeJson } from "../anthropic";
-import { isRedditIntelBraked } from "../inngest/reddit-intel-error-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 
 // Bump when the prompt or output schema changes materially.
 const PROMPT_VERSION = "competitor-intel-extract-v1@2026-07-09";
@@ -125,7 +125,7 @@ export async function extractCompetitorObservations(
   if (!supabase) return { feedItemId, observations: 0, skipped: "no_client" };
 
   // Shared intel-subsystem brake.
-  if (await isRedditIntelBraked()) {
+  if (await isFeatureBrakedOrUnknown("reddit_intel")) {
     return { feedItemId, observations: 0, skipped: "braked" };
   }
 

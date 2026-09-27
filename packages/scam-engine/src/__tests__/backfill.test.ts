@@ -12,7 +12,7 @@ const mockIsBraked = vi.fn(async (_feature: string) => false);
 const mockLogCost = vi.fn(async (_args: unknown) => undefined);
 
 vi.mock("../cost-log", () => ({
-  isFeatureBraked: (f: string) => mockIsBraked(f),
+  isFeatureBrakedOrUnknown: (f: string) => mockIsBraked(f),
   logCost: (a: unknown) => mockLogCost(a as never),
 }));
 

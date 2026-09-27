@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { Resend } from "resend";
 import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -124,7 +125,8 @@ export async function POST(
   }
 
   // 1. Cost brake — if shopfront_clone_outreach is paused, refuse pre-send.
-  const brakeEngaged = await isShopfrontCloneBrakeEngaged(sb);
+  // Outbound email → fail-closed: an unreadable brake refuses the send.
+  const brakeEngaged = await isFeatureBrakedOrUnknown("shopfront_clone_outreach");
   if (brakeEngaged) {
     return NextResponse.json(
       { error: "cost_brake_engaged" },
@@ -383,28 +385,6 @@ export async function POST(
     providerMessageId,
     raceLoser: transition.updated_count === 0,
   });
-}
-
-async function isShopfrontCloneBrakeEngaged(
-  sb: ReturnType<typeof createServiceClient>,
-): Promise<boolean> {
-  if (!sb) return true;
-  const { data, error } = await sb
-    .from("feature_brakes")
-    .select("paused_until")
-    .eq("feature", "shopfront_clone_outreach")
-    .maybeSingle();
-  if (error) {
-    logger.warn("clone-watch send: feature_brakes lookup failed", {
-      error: error.message,
-    });
-    // Conservative: treat lookup failure as brake engaged. Mirrors the
-    // apivoid pattern.
-    return true;
-  }
-  return Boolean(
-    data?.paused_until && new Date(data.paused_until).getTime() > Date.now(),
-  );
 }
 
 /**

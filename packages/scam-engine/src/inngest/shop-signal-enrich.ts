@@ -54,7 +54,7 @@ import { fetchShopPage } from "../fetch-shop-page";
 import { detectAndFetchReviews } from "../providers/reviews";
 import { assessReviewLanguage } from "../providers/reviews/language";
 import { scoreReviewDistribution, fuseReviewsVerdict } from "../reviews-signal";
-import { isFeatureBraked } from "../cost-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 
 /** Merge a deepCheck patch into shop_checks.signal. Throws on RPC error. */
 async function writeDeepCheck(
@@ -225,7 +225,7 @@ export async function runShopSignalEnrich(
     let llmCostUsd: number | null = null;
     if (
       featureFlags.shopSignalReviewsLlm &&
-      !(await isFeatureBraked("shop_signal_reviews"))
+      !(await isFeatureBrakedOrUnknown("shop_signal_reviews"))
     ) {
       const llm = await assessReviewLanguage(corpus.reviews, shopCheckId);
       if (llm) {

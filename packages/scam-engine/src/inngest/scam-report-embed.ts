@@ -24,7 +24,7 @@ import { vectorToPgString } from "@askarthur/utils/pgvector";
 import { inngest } from "./client";
 import { SCAM_REPORT_STORED_EVENT, parseScamReportStoredData } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
-import { isFeatureBraked } from "../cost-log";
+import { isFeatureBrakedOrUnknown } from "../cost-log";
 import { withAxiomLogging } from "./with-axiom-logging";
 
 // scam_types that route to voyage-finance-2. Names follow the analyze
@@ -106,7 +106,7 @@ export const scamReportEmbed = inngest.createFunction(
     // when the day's embed spend exceeds its cap. No brake row → runs
     // normally (regression-free). Checked before the row load so a braked
     // day does zero Voyage work.
-    if (await isFeatureBraked("scam_report_embed")) {
+    if (await isFeatureBrakedOrUnknown("scam_report_embed")) {
       return { skipped: true, reason: "cost_brake_engaged" };
     }
 

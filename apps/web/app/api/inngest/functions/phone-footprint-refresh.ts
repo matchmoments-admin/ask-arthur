@@ -30,6 +30,7 @@ import {
   type Footprint,
   type FootprintTier,
 } from "@askarthur/scam-engine/phone-footprint";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -52,38 +53,6 @@ const STALE_CLAIM_MS = 60 * 60 * 1000; // 1 hour
 // clone-watch auto-triage + netcraft-auto already share). A background
 // monitor's re-scan tolerates ≤6h of scheduling latency.
 const CLAIMER_MANUAL_EVENT = "phone-footprint/refresh-claimer.manual-trigger.v1";
-
-/**
- * Check the cost-brake row set by /api/cron/cost-daily-check.
- *
- * When today's combined Vonage + cost_telemetry spend on phone_footprint
- * exceeds PHONE_FOOTPRINT_CAP_USD (default $5), the daily-check cron writes
- * a feature_brakes row with paused_until = now()+24h. We early-return here
- * so per-monitor refreshes (Vonage NI v2 + CAMARA SIM Swap + Device Swap,
- * ~$0.12/refresh) don't continue spending after the cap is hit.
- *
- * Mirrors the pattern in enrich-vulnerability.ts:isBrakeSet() and
- * reddit-intel-daily.ts:isRedditIntelBraked() — single source of brake
- * truth is the feature_brakes table, set by cost-daily-check.
- */
-async function isPhoneFootprintBraked(): Promise<boolean> {
-  const supa = createServiceClient();
-  if (!supa) return false;
-  try {
-    const { data } = await supa
-      .from("feature_brakes")
-      .select("paused_until")
-      .eq("feature", "phone_footprint")
-      .maybeSingle();
-    if (!data) return false;
-    const pausedUntil = data.paused_until
-      ? new Date(data.paused_until as string)
-      : null;
-    return !!(pausedUntil && pausedUntil.getTime() > Date.now());
-  } catch {
-    return false;
-  }
-}
 
 interface MonitorRow {
   id: number;
@@ -240,7 +209,10 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
     // row completed so the claimer doesn't keep re-emitting the same event;
     // the next scheduled refresh will be picked up tomorrow once the brake
     // expires (paused_until is set to now()+24h).
-    const braked = await step.run("check-cost-brake", isPhoneFootprintBraked);
+    const braked = await step.run("check-cost-brake", () =>
+      // Paid Vonage/CAMARA spend → fail-closed (an unreadable brake stops it).
+      isFeatureBrakedOrUnknown("phone_footprint"),
+    );
     if (braked) {
       await markCompleted(queueId, "phone_footprint_braked");
       return { paused: true, reason: "feature_brakes.phone_footprint is set" };

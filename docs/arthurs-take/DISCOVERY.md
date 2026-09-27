@@ -192,7 +192,7 @@ having executed.
   `-truncated` ($0 diagnostic), `-error` ($0 diagnostic) via direct inserts
   (`reddit-intel-daily.ts:422-484`, `reddit-intel-error-log.ts:70-99`); packages cannot import
   apps/web's `logCost`.
-- **Brake**: `feature_brakes.reddit_intel`, read by `isRedditIntelBraked()`
+- **Brake**: `feature_brakes.reddit_intel`, read by `isFeatureBrakedOrUnknown("reddit_intel")` (fail-closed since 2026-09-27; `isRedditIntelBraked()` was deleted)
   (`reddit-intel-error-log.ts:31-48`) at the top of all three intel functions; engaged by
   `cost-daily-check` (`apps/web/app/api/cron/cost-daily-check/route.ts:410-438`) against an explicit
   tag allowlist (:204-214) with cap `REDDIT_INTEL_CAP_USD` (default $10/day).

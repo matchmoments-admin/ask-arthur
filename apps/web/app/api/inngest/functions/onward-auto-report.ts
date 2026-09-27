@@ -2,7 +2,7 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { logger } from "@askarthur/utils/logger";
 import { enabledUrlBlocklistDestinations } from "@/lib/onward/destinations";
 import {
@@ -90,7 +90,7 @@ export const onwardAutoReport = inngest.createFunction(
     // Operator kill-switch / cost brake: an operator-settable feature_brakes row
     // halts onward sends (e.g. a targeted volume spike) without a deploy.
     const braked = await step.run("check-brake", () =>
-      isFeatureBraked("onward_reporting"),
+      isFeatureBrakedOrUnknown("onward_reporting"),
     );
     if (braked) {
       return { skipped: true, reason: "feature_braked" };
