@@ -36,6 +36,12 @@
  *      `aggregate_open_clone_alerts_by_brand` on /admin/brand-register.
  *   2. `cloneWatchLifecycle.test.ts` — property tests over the edge set.
  *
+ *   3. `clone_lifecycle_transitions` (v339) — a log-only AFTER trigger records
+ *      every lifecycle_state change with the SQL function that made it, and
+ *      the daily health digest reports any observed move this file calls
+ *      illegal (`offSpecTransitions` below). It never blocks a write: this is
+ *      the measurement that decides whether step 2 is worth building.
+ *
  * Step 2 (deliberately NOT done in the same change as the guardrail, because
  * the enforcement crons run daily and a bug here breaks live takedown
  * reporting) is to route the four SQL writers through one set-based
@@ -197,4 +203,48 @@ export function canTransition(from: string, to: string): boolean {
 /** Every state reachable from `from`, for rendering and for tests. */
 export function nextStates(from: string): CloneLifecycleState[] {
   return LIFECYCLE_EDGES.filter((e) => e.from === from).map((e) => e.to);
+}
+
+/** One row of `clone_lifecycle_transitions` (v339), as the digest selects it. */
+export interface ObservedTransition {
+  from_state: string | null;
+  to_state: string | null;
+  writer: string;
+}
+
+export interface OffSpecTransition {
+  from: string | null;
+  to: string | null;
+  writer: string;
+  count: number;
+}
+
+/**
+ * Observed moves the spec calls illegal, grouped by (from, to, writer) and
+ * sorted most frequent first. A null state is always off-spec: the column is
+ * NOT NULL, so a null here means the log itself is wrong, and that is worth
+ * seeing too.
+ */
+export function offSpecTransitions(
+  rows: readonly ObservedTransition[],
+): OffSpecTransition[] {
+  const byKey = new Map<string, OffSpecTransition>();
+  for (const r of rows) {
+    const legal =
+      r.from_state !== null &&
+      r.to_state !== null &&
+      canTransition(r.from_state, r.to_state);
+    if (legal) continue;
+    const key = `${r.from_state}\u0000${r.to_state}\u0000${r.writer}`;
+    const hit = byKey.get(key);
+    if (hit) hit.count += 1;
+    else
+      byKey.set(key, {
+        from: r.from_state,
+        to: r.to_state,
+        writer: r.writer,
+        count: 1,
+      });
+  }
+  return [...byKey.values()].sort((a, b) => b.count - a.count);
 }

@@ -130,3 +130,38 @@ describe("NO_DOWNGRADE_STATES ↔ apply_netcraft_reconcile (SQL parity)", () => 
     expect(sqlStates).toEqual([...NO_DOWNGRADE_STATES].sort());
   });
 });
+
+// v339: the digest compares logged moves against the spec. Go-red: making
+// offSpecTransitions treat every move as legal fails the first case.
+describe("offSpecTransitions (v339 log vs LIFECYCLE_EDGES)", () => {
+  it("reports an illegal move, grouped and counted per writer", async () => {
+    const { offSpecTransitions } = await import("@/lib/clone-watch/lifecycle");
+    const out = offSpecTransitions([
+      { from_state: "weaponised", to_state: "monitoring", writer: "apply_clone_urlscan_verdict" },
+      { from_state: "weaponised", to_state: "monitoring", writer: "apply_clone_urlscan_verdict" },
+      { from_state: "taken_down", to_state: "detected", writer: "direct_update" },
+    ]);
+    expect(out).toEqual([
+      { from: "weaponised", to: "monitoring", writer: "apply_clone_urlscan_verdict", count: 2 },
+      { from: "taken_down", to: "detected", writer: "direct_update", count: 1 },
+    ]);
+  });
+
+  it("stays silent on legal moves, including the re-emergence exit", async () => {
+    const { offSpecTransitions } = await import("@/lib/clone-watch/lifecycle");
+    expect(
+      offSpecTransitions([
+        { from_state: "detected", to_state: "monitoring", writer: "apply_clone_urlscan_verdict" },
+        { from_state: "declined", to_state: "weaponised", writer: "apply_clone_urlscan_verdict" },
+        { from_state: "dormant", to_state: "weaponised", writer: "record_weaponised_liveness" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("treats a null state as off-spec (the log itself is wrong)", async () => {
+    const { offSpecTransitions } = await import("@/lib/clone-watch/lifecycle");
+    expect(
+      offSpecTransitions([{ from_state: null, to_state: "detected", writer: "unknown" }]),
+    ).toHaveLength(1);
+  });
+});
