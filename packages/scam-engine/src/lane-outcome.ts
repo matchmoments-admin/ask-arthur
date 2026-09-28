@@ -543,9 +543,15 @@ type Sb = NonNullable<ReturnType<typeof createServiceClient>>;
  * preserves the pre-extraction behaviour: any row the Lane writes under its
  * feature counts as activity, including vendor rows that share it.
  *
- * Fails OPEN: an unreadable log returns false and the run proceeds. The cooldown
- * only smooths operator ergonomics. The quota backstops are the Lane's throttle
- * and its daily cap, so a skipped cooldown cannot breach a vendor ceiling alone.
+ * Fails OPEN: an unreadable log returns false and the run proceeds. So it must
+ * never be a Lane's only protection for a vendor quota. An Inngest `throttle`
+ * counts RUNS, not vendor calls (recheck's 210 runs/day × 90 submits is 18,900),
+ * and it reads only this Lane's own rows. So it cannot see another Lane
+ * spending the same key. That is how a manual recheck at 09:05 passed while
+ * the 09:00 submit batch was spending: 165 against urlscan's 100/hour. urlscan
+ * spenders therefore use the fail-CLOSED, cross-lane guard in
+ * apps/web/lib/clone-watch/urlscan-budget.ts instead. What still reads this
+ * helper is netcraft-issue, whose vendor quota is bounded by its own daily cap.
  */
 export async function laneRanWithin(
   sb: Sb,

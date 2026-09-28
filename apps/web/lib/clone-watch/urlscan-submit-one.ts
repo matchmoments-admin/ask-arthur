@@ -214,11 +214,13 @@ export interface SubmitTally {
  * the budget is in-step and a replay cannot reset the tally mid-loop. One
  * row's throw is counted and logged via `onRowError`, never aborts the rest.
  *
- * Why pacing and not just width: urlscan's unlisted quota is 60/MINUTE
- * (/user/quotas, 2026-09-26), and a sequential submit already takes only
- * ~1.5–2.2 s (measured from urlscan_submitted_at stamps), so width alone
- * would push ~80 POSTs/min and 429 a quarter of the batch. Width hides each
- * row's latency; the start interval holds the rate under the cap.
+ * Why pacing and not just width: urlscan's unlisted quota has a per-MINUTE
+ * cap (URLSCAN_UNLISTED in lib/clone-watch/urlscan-budget.ts, the one copy),
+ * and a sequential submit already takes only ~1.5–2.2 s (measured from
+ * urlscan_submitted_at stamps), so width alone would push ~80 POSTs/min and
+ * 429 a quarter of the batch. Width hides each row's latency; the start
+ * interval holds the rate under the cap. Callers pass the interval their
+ * budget roster entry declares (`minStartIntervalMs`).
  */
 export async function submitCandidateBatch(
   candidates: readonly CloneCandidate[],

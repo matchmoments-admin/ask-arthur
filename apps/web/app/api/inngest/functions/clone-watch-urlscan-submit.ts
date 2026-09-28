@@ -18,6 +18,10 @@ import {
 } from "@/lib/clone-watch/not-a-clone-audit";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import {
+  URLSCAN_SPENDERS,
+  checkUnlistedHeadroom,
+} from "@/lib/clone-watch/urlscan-budget";
 
 /**
  * Clone-Watch urlscan — Stage 1 of 2: SUBMIT.
@@ -48,13 +52,15 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * urlscan verdict: no verdict now means no report, ever.
  *
  * The batch limit was raised 30 -> 75 at the same time. 30 was never a vendor
- * or cost number — the recheck lane already runs ~200 urlscan submits/day on
- * the same key. The quota check the ops doc had flagged UNVERIFIED for months
+ * or cost number. The quota check the ops doc had flagged UNVERIFIED for months
  * was finally run on 2026-08-23: the real entitlement is unlisted 1,000/day
- * (public 5,000, retrieve 10,000), not the documented 100. At 75 + recheck's
- * ~200 we sit at roughly a quarter of the ceiling. The binding constraint is
- * SUBMIT_WALL_CLOCK_MS below, not urlscan — and overshooting is graceful,
- * because a 429 leaves the row untouched (urlscan-submit-one.ts:112).
+ * (public 5,000, retrieve 10,000), not the documented 100. How this lane's 75
+ * sits beside the other unlisted spenders (recheck 90 × 4 = 360/day,
+ * enrichment 20 × 3, admin scans) is NOT restated here: the numbers, the
+ * cron placement and the per-hour/per-day proof live in
+ * lib/clone-watch/urlscan-budget.ts and __tests__/urlscanBudget.test.ts.
+ * Overshooting is graceful: a 429 leaves the row untouched (`rate_limited` in
+ * urlscan-submit-one.ts).
  *
  * NOT-A-CLONE AUDIT (#1238, v330). The lane also carries a random sample of
  * is_clone=false alerts — never scanned otherwise — so the pre-classifier's
@@ -62,21 +68,23 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * audit is MEASUREMENT: v330 routes a sampled miss to monitoring, never
  * weaponised, and this lane surfaces each miss durably (Axiom warn + ids on the
  * Outcome Row) for human review. Samples
- * take at most AUDIT_SLOTS_PER_RUN of the SUBMIT_BATCH_LIMIT slots and run
- * after the regular batch. Only ~33 regular rows were eligible on 2026-09-26,
- * so they mostly fill otherwise-empty slots: while samples are due the lane
- * makes up to 25 MORE urlscan submits a day (plus their retrieves). The run
- * stays ≤ 75 submits in the 09:xx UTC hour, which no other urlscan lane shares
- * (recheck fires at :30 of 00/06/12/18), so it stays inside urlscan's
- * 100/hour; submits are sequential behind a DNS precheck and a reputation
- * lookup each (75-row runs have taken 3–6 min), well under 60/min. The weekly
+ * take at most AUDIT_SLOTS_PER_RUN (= SUBMIT_AUDIT_SHARE in urlscan-budget.ts)
+ * of the SUBMIT_BATCH_LIMIT slots and run after the regular batch. Only ~33
+ * regular rows were eligible on 2026-09-26, so they mostly fill otherwise-empty
+ * slots: while samples are due the lane makes up to 25 MORE urlscan submits a
+ * day (plus their retrieves), never more than SUBMIT_BATCH_LIMIT in the run.
+ * The hour and minute fit is proven in urlscanBudget.test.ts, not argued here;
+ * submits are paced (URLSCAN_SPENDERS.submit.minStartIntervalMs). The weekly
  * draw runs inside the load step (once per UTC ISO week), gated
  * FF_CLONE_WATCH_NOT_A_CLONE_AUDIT_WEEKLY; the one-off baseline is drawn by an
  * operator (docs/ops/clone-watch-config.md). Every tried sample gets an attempt
  * (168 h re-offer, max 3), so an unscannable one cannot re-present forever.
  */
 
-const SUBMIT_BATCH_LIMIT = 75;
+// Declared once, in the urlscan budget roster (includes the audit share).
+const SUBMIT_BATCH_LIMIT = URLSCAN_SPENDERS.submit.perRun;
+const SUBMIT_MIN_START_INTERVAL_MS = URLSCAN_SPENDERS.submit.minStartIntervalMs;
+const MANUAL_EVENT = "shopfront/clone.urlscan-submit.manual-trigger.v1";
 // ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
 // with its evidence in lib/clone-watch/preclassify-thresholds.ts.
 const MIN_CONFIDENCE = WORKLIST_MIN_CONFIDENCE;
@@ -104,13 +112,11 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     concurrency: { limit: 3 },
     // Caps RUNS per day (queueing excess fires rather than dropping them —
     // docs/inngest-brakes.md §glossary). It is NOT a submissions ceiling: one
-    // run submits up to SUBMIT_BATCH_LIMIT rows, so the true worst case is
-    // limit x SUBMIT_BATCH_LIMIT. The comment here used to claim it was a
-    // "global ceiling across all submits/day", and v285 briefly raised it to 90
-    // on that misreading — which would have widened the manual-trigger blast
-    // radius to 90x75 against a 1,000/day urlscan quota. Reverted: the cron
-    // fires once, so the real daily figure is SUBMIT_BATCH_LIMIT, and 40 runs
-    // is ample headroom for operator re-fires.
+    // run submits up to SUBMIT_BATCH_LIMIT rows. The comment here used to claim
+    // it was a "global ceiling across all submits/day", and v285 briefly raised
+    // it to 90 on that misreading. The cron fires once (75/day); a MANUAL fire
+    // spends only what the unlisted budget admits (check-urlscan-budget below),
+    // so 40 runs/day bounds Inngest invocations, not urlscan spend.
     throttle: { limit: 40, period: "1d" },
     // 10m, not 5m: the batch wall-clock guard (200s) bounds real work; the
     // finish budget must also cover ~4 step boundaries × up to 60s of
@@ -122,11 +128,11 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
   },
   [
     ...laneCrons("shopfront-clone-urlscan-submit"),
-    { event: "shopfront/clone.urlscan-submit.manual-trigger.v1" },
+    { event: MANUAL_EVENT },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-urlscan-submit" },
-    async ({ step, runId }) => {
+    async ({ event, step, runId }) => {
       // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
       const gate = laneGate("shopfront-clone-urlscan-submit");
       if (!gate.ok) return { skipped: true, reason: gate.reason };
@@ -135,6 +141,25 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       }
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+      // A MANUAL fire must fit urlscan's key-wide unlisted budget: all unlisted
+      // spend in the trailing hour/day (every lane, in units) plus any
+      // scheduled batch in flight or due within the hour. Unreadable ledger →
+      // refused (fail closed). The 09:00 cron is proven to fit statically
+      // (urlscanBudget.test.ts), so it does not pay this read. Inside a step:
+      // a replay reuses the decision instead of re-reading a ledger that now
+      // contains this run's own row.
+      if (event?.name === MANUAL_EVENT) {
+        const budget = await step.run("check-urlscan-budget", () =>
+          checkUnlistedHeadroom(sb, "submit"),
+        );
+        if (!budget.ok) {
+          logger.warn("clone-watch urlscan submit: manual fire refused by urlscan budget", {
+            ...budget,
+          });
+          return { skipped: true, reason: `urlscan_budget_${budget.reason}`, budget };
+        }
+      }
 
       const loaded = await step.run("load-gated-candidates", async () => {
         // Not-a-clone audit (#1238): draw (weekly, flagged), claim new misses,
@@ -280,6 +305,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             });
           const tally = await submitCandidateBatch(candidates, budget, {
             onRowError,
+            minStartIntervalMs: SUBMIT_MIN_START_INTERVAL_MS,
           });
           // Audit samples run AFTER the regular batch, on the same budget, as a
           // SEPARATE tally: the Outcome Row's units / submitted / dns_* — and so
@@ -287,6 +313,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
           // day of DNS-dead samples cannot read as a broken lane.
           const auditTally = await submitCandidateBatch(auditCandidates, budget, {
             onRowError,
+            minStartIntervalMs: SUBMIT_MIN_START_INTERVAL_MS,
           });
           // One attempt per tried sample, in the same step so a replay cannot
           // separate the submit from its stamp. A 429 or an unreached sample is

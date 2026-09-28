@@ -27,7 +27,7 @@ vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
     ...actual,
     submitCloneCandidate: mocks.submit,
     submitCandidateBatch: (...[c, b, o]: Parameters<typeof actual.submitCandidateBatch>) =>
-      actual.submitCandidateBatch(c, b, { ...o, submitOne: mocks.submit }),
+      actual.submitCandidateBatch(c, b, { ...o, submitOne: mocks.submit, sleep: async () => {} }),
   };
 });
 vi.mock("@/lib/cost-telemetry", () => ({ logCost: mocks.log, logCostAsync: mocks.log }));

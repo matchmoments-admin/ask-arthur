@@ -213,8 +213,9 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       // cron never trips this; it exists so a burst of weaponisations (or an
       // operator leaning on the manual trigger) can't run the reporter back to
       // back and spend the day's Netcraft GET budget re-reading the same uuids.
-      // Mirrors clone-watch-lifecycle-recheck's check-cooldown. The daily cap is
-      // the structural backstop; this is the ergonomics one.
+      // (The recheck lane used to share this own-rows cooldown; urlscan
+      // spenders now use the cross-lane budget in lib/clone-watch/urlscan-budget.ts.)
+      // The daily cap is the structural backstop; this is the ergonomics one.
       const recentRun = await step.run("check-cooldown", () =>
         laneRanWithin(sb, "shopfront-clone-netcraft-issue", COOLDOWN_MS),
       );

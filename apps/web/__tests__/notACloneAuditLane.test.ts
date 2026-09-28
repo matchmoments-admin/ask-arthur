@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Not-a-clone audit (#1238) inside the urlscan submit lane.
@@ -57,22 +56,22 @@ vi.mock("@/lib/clone-watch/urlscan-submit-one", async (importOriginal) => {
   return {
     ...actual,
     submitCandidateBatch: (...[c, b, o]: Parameters<typeof actual.submitCandidateBatch>) =>
-      actual.submitCandidateBatch(c, b, { ...o, submitOne: mocks.submit }),
+      // The lane paces submits (urlscan-budget minStartIntervalMs); no real
+      // sleeping in tests.
+      actual.submitCandidateBatch(c, b, { ...o, submitOne: mocks.submit, sleep: async () => {} }),
   };
 });
 
 import { AUDIT_SLOTS_PER_RUN, composeSubmitBatch } from "@/lib/clone-watch/not-a-clone-audit";
 import { cloneWatchUrlscanSubmit } from "@/app/api/inngest/functions/clone-watch-urlscan-submit";
 import { LANE_SHAPES } from "@/lib/laneHealth";
+import { URLSCAN_SPENDERS } from "@/lib/clone-watch/urlscan-budget";
 
 const cand = (id: number) => ({ id, candidate_url: `https://c${id}.example`, candidate_domain: `c${id}.example` });
 const range = (from: number, n: number) => Array.from({ length: n }, (_, i) => cand(from + i));
 
-const SRC = readFileSync(
-  new URL("../app/api/inngest/functions/clone-watch-urlscan-submit.ts", import.meta.url),
-  "utf8",
-);
-const SUBMIT_BATCH_LIMIT = Number(/const SUBMIT_BATCH_LIMIT = (\d+)/.exec(SRC)![1]);
+// The submit lane reads its cap from the urlscan budget roster.
+const SUBMIT_BATCH_LIMIT = URLSCAN_SPENDERS.submit.perRun;
 
 describe("composeSubmitBatch", () => {
   it("never grows the batch past SUBMIT_BATCH_LIMIT", () => {
@@ -105,8 +104,8 @@ describe("composeSubmitBatch", () => {
 describe("quota fit (urlscan unlisted: 60/min, 100/hour, 1,000/day)", () => {
   it("the audit reserve is a share of the batch, and the batch fits one hour's quota", () => {
     expect(AUDIT_SLOTS_PER_RUN).toBeLessThan(SUBMIT_BATCH_LIMIT);
-    // The submit run is the only urlscan submitter in its hour (recheck fires
-    // at :30 of 00/06/12/18 UTC). Samples ride inside the batch, never on top.
+    // Samples ride inside the batch, never on top. Whether the batch shares
+    // its hour with another spender is proven in urlscanBudget.test.ts.
     expect(SUBMIT_BATCH_LIMIT).toBeLessThanOrEqual(100);
   });
 });

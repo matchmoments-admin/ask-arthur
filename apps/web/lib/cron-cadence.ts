@@ -60,10 +60,20 @@ function firings(expr: string): number[] {
   return out;
 }
 
+/**
+ * Every minute-of-week (0 = Sunday 00:00 UTC) at which ANY of `exprs` fires,
+ * sorted and de-duplicated. Used by the urlscan budget
+ * (lib/clone-watch/urlscan-budget.ts) to place each spender's runs on the
+ * clock without re-typing its schedule.
+ */
+export function cronFiringsOfWeek(exprs: readonly string[]): number[] {
+  return [...new Set(exprs.flatMap(firings))].sort((a, b) => a - b);
+}
+
 /** Longest interval between consecutive firings of ANY of `exprs`, in ms. */
 export function cronMaxGapMs(exprs: readonly string[]): number {
   if (exprs.length === 0) throw new Error("cronMaxGapMs: no cron expressions");
-  const all = [...new Set(exprs.flatMap(firings))].sort((a, b) => a - b);
+  const all = cronFiringsOfWeek(exprs);
   let gap = all[0] + WEEK_MINUTES - all[all.length - 1]; // wrap-around
   for (let i = 1; i < all.length; i++) gap = Math.max(gap, all[i] - all[i - 1]);
   return gap * MIN;

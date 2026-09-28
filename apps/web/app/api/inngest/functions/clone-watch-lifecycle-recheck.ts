@@ -1,7 +1,6 @@
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import {
   LANES,
-  laneRanWithin,
   recordLaneError,
   recordLaneOutcome,
 } from "@askarthur/scam-engine/lane-outcome";
@@ -24,6 +23,10 @@ import {
   type DnsRead,
 } from "@/lib/clone-watch/recheck-dns-gate";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import {
+  URLSCAN_SPENDERS,
+  checkUnlistedHeadroom,
+} from "@/lib/clone-watch/urlscan-budget";
 
 /**
  * Clone-Watch — lifecycle re-check loop (Wave 0 PR-B).
@@ -40,10 +43,12 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * v224 (ops review): rescans are submitted INLINE here (one step.run per
  * candidate, mirroring clone-watch-urlscan-submit), NOT fanned out as 50
  * scan-requested events to scan-one — that fan-out was ~200 Inngest
- * invocations/day of the operator-single-click path. The daily throttle keeps
- * total rescans structurally bounded (the May-27 lesson); a manual-trigger
- * cooldown prevents same-hour stacking (which breached urlscan's 100/hour
- * unlisted cap). The retrieve stage picks up the fresh submissions (v224 also
+ * invocations/day of the operator-single-click path. A manual fire must fit
+ * the key-wide unlisted urlscan budget (lib/clone-watch/urlscan-budget.ts —
+ * every lane's spend in the trailing hour, in units, plus scheduled batches in
+ * flight or due), which prevents same-hour stacking (the 2026-07-12 breach of
+ * urlscan's 100/hour unlisted cap). The throttle bounds RUNS, not submits.
+ * The retrieve stage picks up the fresh submissions (v224 also
  * fixed retrieve to see re-submitted-since-last-scan rows, so classified rows
  * that flip are finally detectable).
  *
@@ -61,10 +66,11 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * submission) + a feature_brakes.shopfront_clone_recheck operator kill-switch.
  */
 
-// × 4 runs/day = ≤360 rescans/day. Bounded by urlscan's UNLISTED quota —
-// 100/hour, 1,000/day (/user/quotas, read 2026-09-26): one batch lands inside
-// one hour, so 90 leaves 10 of the hour for any other unlisted caller. Was 50
-// (#1231): 50/50 on every run since 2026-09-17 with 1,420 rows due.
+// × 4 runs/day = ≤360 rescans/day. Declared once in the urlscan budget
+// roster (lib/clone-watch/urlscan-budget.ts), where it is summed with every
+// other UNLISTED spender against 100/hour and 1,000/day and proven to fit by
+// urlscanBudget.test.ts. Was 50 (#1231): 50/50 on every run since 2026-09-17
+// with 1,420 rows due.
 //
 // This does NOT meet the designed cadence and cannot: at 6h/24h/168h the pool
 // asks for ~3,800 rescans/day, ~4x the whole daily quota. So since v334 the
@@ -73,18 +79,18 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
 // fingerprint changed, read inconclusive, have no baseline, or are floor-due
 // spend one of these 90 urlscan slots. Unchanged rows get a DNS stamp that
 // moves them back in the queue. `due_total` still shows what is left due.
-export const RECHECK_BATCH_LIMIT = 90;
+export const RECHECK_BATCH_LIMIT = URLSCAN_SPENDERS.recheck.perRun;
 // Submits in flight inside the batch step, PACED: urlscan's unlisted cap is
 // 60/min and a sequential submit is ~1.5–2.2 s (measured), so width alone
-// would push ~80/min. One start per 1.1 s holds it near 55/min; width 3 hides
-// each row's latency so the pacing, not the latency, sets the rate. 90 rows
-// ≈ 100 s, inside RECHECK_SUBMIT_WALL_CLOCK_MS.
+// would push ~80/min. One start per interval (1.1 s → ≤55/min, the budget
+// roster's `minStartIntervalMs`) caps the rate; width 3 hides each row's
+// latency so the pacing, not the latency, sets it. The pacing is this run's
+// alone — the budget guarantees no other unlisted spender shares its window
+// (static test for crons, runtime guard for manual fires). 90 rows ≈ 100 s,
+// inside RECHECK_SUBMIT_WALL_CLOCK_MS.
 const RECHECK_SUBMIT_CONCURRENCY = 3;
-const RECHECK_SUBMIT_MIN_INTERVAL_MS = 1_100;
-// Same-window cooldown for a manual fire. 65 min, not 50: the unlisted quota
-// is 100/HOUR, and two batches of 90 inside one hour is 180 (at 50/batch a
-// 51-minute stack was 100 and just fit).
-const RECHECK_COOLDOWN_MS = 65 * 60 * 1000;
+const RECHECK_SUBMIT_MIN_INTERVAL_MS = URLSCAN_SPENDERS.recheck.minStartIntervalMs;
+const MANUAL_EVENT = "shopfront/clone.lifecycle-recheck.manual-trigger.v1";
 // F3: over-fetch the staleness-ordered pool, rank by weaponisation risk in TS
 // (ONE scorer — weaponisation-risk.ts), rescan the top RECHECK_BATCH_LIMIT. Unselected rows keep
 // their stale last_rechecked_at and rotate through on later runs.
@@ -388,7 +394,7 @@ export function planUrlscanRechecks(
   // lane already spends today keeps rotating urlscan through the whole pool.
   // Without it a DNS-silent flip (content swapped on the same host) on an
   // older alert waited for the 30-day floor, worse than today's ~6.6-day mean.
-  // It spends nothing new: the same 90 cap, pacing and cooldown. Filled rows
+  // It spends nothing new: the same 90 cap, pacing and budget guard. Filled rows
   // are scanned rows — they leave unchangedIds and get a fresh baseline.
   const fillRoom = Math.max(0, limit - first.length - rest.length);
   // Opaque rows rank FIRST: for them DNS "unchanged" means nothing, so a
@@ -422,8 +428,8 @@ export function planUrlscanRechecks(
   return { scan, unchangedIds: stamped, counts };
 }
 
-// inngest-finish-budget: 7 boundaries — check-brake, check-cooldown,
-// load-and-rank, dns-gate-and-submit (budgeted 220 s), mark-rechecked,
+// inngest-finish-budget: 7 boundaries — check-brake, check-urlscan-budget
+// (manual fires only), load-and-rank, dns-gate-and-submit (budgeted 220 s), mark-rechecked,
 // record-dns, log-cost (log-cost-quiet replaces the last four on a quiet run).
 export const cloneWatchLifecycleRecheck = inngest.createFunction(
   {
@@ -431,10 +437,12 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     name: "Clone-Watch: lifecycle re-check loop",
     retries: 1,
     concurrency: { limit: 1 },
-    // Inngest throttle counts RUNS, not submits: this caps runs/day. The
-    // submit ceiling is RECHECK_BATCH_LIMIT per run × the 65-min cooldown,
-    // which keeps a manual-trigger storm from recreating the May-27 urlscan
-    // burst (v224).
+    // Inngest throttle counts RUNS, not submits: 210 RUNS/day (queued, never
+    // dropped — docs/inngest-brakes.md §glossary). It is not a urlscan bound:
+    // 210 × 90 would be 18,900 submits. The submit ceiling is
+    // RECHECK_BATCH_LIMIT per run × the runs the unlisted budget admits
+    // (4 crons proven by urlscanBudget.test.ts; each manual fire checked at
+    // runtime by check-urlscan-budget below).
     throttle: { limit: 210, period: "1d" },
     // 15m, not 8m (#1069): the inline rescan step legitimately runs minutes
     // (a batch of rechecks incl. urlscan submits), and step boundaries now queue for
@@ -452,11 +460,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     // a retrieve tick don't race on the same row (v224). The offset is 20 min,
     // narrowed from 30 when retrieve moved off the top of the hour.
     ...laneCrons("shopfront-clone-lifecycle-recheck"),
-    { event: "shopfront/clone.lifecycle-recheck.manual-trigger.v1" },
+    { event: MANUAL_EVENT },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-lifecycle-recheck" },
-    async ({ step }) => {
+    async ({ event, step }) => {
       // Flag gate declared once, in LANE_SHAPES (the digest reads the same list).
       const gate = laneGate("shopfront-clone-lifecycle-recheck");
       if (!gate.ok) return { skipped: true, reason: gate.reason };
@@ -473,16 +481,26 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      // Cooldown: skip if a recheck ran in the last 50 min. The 6h-apart crons
-      // never trip this; it exists so rapid MANUAL triggers can't stack three
-      // 50-submit runs into one hour and breach urlscan's 100/hour unlisted cap
-      // (which happened 2026-07-12 00:00 UTC). The throttle is the structural
-      // backstop; this is the operator-ergonomics one.
-      const recentRun = await step.run("check-cooldown", () =>
-        laneRanWithin(sb, "shopfront-clone-lifecycle-recheck", RECHECK_COOLDOWN_MS),
-      );
-      if (recentRun) {
-        return { skipped: true, reason: "cooldown_active" };
+      // A MANUAL fire must fit urlscan's key-wide UNLISTED budget. This
+      // replaced a 65-min cooldown that read only THIS lane's rows, so a
+      // manual fire at 09:05 passed while the 09:00 submit batch was spending
+      // (90 + 75 = 165 against 100/hour). The guard counts every unlisted
+      // spender's units in the trailing hour and day, reserves any scheduled
+      // batch in flight or due within the hour, and refuses when
+      // 100 − used < RECHECK_BATCH_LIMIT. An unreadable ledger refuses (fail
+      // closed). Scheduled ticks skip it: the four crons are proven to fit by
+      // urlscanBudget.test.ts, and a manual fire cannot land within an hour of
+      // one. Inside a step, so a replay reuses the decision.
+      if (event?.name === MANUAL_EVENT) {
+        const budget = await step.run("check-urlscan-budget", () =>
+          checkUnlistedHeadroom(sb, "recheck"),
+        );
+        if (!budget.ok) {
+          logger.warn("clone-watch recheck: manual fire refused by urlscan budget", {
+            ...budget,
+          });
+          return { skipped: true, reason: `urlscan_budget_${budget.reason}`, budget };
+        }
       }
 
       // The worklist holds out never-scanned dead rows (v326: no uuid, 400
@@ -546,9 +564,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
 
       if (pool === 0) {
         // Quiet-run Outcome Row (#1145/#1166): "nothing due" used to write
-        // nothing and read as "not running". The 65-min cooldown above reads
-        // this feature's latest row, so a quiet run also holds off a stacked
-        // manual fire — intended.
+        // nothing and read as "not running".
         await step.run("log-cost-quiet", () =>
           recordLaneOutcome("shopfront-clone-lifecycle-recheck", 0, {
             reason: "nothing_due",

@@ -30,12 +30,15 @@
 
 import { getLogger } from "@askarthur/utils/axiom-logger";
 import type { CloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
+import { SUBMIT_AUDIT_SHARE } from "@/lib/clone-watch/urlscan-budget";
 
-/** Of the submit lane's daily SUBMIT_BATCH_LIMIT (75), at most this many go to
- *  audit samples. Only ~33 regular rows were eligible on 2026-09-26, so in
- *  practice the samples fill otherwise-empty slots: they ADD up to this many
- *  urlscan submits a day (plus their retrieves) while samples are due. */
-export const AUDIT_SLOTS_PER_RUN = 25;
+/** Of the submit lane's daily SUBMIT_BATCH_LIMIT, at most this many go to
+ *  audit samples — declared in the urlscan budget (SUBMIT_AUDIT_SHARE), which
+ *  counts them INSIDE the submit lane's per-run cap. Only ~33 regular rows
+ *  were eligible on 2026-09-26, so in practice the samples fill otherwise-empty
+ *  slots: they ADD up to this many urlscan submits a day (plus their
+ *  retrieves) while samples are due. */
+export const AUDIT_SLOTS_PER_RUN = SUBMIT_AUDIT_SHARE;
 
 /** The weekly sample: this fraction of the never-scanned not-a-clone pool inside
  *  the horizon, minimum 1 when the pool is non-empty (decision #1233: "~5%"). */
