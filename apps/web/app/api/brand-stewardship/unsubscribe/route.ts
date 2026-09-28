@@ -19,14 +19,23 @@ export const dynamic = "force-dynamic";
  *
  * Both verify the HMAC token (signed over the lowercased email) so a stranger
  * can't unsubscribe an arbitrary address.
+ *
+ * Also the target of the founder-outreach email's unsubscribe link (PR-C,
+ * 2026-09-28): brand_report_unsubscribes is the one brand-contact opt-out
+ * store the Brand Send Gate reads for every brand send. `src` is an unsigned
+ * label for the row's `source` only — an unknown value falls back to the
+ * stewardship default, so it cannot inject arbitrary text.
  */
-async function suppress(email: string): Promise<void> {
+const SOURCES = new Set(["brand_stewardship_email", "brand_outreach"]);
+
+async function suppress(email: string, src: string | null): Promise<void> {
   const sb = createServiceClient();
   if (!sb) return;
+  const source = src && SOURCES.has(src) ? src : "brand_stewardship_email";
   const { error } = await sb
     .from("brand_report_unsubscribes")
     .upsert(
-      { email: email.toLowerCase(), source: "brand_stewardship_email" },
+      { email: email.toLowerCase(), source },
       { onConflict: "email", ignoreDuplicates: true },
     );
   if (error) {
@@ -40,7 +49,7 @@ export async function POST(req: NextRequest) {
   const email = req.nextUrl.searchParams.get("email");
   const token = req.nextUrl.searchParams.get("token");
   if (email && token && verifyUnsubscribeToken(email, token)) {
-    await suppress(email);
+    await suppress(email, req.nextUrl.searchParams.get("src"));
   }
   // RFC 8058: always 200, no body.
   return new NextResponse(null, { status: 200 });
@@ -50,10 +59,10 @@ export async function GET(req: NextRequest) {
   const email = req.nextUrl.searchParams.get("email");
   const token = req.nextUrl.searchParams.get("token");
   const ok = Boolean(email && token && verifyUnsubscribeToken(email, token));
-  if (ok) await suppress(email!);
+  if (ok) await suppress(email!, req.nextUrl.searchParams.get("src"));
 
   const body = ok
-    ? `<h1>You're unsubscribed</h1><p>We won't send any more Ask Arthur brand-protection summaries to <strong>${escapeHtml(
+    ? `<h1>You're unsubscribed</h1><p>We won't send any more Ask Arthur brand-protection emails to <strong>${escapeHtml(
         email!,
       )}</strong>.</p>`
     : `<h1>Link expired</h1><p>This unsubscribe link is invalid or has expired. Reply <strong>STOP</strong> to any Ask Arthur email and we'll remove you.</p>`;

@@ -7,6 +7,8 @@
 // see a send when one happens.
 //
 // Go-red record (2026-09-27, guard reverted → test failed → restored):
+//   (PR-C: the readiness read now happens inside the Brand Send Gate's
+//   check-auto-send-gate step; resolveAutoSend takes its per-group decision.)
 //   - prepare: `const autoSend = resolveAutoSend(flag, readiness)` reverted to
 //     the bare flag `featureFlags.shopfrontCloneNotifyBrandAutoSend`
 //        → "flag ON + scorecard not ready → no Resend call" FAILED
@@ -18,6 +20,8 @@ const m = vi.hoisted(() => ({
   send: vi.fn(async () => ({ data: { id: "msg_1" }, error: null })),
   rpc: vi.fn(),
   readiness: { data: [] as unknown, error: null as unknown },
+  directory: { data: [] as unknown, error: null as unknown },
+  flagsOff: {} as Record<string, boolean>,
 }));
 
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({
@@ -27,7 +31,7 @@ vi.mock("@askarthur/scam-engine/inngest/with-axiom-logging", () => ({
   withAxiomLogging: (_c: unknown, h: unknown) => h,
 }));
 vi.mock("@askarthur/utils/feature-flags", () => ({
-  featureFlags: new Proxy({}, { get: () => true }),
+  featureFlags: new Proxy({}, { get: (_t, k) => m.flagsOff[String(k)] !== true }),
 }));
 vi.mock("@askarthur/utils/env", () => ({
   readStringEnv: () => "alerts@askarthur.au",
@@ -61,11 +65,22 @@ vi.mock("@askarthur/scam-engine/lane-outcome", async (orig) => ({
   recordLaneError: vi.fn(async () => {}),
 }));
 
+// PR-C: auto-send now passes the Brand Send Gate's "auto-send" profile, which
+// adds the brand_contact_directory cross-check and unsubscribe / STOP. The
+// directory row below matches the queued recipient, so these tests still
+// isolate readiness.
 function builder(table: string) {
   const res = () =>
-    table === "clone_watch_readiness" ? m.readiness : { data: [], error: null };
+    table === "clone_watch_readiness"
+      ? m.readiness
+      : table === "brand_contact_directory"
+        ? m.directory
+        : table === "brand_report_unsubscribes"
+          ? { data: null, error: null }
+          : { data: [], error: null };
   const b: Record<string, unknown> = {};
   for (const k of ["select", "eq", "in", "order", "limit", "update", "neq", "is"]) b[k] = () => b;
+  b.maybeSingle = async () => res();
   b.then = (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) =>
     Promise.resolve(res()).then(ok, bad);
   return b;
@@ -97,6 +112,10 @@ const assignCalls = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.RESEND_API_KEY = "re_test";
+  m.directory = {
+    data: [{ recipient: "security@auspost.com.au", channel_type: "security_txt" }],
+    error: null,
+  };
   m.rpc.mockImplementation(async (name: string) => {
     if (name === "list_clone_alerts_unbatched_for_prepare") {
       return {
@@ -110,6 +129,7 @@ beforeEach(() => {
         error: null,
       };
     }
+    if (name === "clone_alert_recipient_is_suppressed") return { data: false, error: null };
     return { data: [], error: null };
   });
 });
@@ -137,5 +157,37 @@ describe("notify-brand-prepare auto-send × readiness gate", () => {
     await run();
     expect(m.send).toHaveBeenCalledTimes(1);
     expect(assignCalls()[0]).toMatchObject({ p_auto_approved: true });
+  });
+});
+
+// PR-C go-red record (2026-09-28): "directory" removed from the auto-send
+// profile → "a directory mismatch keeps the batch for manual approval" FAILED.
+describe("notify-brand-prepare auto-send × Brand Send Gate (directory cross-check)", () => {
+  it("a directory mismatch keeps the batch for manual approval — no Resend call", async () => {
+    const [a, b] = required();
+    m.readiness = { data: [{ period_month: a, ready: true }, { period_month: b, ready: true }], error: null };
+    m.directory = {
+      data: [{ recipient: "someone-else@auspost.com.au", channel_type: "security_txt" }],
+      error: null,
+    };
+    const out = await run();
+    expect(m.send).not.toHaveBeenCalled();
+    expect(assignCalls()[0]).toMatchObject({ p_auto_approved: false });
+    expect(out.auto_send_refused).toEqual({ recipient_mismatch: 1 });
+  });
+
+  // PR-C review go-red: "legal_signoff" removed from the auto-send profile → this FAILED.
+  it("no #371 sign-off (FF_BRAND_STEWARDSHIP_SEND OFF) keeps the batch for manual approval", async () => {
+    const [a, b] = required();
+    m.readiness = { data: [{ period_month: a, ready: true }, { period_month: b, ready: true }], error: null };
+    m.flagsOff = { brandStewardshipSend: true };
+    try {
+      const out = await run();
+      expect(m.send).not.toHaveBeenCalled();
+      expect(assignCalls()[0]).toMatchObject({ p_auto_approved: false });
+      expect(out.auto_send_refused).toEqual({ send_disabled: 1 });
+    } finally {
+      m.flagsOff = {};
+    }
   });
 });

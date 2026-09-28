@@ -44,6 +44,12 @@ const loggerMock = {
   debug: vi.fn(),
 };
 vi.mock("@askarthur/utils/logger", () => ({ logger: loggerMock }));
+// The gate's override warn goes to Axiom via getLogger, not the console logger.
+const axiomWarn = vi.fn();
+const axiomFlush = vi.fn(async () => {});
+vi.mock("@askarthur/utils/axiom-logger", () => ({
+  getLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: axiomWarn, error: vi.fn(), flush: axiomFlush }),
+}));
 
 const logCostMock = vi.fn();
 vi.mock("@/lib/cost-telemetry", async () => {
@@ -69,22 +75,54 @@ vi.mock("@/lib/unsubscribe", () => ({
 // insert path (brand_outreach_log) and the select-chain (shopfront_clone_alerts
 // → getBrandCloneSample). `cloneSampleRows` is per-test mutable.
 const insertMock = vi.fn().mockResolvedValue({ error: null });
+// The gate's override record (cost_telemetry) — kept apart from the ledger.
+const costInsertMock = vi.fn().mockResolvedValue({ error: null });
 let cloneSampleRows: unknown[] = [];
-function makeQueryBuilder(): Record<string, unknown> {
+// The Brand Send Gate's "outreach" profile (PR-C) reads the readiness
+// scorecard for a REAL send: `select(...).in("period_month", months)`.
+// Default READY for the two months the gate requires (real clock).
+function requiredMonths(): [string, string] {
+  const d = new Date();
+  const a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
+  const b = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 2, 1));
+  return [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)];
+}
+const readyRows = () => requiredMonths().map((m) => ({ period_month: m, ready: true }));
+let readinessRes: { data: unknown; error: unknown } = { data: [], error: null };
+function makeQueryBuilder(table?: string): Record<string, unknown> {
   const b: Record<string, unknown> = {
-    insert: insertMock,
+    insert: table === "cost_telemetry" ? costInsertMock : insertMock,
     select: () => b,
     eq: () => b,
     gte: () => b,
     or: () => b,
     order: () => b,
+    in: () => Promise.resolve(table === "clone_watch_readiness" ? readinessRes : { data: [], error: null }),
     limit: () => Promise.resolve({ data: cloneSampleRows, error: null }),
+    // The gate's `unsubscribe` check (outreach profile, PR-C review).
+    maybeSingle: () =>
+      Promise.resolve(table === "brand_report_unsubscribes" ? unsubRes : { data: null, error: null }),
   };
   return b;
 }
+let unsubRes: { data: unknown; error: unknown } = { data: null, error: null };
+let stopRes: { data: unknown; error: unknown } = { data: false, error: null };
 vi.mock("@askarthur/supabase/server", () => ({
-  createServiceClient: () => ({ from: () => makeQueryBuilder() }),
+  createServiceClient: () => ({
+    from: (t: string) => makeQueryBuilder(t),
+    rpc: async () => stopRes,
+  }),
 }));
+
+let readinessOverride = false;
+vi.mock("@askarthur/utils/env", async (orig) => {
+  const actual = await orig<typeof import("@askarthur/utils/env")>();
+  return {
+    ...actual,
+    readBoolEnv: (name: string) =>
+      name === "BRAND_OUTREACH_READINESS_OVERRIDE" ? readinessOverride : actual.readBoolEnv(name),
+  };
+});
 
 // ── Helpers ──
 
@@ -118,6 +156,12 @@ beforeEach(() => {
   insertMock.mockReset().mockResolvedValue({ error: null });
   loggerMock.error.mockReset();
   cloneSampleRows = [];
+  readinessRes = { data: readyRows(), error: null };
+  readinessOverride = false;
+  unsubRes = { data: null, error: null };
+  stopRes = { data: false, error: null };
+  loggerMock.warn.mockReset();
+  costInsertMock.mockReset().mockResolvedValue({ error: null });
   delete process.env.BRAND_OUTREACH_SHADOW_RECIPIENT;
 });
 
@@ -342,6 +386,146 @@ describe("POST /api/admin/brand-outreach/send", () => {
     delete process.env.RESEND_API_KEY;
     const res = await POST(makeRequest(validPayload));
     expect(res.status).toBe(503);
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+});
+
+// Founder decision 2026-09-28 (PR-C): a REAL outreach send embeds real Clone
+// Watch detections, so it passes the Brand Send Gate's "outreach" profile —
+// readiness, with an explicit logged override.
+//
+// Go-red record (2026-09-28): deleted the `checkBrandSend("outreach", …)` block
+// in the route → "a REAL send is refused not_ready …" FAILED (Resend called)
+// and the scan test (brandSendGateScan) FAILED on this file; made settle()
+// skip recordOverride → "the override lets it through …" FAILED.
+describe("POST /api/admin/brand-outreach/send — Brand Send Gate", () => {
+  it("a REAL send is refused not_ready when the scorecard is not ready — nothing sent, nothing ledgered", async () => {
+    readinessRes = { data: [readyRows()[0]], error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, brandKey: "pnbank.com.au" }));
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("not_ready");
+    expect(String(json.detail)).toContain("not_computed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(logCostMock).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable scorecard refuses too (fail closed)", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(403);
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("a test / shadow send is not gated (unchanged)", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, testMode: true }));
+    expect(res.status).toBe(200);
+    expect(resendSendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("the override lets it through, sends a flushed Axiom warn and writes a cost_telemetry record", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    readinessOverride = true;
+    axiomWarn.mockClear();
+    axiomFlush.mockClear();
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, brandKey: "pnbank.com.au" }));
+    expect(res.status).toBe(200);
+    expect(resendSendMock).toHaveBeenCalledTimes(1);
+    expect(axiomWarn).toHaveBeenCalledWith(
+      "brand_send_gate_override",
+      expect.objectContaining({ profile: "outreach", brand: "P&N Bank", brand_key: "pnbank.com.au" }),
+    );
+    expect(axiomFlush).toHaveBeenCalled();
+    expect(costInsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "brand_outreach",
+        operation: "readiness_override",
+        estimated_cost_usd: 0,
+      }),
+    );
+  });
+
+  // PR-C review (2026-09-28): outreach also checks unsubscribe / STOP, and its
+  // unsubscribe link writes the store that check reads.
+  // Go-red: "unsubscribe" removed from the outreach profile → the three
+  // opt-out tests below FAILED (Resend called); UNSUBSCRIBE_BASE reverted to
+  // "https://askarthur.au/unsubscribe" → "the unsubscribe link targets …" FAILED.
+  it("a REAL send to an unsubscribed contact is refused — nothing sent", async () => {
+    unsubRes = { data: { email: "security@pnbank.com.au" }, error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("recipient_unsubscribed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("a REAL send to a STOP-replied contact is refused", async () => {
+    stopRes = { data: true, error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect((await res.json()).error).toBe("recipient_suppressed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("the readiness override never overrides an opt-out", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    readinessOverride = true;
+    unsubRes = { data: { email: "security@pnbank.com.au" }, error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect((await res.json()).error).toBe("recipient_unsubscribed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+    expect(costInsertMock).not.toHaveBeenCalled();
+  });
+
+  // PR-C review 2 go-red: the `isShadow && !isInternalRecipient(recipient)`
+  // guard deleted → both tests below FAILED (Resend called with the outside
+  // address).
+  it("a shadow recipient outside @askarthur.au is refused — nothing sent", async () => {
+    process.env.BRAND_OUTREACH_SHADOW_RECIPIENT = "security@pnbank.com.au";
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("shadow_recipient_not_internal");
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("a testMode send to an outside ADMIN_TEST_EMAIL is refused", async () => {
+    const { POST } = await loadRoute();
+    process.env.ADMIN_TEST_EMAIL = "someone@example.com";
+    try {
+      const res = await POST(makeRequest({ ...validPayload, testMode: true }));
+      expect(res.status).toBe(403);
+      expect(resendSendMock).not.toHaveBeenCalled();
+    } finally {
+      process.env.ADMIN_TEST_EMAIL = "brendan@askarthur.au";
+    }
+  });
+
+  it("the unsubscribe link targets the brand opt-out store the gate reads", async () => {
+    const { POST } = await loadRoute();
+    await POST(makeRequest(validPayload));
+    const [payload] = resendSendMock.mock.calls[0];
+    expect(payload.headers["List-Unsubscribe"]).toContain(
+      "https://askarthur.au/api/brand-stewardship/unsubscribe?email=",
+    );
+    expect(payload.headers["List-Unsubscribe"]).toContain("&src=brand_outreach");
+  });
+
+  it("the override is not honoured if its record cannot be written", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    readinessOverride = true;
+    costInsertMock.mockResolvedValue({ error: { message: "insert failed" } });
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("override_unrecorded");
     expect(resendSendMock).not.toHaveBeenCalled();
   });
 });

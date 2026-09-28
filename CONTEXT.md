@@ -217,8 +217,29 @@ fix — but it still keeps the month not ready. The **readiness gate**: a real
 brand send (stewardship report, brand-notify batch or auto-send) needs the last
 `READINESS_REQUIRED_MONTHS` closed months ready; a missing or unreadable
 scorecard is not ready. It is checked in addition to the send's own flag and
-the #371 legal sign-off, never instead of them.
+the #371 legal sign-off, never instead of them — all of which are checks of
+the **Brand Send Gate**.
 _Avoid_: "health score", "go-live check", "KPI".
+
+**Brand Send Gate** (`apps/web/lib/clone-watch/brand-send-gate.ts`, PR-C 2026-09-28):
+The ONE conjunction every Clone Watch brand send passes before Resend: flags,
+the #371 legal sign-off (encoded only as `FF_BRAND_STEWARDSHIP_SEND`), the
+readiness gate, the `shopfront_clone_outreach` brake, unsubscribe / STOP,
+verified contact and the brand-contact-directory cross-check. A send path names
+a **send profile** (`stewardship-real`, `batch`, `auto-send`, `outreach`, and
+`requester` for the clone-list lead magnet) — the
+list of checks that apply to it — so a difference between paths is a line in
+`BRAND_SEND_PROFILES`, not a missing block in a route. Returns
+`{ allowed, reasons[] }`; any read error refuses. Shadow sends (to our own
+inbox) never reach it — and a shadow address that is not an exact
+`@askarthur.au` address sends nothing. Every automated real brand contact (stewardship, batch,
+auto-send) needs the #371 sign-off; every real send, outreach included, honours
+the **brand opt-out store** (`brand_report_unsubscribes`, written by every brand
+email's unsubscribe link) plus STOP replies. The one override is
+`BRAND_OUTREACH_READINESS_OVERRIDE` (outreach profile, readiness only — never an
+opt-out), which is logged and recorded or not honoured. `brandSendGateScan.test.ts` fails any Resend sender carrying Clone
+Watch brand data that does not call it.
+_Avoid_: "send checks", "outreach guard", "preconditions" (for this set).
 
 **AU Brand Watchlist**:
 The static `BrandEntry[]` array at `packages/shopfront-glue/src/au-brand-watchlist.ts` — ~50 Australian retail, bank, telco, and logistics brand names + their `legitimate_domains` exclusion lists. Per-entry: `{ brand: string, legitimate_domains: string[] }`. Used by Layer 0 (`lexicalMatch()` runs every newly-registered domain against the full list) and reused by Phase A (unioned with installed `shopfront_shops` brand names) and Phase B (corpus-mining adds dynamic patterns to the same matcher). The file IS the seam — opt-out and lawyer-vetting happen by editing this file, not by adding a feature flag.

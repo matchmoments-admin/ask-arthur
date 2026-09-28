@@ -165,6 +165,10 @@ describe("stewardship send route — readiness gate", () => {
   });
 
   it("sends when both required months are ready (and the other gates pass)", async () => {
+    // PR-C added the brake and the STOP-reply check to this path, so "the
+    // other gates pass" now also means a clear brake and a not-suppressed answer.
+    tableResult.feature_brakes = { data: null, error: null };
+    rpc.mockResolvedValueOnce({ data: false, error: null });
     const { status } = await stewardshipSend();
     expect(status).toBe(200);
     expect(resendSend).toHaveBeenCalledTimes(1);
@@ -207,15 +211,94 @@ describe("brand-notify batch send route — readiness gate", () => {
 });
 
 describe("notify-brand-prepare — auto-send needs flag AND ready", () => {
+  // PR-C: resolveAutoSend takes the Brand Send Gate's per-group decision
+  // (`allowed`, which includes readiness) instead of the bare readiness gate.
   it("auto-send needs flag AND ready", async () => {
     const { resolveAutoSend } = await import(
       "@/app/api/inngest/functions/clone-watch-notify-brand-prepare"
     );
-    expect(resolveAutoSend(true, { ready: true })).toBe(true);
-    expect(resolveAutoSend(true, { ready: false })).toBe(false);
+    expect(resolveAutoSend(true, { allowed: true })).toBe(true);
+    expect(resolveAutoSend(true, { allowed: false })).toBe(false);
     expect(resolveAutoSend(true, null)).toBe(false);
     // A replayed memo of another shape is not ready.
-    expect(resolveAutoSend(true, { ready: "true" })).toBe(false);
-    expect(resolveAutoSend(false, { ready: true })).toBe(false);
+    expect(resolveAutoSend(true, { allowed: "true" })).toBe(false);
+    expect(resolveAutoSend(false, { allowed: true })).toBe(false);
+  });
+});
+
+// ── PR-C: the Brand Send Gate closes the per-route copy gaps ──
+// Go-red record (2026-09-28): "brake" removed from the stewardship-real profile
+// → "stewardship refuses on an engaged brake" FAILED; "unsubscribe" removed
+// from the batch profile → "batch refuses an unsubscribed recipient" FAILED.
+describe("Brand Send Gate — gaps closed on the real routes", () => {
+  afterEach(() => {
+    rpc.mockReset().mockResolvedValue({ data: [], error: null });
+  });
+
+  it("stewardship refuses on an engaged brake (it had no brake before PR-C)", async () => {
+    // feature_brakes fixture is engaged by default.
+    rpc.mockResolvedValue({ data: false, error: null });
+    const { status, body } = await stewardshipSend();
+    expect(status).toBe(503);
+    expect(body.error).toBe("cost_brake_engaged");
+    expect(resendSend).not.toHaveBeenCalled();
+  });
+
+  // PR-C review go-red: "legal_signoff" removed from the batch profile → this FAILED.
+  it("batch refuses without the #371 sign-off (FF_BRAND_STEWARDSHIP_SEND OFF)", async () => {
+    flags.brandStewardshipSend = false;
+    try {
+      const { status, body } = await batchSend();
+      expect(status).toBe(403);
+      expect(body.error).toBe("send_disabled");
+      expect(rpc).not.toHaveBeenCalled();
+      expect(resendSend).not.toHaveBeenCalled();
+    } finally {
+      flags.brandStewardshipSend = true;
+    }
+  });
+
+  // PR-C review 2 go-red: the `isShadow && !isInternalRecipient(shadow)` guard
+  // deleted → this FAILED (Resend called with the brand address).
+  it("a shadow recipient outside @askarthur.au is refused — nothing sent", async () => {
+    shadowRecipient = "security@auspost.com.au";
+    const { status, body } = await stewardshipSend();
+    expect(status).toBe(403);
+    expect(body.error).toBe("shadow_recipient_not_internal");
+    expect(resendSend).not.toHaveBeenCalled();
+  });
+
+  it("stewardship shadow send still ignores the brake", async () => {
+    shadowRecipient = "shadow@askarthur.au";
+    const { status, body } = await stewardshipSend();
+    expect(status).toBe(200);
+    expect(body.mode).toBe("shadow");
+  });
+
+  it("batch refuses an unsubscribed recipient (it only checked STOP replies before PR-C)", async () => {
+    tableResult.feature_brakes = { data: null, error: null };
+    tableResult.brand_contact_directory = {
+      data: [{ recipient: "security@auspost.com.au", channel_type: "security_txt" }],
+      error: null,
+    };
+    tableResult.brand_report_unsubscribes = { data: { email: "security@auspost.com.au" }, error: null };
+    rpc.mockImplementation(async (name: string) =>
+      name === "load_clone_alert_batch"
+        ? {
+            data: [
+              {
+                id: 1, alert_id: 11, brand: "auspost.com.au", candidate_domain: "auspost-x.com",
+                recipient: "security@auspost.com.au", channel_type: "security_txt",
+                approval_status: "pending", email_subject: "s", email_body_html: "<p>b</p>",
+              },
+            ],
+            error: null,
+          }
+        : { data: false, error: null },
+    );
+    const { status, body } = await batchSend();
+    expect(status).toBe(409);
+    expect(body.error).toBe("recipient_unsubscribed");
+    expect(resendSend).not.toHaveBeenCalled();
   });
 });

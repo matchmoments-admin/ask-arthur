@@ -14,10 +14,22 @@ import { outreachIdempotencyKey } from "@/lib/email/brand-outreach";
 import { getBrandCloneSample } from "@/lib/email/brand-outreach-pilot";
 import BrandOutreachPilot from "@/emails/BrandOutreachPilot";
 import { html, joinHtml } from "@askarthur/utils/html";
+import {
+  checkBrandSend,
+  isInternalRecipient,
+  refusalStatus,
+  SHADOW_NOT_INTERNAL,
+} from "@/lib/clone-watch/brand-send-gate";
 
 export const dynamic = "force-dynamic";
 
-const UNSUBSCRIBE_BASE = "https://askarthur.au/unsubscribe";
+// The brand-contact opt-out endpoint: it writes brand_report_unsubscribes,
+// which the Brand Send Gate's `unsubscribe` check reads before every real
+// brand send (outreach included). The consumer /unsubscribe page used here
+// before only UPDATEs an existing email_subscribers row, so a brand contact's
+// opt-out was recorded nowhere. `src` (appended after signing — it is not
+// part of the HMAC) only labels the row's source.
+const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
 // The Zod key name is verbose on purpose — the field carries the founder's
 // own prose (light markdown), which the email builder sanitises before it is
@@ -88,7 +100,9 @@ async function recordOutreach(row: {
  * and writes the body, then sends. It is legally distinct from the automated
  * brand-stewardship report send (which is flag-gated on #371 legal sign-off)
  * — a person authored and approved every word here, so there is no bulk loop
- * and no per-brand auto-send.
+ * and no per-brand auto-send. It still embeds real Clone Watch detections, so
+ * a REAL send passes the Brand Send Gate's "outreach" profile (readiness,
+ * with a logged env override) — founder decision 2026-09-28.
  *
  * Recipient routing (mirrors the stewardship route's validation-first shape):
  *   • testMode === true            → shadow send to the founder's own inbox.
@@ -127,6 +141,41 @@ export async function POST(req: NextRequest) {
   const isShadow = body.testMode === true || Boolean(shadowEnv);
   const recipient = isShadow ? founderInbox : body.to;
 
+  // Brand Send Gate, profile "outreach" (founder decision 2026-09-28): a REAL
+  // send embeds real Clone Watch detections (getBrandCloneSample below), so it
+  // waits on the readiness scorecard like every other brand send. The escape
+  // hatch is BRAND_OUTREACH_READINESS_OVERRIDE — the gate writes a cost_telemetry
+  // row (and refuses if it cannot) plus an Axiom warn when Axiom is enabled.
+  // Shadow / test sends go to our own inbox and are not gated (unchanged).
+  // A shadow / test send is only ungated because it reaches our own inbox —
+  // so the resolved shadow address (BRAND_OUTREACH_SHADOW_RECIPIENT or
+  // ADMIN_TEST_EMAIL) must be internal, or nothing is sent.
+  if (isShadow && !isInternalRecipient(recipient)) {
+    return NextResponse.json(
+      { error: SHADOW_NOT_INTERNAL.code, detail: SHADOW_NOT_INTERNAL.detail },
+      { status: refusalStatus(SHADOW_NOT_INTERNAL) },
+    );
+  }
+  const sb = createServiceClient();
+  if (!isShadow) {
+    const decision = await checkBrandSend("outreach", sb, {
+      recipient,
+      brandKey: body.brandKey ?? null,
+      context: { brand: body.brandName },
+    });
+    if (!decision.allowed) {
+      const first = decision.reasons[0];
+      logger.warn("brand-outreach send: refused by brand send gate", {
+        brand: body.brandName,
+        code: first.code,
+      });
+      return NextResponse.json(
+        { error: first.code, detail: first.detail },
+        { status: refusalStatus(first) },
+      );
+    }
+  }
+
   // Shadow sends are prefixed so the founder can tell a self-test from a real
   // thread in their own inbox; the REAL send carries the founder's subject
   // verbatim (it's a personal email — no marketing prefix).
@@ -136,7 +185,7 @@ export async function POST(req: NextRequest) {
   // the ACTUAL recipient so a shadow test unsubscribes the founder, not the
   // brand. The stable idempotencyKey (recipient+subject+day) means a
   // double-click never double-sends.
-  const unsubscribeUrl = signUnsubscribeUrl(recipient, UNSUBSCRIBE_BASE);
+  const unsubscribeUrl = `${signUnsubscribeUrl(recipient, UNSUBSCRIBE_BASE)}&src=brand_outreach`;
   const stopMailto = `mailto:brendan@askarthur.au?subject=${encodeURIComponent(
     `STOP — ${body.brandName}`,
   )}`;
@@ -148,10 +197,7 @@ export async function POST(req: NextRequest) {
   // domain == inferred_target_domain). Best-effort — a null sample (no brandKey,
   // no service client, or a query error) simply drops the sample section; the
   // pitch + signature still send.
-  const sampleClient = createServiceClient();
-  const cloneSample = sampleClient
-    ? await getBrandCloneSample(sampleClient, body.brandKey)
-    : null;
+  const cloneSample = sb ? await getBrandCloneSample(sb, body.brandKey) : null;
 
   // Render the styled React Email template (multipart html + plain-text twin).
   // The founder's prose (offer + {{hook}}) is sanitised markdown → HTML via the
