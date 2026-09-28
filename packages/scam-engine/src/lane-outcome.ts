@@ -332,8 +332,13 @@ export interface LaneOutcome {
     /** Rows due a read (weaponised daily + offline dormant weekly), counted
      *  before the per-run LIMIT. */
     liveness_due?: number;
-    /** The name exists. */
+    /** Resolves to an address (A/AAAA). Before v341: "the name exists", which
+     *  also counted a name with NS but no address. */
     liveness_present?: number;
+    /** v341: the name exists and A/AAAA answered empty (NS-only). Not gone (the
+     *  dormancy clock does not start), not present (never a re-emergence, never
+     *  `stranded_live`). Absent before v341. */
+    liveness_no_host?: number;
     /** NXDOMAIN, not yet confirmed (first read, or a second inside 12 h). */
     liveness_gone_unconfirmed?: number;
     /** The resolver proved nothing. */
@@ -342,7 +347,8 @@ export interface LaneOutcome {
     liveness_unreached?: number;
     /** Second NXDOMAIN >= 12 h after the first: weaponised → dormant. */
     offline_confirmed?: number;
-    /** An offline (dormant) clone resolved again: dormant → weaponised. */
+    /** An offline (dormant) clone resolved again — to an ADDRESS since v341:
+     *  dormant → weaponised. */
     re_emerged?: number;
     /** No-threat-on-phishing alerts paged to the operator and stamped
      *  submitted_to.vendor_gap this run. null = list or mark failed. */
@@ -354,7 +360,8 @@ export interface LaneOutcome {
     /** Why the escalation did not complete ("list: …" / "page: …" / "mark: …"). */
     vendor_gap_error?: string;
     /** #1265: LIVE weaponised clones stranded by a spent issue slot on their
-     *  submission uuid (should be 0). null = the count failed. */
+     *  submission uuid (should be 0). Live = liveness_last_verdict 'present',
+     *  i.e. resolves to an address since v341. null = the count failed. */
     stranded_live?: number | null;
   };
   "shopfront-nrd-daily-ingest": {

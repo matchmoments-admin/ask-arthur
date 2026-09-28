@@ -9,6 +9,7 @@ import {
 import { logger } from "@askarthur/utils/logger";
 import { resolveRedirectChain, isKnownShortener } from "./redirect-resolver";
 import { DISPOSABLE_DOMAINS } from "./disposable-domains";
+import { DOMAIN_INTEL_PARKING_NS, hostUnder } from "./parking-providers";
 
 // ── DNS helper ──
 
@@ -86,21 +87,11 @@ function detectHostingProvider(hostname: string): {
 }
 
 // ── Parked domain detection ──
-
-const PARKING_NS_PATTERNS = [
-  /sedoparking\.com$/i,
-  /parkingcrew\.net$/i,
-  /bodis\.com$/i,
-  /domaincontrol\.com$/i, // GoDaddy parking
-  /above\.com$/i,
-  /parklogic\.com$/i,
-  /undeveloped\.com$/i,
-];
+// The provider list lives in parking-providers.ts (one table for every
+// "is this parked?" reading); this is the domain-intel reading of it.
 
 function isParkedDomain(nsRecords: string[]): boolean {
-  return nsRecords.some((ns) =>
-    PARKING_NS_PATTERNS.some((pattern) => pattern.test(ns)),
-  );
+  return nsRecords.some((ns) => hostUnder(ns, DOMAIN_INTEL_PARKING_NS));
 }
 
 // ── Public API ──

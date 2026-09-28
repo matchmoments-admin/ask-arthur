@@ -240,9 +240,12 @@ describe("readWeaponisedLiveness", () => {
     { id: 2, candidate_domain: "up.example" },
     { id: 3, candidate_domain: "boom.example" },
   ];
+  const NX = { errorCode: "ENOTFOUND" } as const;
   const probe = async (h: string) => {
     if (h === "boom.example") throw new Error("resolver exploded");
-    return h === "gone.example";
+    return h === "gone.example"
+      ? { a: NX, aaaa: NX, ns: NX }
+      : { a: { records: ["192.0.2.1"] }, aaaa: null, ns: { records: ["ns1.example"] } };
   };
 
   it("a probe that throws is inconclusive, never gone", async () => {

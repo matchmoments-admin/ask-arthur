@@ -6,7 +6,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { logger } from "@askarthur/utils/logger";
 import { CLONE_COHORT_SOURCE } from "@/lib/clone-watch/clone-cohort";
-import { probeStockDns } from "@/lib/clone-watch/liveness";
+import { probeDomainDns } from "@/lib/clone-watch/liveness";
 import {
   probeChunk,
   selectActiveStock,
@@ -231,7 +231,7 @@ export const cloneWatchMonthEndLiveness = inngest.createFunction(
               ids: slice,
               rows,
               periodMonth: window.periodMonth,
-              probe: probeStockDns,
+              probe: probeDomainDns,
               expired: () => budget.expired(),
             });
             await upsertSnapshots(sb, res.snapshots);

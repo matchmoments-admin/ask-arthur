@@ -5,6 +5,10 @@
 // unit-tested in __tests__/urlscan-classify.test.ts.
 
 import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
+import {
+  PARKING_LANDING_HOSTS,
+  hostUnder,
+} from "@askarthur/scam-engine/parking-providers";
 
 export type UrlscanClassification =
   | "parked_for_sale"
@@ -20,21 +24,10 @@ export interface ReputationVerdict {
   sources: string[];
 }
 
-// Effective URLs in these hosts → parked-for-sale. Match by suffix (host ===
-// p OR host endsWith "." + p) so `evilafternic.com.attacker.com` does NOT
-// match `afternic.com` (ultrareview F8).
-export const PARKED_HOST_PATTERNS = [
-  "afternic.com",
-  "sedo.com",
-  "sedoparking.com",
-  "dan.com",
-  "parkingcrew.net",
-  "bodis.com",
-  "uniregistry.com",
-  "undeveloped.com",
-  "domainmarket.com",
-  "namebright.com",
-] as const;
+// Effective URLs on a parking/aftermarket landing host → parked-for-sale.
+// The host list is parking-providers.ts `PARKING_LANDING_HOSTS` (the ONE
+// parking table); matched by DNS-label suffix, so
+// `evilafternic.com.attacker.com` does NOT match `afternic.com` (ultrareview F8).
 
 /**
  * Auto-classify from the urlscan render + the SB/VT reputation verdict.
@@ -55,7 +48,7 @@ export function classifyScan(
   if (!result || !result.effectiveUrl) return "unresolved";
 
   const host = safeHostOf(result.effectiveUrl);
-  if (host && PARKED_HOST_PATTERNS.some((p) => host === p || host.endsWith("." + p))) {
+  if (host && hostUnder(host, PARKING_LANDING_HOSTS)) {
     return "parked_for_sale";
   }
 

@@ -7,13 +7,15 @@ import {
 import {
   dnsFingerprint,
   gateVerdict,
-  isOpaqueProbe,
-  isSharedFrontAddress,
   isUrlscanFloorDue,
   readRecheckDns,
-  SHARED_FRONT_RANGES,
   type DnsRead,
 } from "@/lib/clone-watch/recheck-dns-gate";
+import {
+  isOpaqueAnswers,
+  isSharedFrontAddress,
+  SHARED_FRONT_RANGES,
+} from "@/lib/clone-watch/liveness";
 
 /**
  * Recheck DNS Gate (v334, #1229 part 2a) — the pure half: fingerprint, verdict,
@@ -529,27 +531,27 @@ describe("opaque shared fronts", () => {
 
   it("a probe is opaque when ANY A/AAAA address is on a front", () => {
     expect(
-      isOpaqueProbe({
+      isOpaqueAnswers({
         a: rec(["8.8.8.8", "104.21.5.5"]),
         aaaa: null,
         ns: rec(["n"]),
       }),
     ).toBe(true);
     expect(
-      isOpaqueProbe({
+      isOpaqueAnswers({
         a: err("ENODATA"),
         aaaa: rec(["2606:4700::1"]),
         ns: rec(["n"]),
       }),
     ).toBe(true);
     expect(
-      isOpaqueProbe({
+      isOpaqueAnswers({
         a: rec(["8.8.8.8"]),
         aaaa: null,
         ns: rec(["ns.cloudflare.com"]),
       }),
     ).toBe(false);
-    expect(isOpaqueProbe(null)).toBe(false);
+    expect(isOpaqueAnswers(null)).toBe(false);
   });
 
   it("an opaque row gets the 7-day floor at ANY age", () => {

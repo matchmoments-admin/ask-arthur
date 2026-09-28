@@ -35,7 +35,7 @@ vi.mock("@/lib/cost-telemetry", () => ({ logCost: mocks.log, logCostAsync: mocks
 // in tests — default null (inconclusive → scanned, i.e. the pre-v334 path).
 vi.mock("@/lib/clone-watch/liveness", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/clone-watch/liveness")>()),
-  probeStockDns: mocks.dns,
+  probeDomainDns: mocks.dns,
 }));
 
 import { cloneWatchUrlscanRetrieve } from "@/app/api/inngest/functions/clone-watch-urlscan-retrieve";

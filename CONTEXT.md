@@ -158,7 +158,8 @@ from `alert_state`, the COARSE operator disposition (`open` / `taken_down` /
 open-count filter on: the two are synchronised at terminal states ONLY.
 _Avoid_: calling either column "status", and treating `lifecycle_state` as a
 liveness probe — it records the last observation, not whether the domain
-answers right now (that is `probeLiveness`).
+answers right now (that is the **Domain DNS State**, or `probeLivenessVerdict`
+for the HTTP view).
 
 **Weaponised**:
 A Clone Alert observed serving live phishing or credential-harvest content —
@@ -168,8 +169,8 @@ classified it malicious) or, since v329, to `dormant` when our DNS sweep
 witnesses the name gone twice ≥ 12 h apart (`offline_since` dates it — never
 `taken_down`, which every reader renders as "actioned by Netcraft"). That
 `dormant` is the one reversible terminal state: offline clones are re-read
-weekly and one that resolves again (a lifted registrar hold) goes back to
-`weaponised` — the only edge out of a terminal state (`TERMINAL_EXITS`). A later
+weekly and one that resolves to an ADDRESS again (a lifted registrar hold) goes
+back to `weaponised` — NS alone is not enough (v341) — the only edge out of a terminal state (`TERMINAL_EXITS`). A later
 benign vendor grade must NOT move it back (the no-downgrade rule in
 `apply_netcraft_reconcile`). `declined → weaponised` is the money transition —
 the vendor graded it "no threat" and it weaponised afterwards — and is the
@@ -266,6 +267,10 @@ The per-brand rollup that aligns the three streams — one row per Canonical Bra
 **Step Budget** (`packages/scam-engine/src/inngest/step-budget.ts`, #1130):
 The wall-clock allowance for work inside one Inngest run, with two distinct bounds that must not be confused. Inside a single `step.run` the bound is the route's `maxDuration` — Vercel kills the request, and the retry redoes identical work and dies identically; across step boundaries it is `timeouts.finish` — Inngest cancels the run silently, with no retry, error or telemetry. A budget is obtained from one of two constructors, one per bound: `budgetedStep` (in-step; the clock starts at step entry by construction because the budget only exists inside the callback) and `spanningBudget` (across boundaries; the clock is `event.ts`, never handler entry, because the handler is re-executed at every boundary). When `event.ts` is unusable a spanning budget is _degraded_ — segment clock, one warning — rather than fail-open or fail-closed. Each function keeps its own `*_WALL_CLOCK_MS` constant so `inngestFinishBudgets.test.ts` can sum them into the finish-timeout floor.
 _Avoid_: "timeout" (ambiguous between the two bounds), "deadline" alone (says nothing about which clock), "budget" for a cost cap (that is a brake — see `docs/inngest-brakes.md`).
+
+**Domain DNS State** (`apps/web/lib/clone-watch/liveness.ts`, v341, 2026-09-28):
+The one answer to "what does DNS say about this lookalike?". One probe (`probeDomainDns`: A and NS, AAAA when A has none — the resolver adapter at the `DnsProbe` seam; tests pass a fake) is read once (`readDomainDnsState`) into a **presence** — `gone` (NXDOMAIN on A and NS, the only honest gone), `resolves` (an A/AAAA address), `no_host` (answers, no address), `unverified` (the resolver proved nothing) — plus parking NS, registry hold (from stored RDAP statuses) and **opaque** (an address on a shared anycast front, `SHARED_FRONT_RANGES`). Every DNS verdict is a reading of it: `isDomainGone`, `resolvesToHost`, `submitPrecheckOf`, `livenessVerdictOf` (what the weaponised sweep stores), `stockStatus`, the Recheck DNS Gate's fingerprint. **"Present" means resolves to an address** everywhere — the weaponised sweep, the re-emergence monitor, month-end stock and the v326 dead-dormancy exit share that one bar. `sweepDomainDns` is the one budgeted, bounded-concurrency walk the three DNS sweeps use.
+_Avoid_: "alive" / "live" for a name that merely has NS (that is `no_host`), and "liveness" for the HTTP probe's DNS fallback when you mean this state.
 
 **Recheck DNS Gate** (`apps/web/lib/clone-watch/recheck-dns-gate.ts`, v334, #1229):
 The free DNS read that decides whether a due recheck row gets a urlscan rescan. Its **DNS fingerprint** is the row's A (+AAAA when no A) reduced to /24 and /48, plus NS, sorted. The **baseline** is the fingerprint taken at the row's last urlscan rescan (`recheck_dns_fingerprint`). A read is _unchanged_ when NS is identical and the address prefixes overlap; _changed_, _unknown_ (SERVFAIL / timeout — scanned, the gate fails open) and _no baseline_ are scanned. A **floor rescan** is a mandatory urlscan regardless of DNS (7 days under 14 days old, 30 days after), bounding flips that do not move DNS; any cap slots the gate leaves unused are a **stale fill** — DNS-unchanged rows rescanned oldest-urlscan-first, so the lane never spends less urlscan than before and every row keeps a bounded revisit. A read is **opaque** when an address sits on a shared anycast front (`SHARED_FRONT_RANGES`: Cloudflare, GoDaddy's AWS pair, Vercel), where DNS cannot see a content flip. Opaque rows get the 7-day floor at any age and lead the stale fill. The row has two clocks: `last_rechecked_at` (urlscan) and `recheck_dns_checked_at` (DNS); the worklist's **queue clock** is the later of the two.

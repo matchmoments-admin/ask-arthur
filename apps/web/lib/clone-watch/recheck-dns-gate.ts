@@ -1,6 +1,13 @@
 import type { BudgetClock } from "@askarthur/scam-engine/inngest/step-budget";
-import { mapWithConcurrency } from "@askarthur/utils/concurrency";
-import { probeStockDns, type DnsLookup } from "@/lib/clone-watch/liveness";
+import {
+  ipv6Groups,
+  isDnsAnswer,
+  probeDomainDns,
+  sweepDomainDns,
+  type DnsAnswers,
+  type DnsLookup,
+  type DnsProbe,
+} from "@/lib/clone-watch/liveness";
 
 /**
  * Recheck DNS Gate (v334, #1229 part 2a) — a free DNS fingerprint decides
@@ -28,14 +35,15 @@ import { probeStockDns, type DnsLookup } from "@/lib/clone-watch/liveness";
  *                    flip that does NOT move DNS (content swapped on the same
  *                    host) is still seen in bounded time. See URLSCAN_FLOOR.
  *
- * DNS ONLY, REUSED. The lookups are liveness.ts `probeStockDns` (A, AAAA only
- * when A has none, always NS) — the month-end stock probe; this module adds no
- * resolver code. The weaponised liveness sweep (v329) asks a different
- * question of DNS ("is the name gone?" — `isDomainGone`), so it is reused in
- * shape (budgeted, bounded-concurrency read, never throws) rather than in
- * function. Weaponisation itself stays urlscan-only.
+ * DNS ONLY, REUSED. The read is the Domain DNS State Module (liveness.ts):
+ * `sweepDomainDns` — the same budgeted, bounded-concurrency walk and the same
+ * probe (A + NS, AAAA when A has none) as the weaponised liveness sweep and
+ * month-end stock. This module adds no resolver code: the fingerprint and the
+ * opacity flag are readings of each row's `DomainDnsState`. Weaponisation
+ * itself stays urlscan-only.
  *
- * Pure except `readRecheckDns`, which takes its probe as a parameter.
+ * Pure except `readRecheckDns`, which takes its probe (the `DnsProbe` seam) as
+ * a parameter.
  */
 
 export const RECHECK_DNS = {
@@ -80,15 +88,6 @@ export type DnsGateVerdict =
   | "unknown"
   | "no_baseline";
 
-/**
- * Resolver codes that are an ANSWER (the name is absent, or has no record of
- * this type) and so are part of a stable fingerprint. Everything else —
- * SERVFAIL, REFUSED, TIMEOUT, connection errors, UNKNOWN — proves nothing and
- * makes the whole fingerprint unknown. Same classes as liveness.ts
- * NAME_ABSENT_CODES + NO_DATA_CODE.
- */
-const ANSWER_CODES = new Set(["ENOTFOUND", "NOTFOUND", "NXDOMAIN", "ENODATA"]);
-
 /** IPv4 → its /24. Parking and anycast pools answer a random member of a
  *  /24 on every query (Hostinger's dns-parking.com: a fresh 37.98.151.x and
  *  91.108.99.x each read), so a full address is not a stable fingerprint. */
@@ -100,18 +99,11 @@ function v4Prefix(ip: string): string | null {
 
 /** IPv6 → its /48 (first three hextets, zero-expanded, leading zeros
  *  stripped). Same reason as v4Prefix — the Hostinger pool rotates the low
- *  64 bits per query. */
+ *  64 bits per query. Parsing is liveness.ts `ipv6Groups` (the one parser). */
 function v6Prefix(ip: string): string | null {
-  const s = ip.toLowerCase().split("%")[0]!;
-  if (!s.includes(":")) return null;
-  const [head, tail] = s.split("::") as [string, string | undefined];
-  const h = head ? head.split(":") : [];
-  const t = tail !== undefined && tail !== "" ? tail.split(":") : [];
-  const groups =
-    tail === undefined
-      ? h
-      : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  const groups = ipv6Groups(ip);
   if (
+    !groups ||
     groups.length < 3 ||
     groups.slice(0, 3).some((g) => !/^[0-9a-f]{1,4}$/.test(g))
   )
@@ -144,21 +136,19 @@ function part(kind: Kind, l: DnsLookup): string | null {
       .sort()
       .join(",");
   }
-  return ANSWER_CODES.has(l.errorCode) ? "" : null;
+  return isDnsAnswer(l) ? "" : null;
 }
 
 /**
  * The fingerprint of one probe, or null when any query was inconclusive (or the
  * probe itself failed). Addresses are reduced to their /24 or /48 and every
  * part is sorted and de-duplicated, so record ORDER and pool rotation never
- * read as a change. AAAA is "-" when A had records (probeStockDns skips it);
+ * read as a change. AAAA is "-" when A had records (probeDomainDns skips it);
  * that is stable across reads, and if A disappears the A part changes anyway.
  *
  *   v1|a=13.248.169.0/24,76.223.54.0/24|aaaa=-|ns=ns1.afternic.com,ns2.afternic.com
  */
-export function dnsFingerprint(
-  probe: { a: DnsLookup; aaaa: DnsLookup | null; ns: DnsLookup } | null,
-): string | null {
+export function dnsFingerprint(probe: DnsAnswers | null): string | null {
   if (!probe) return null;
   const a = part("a", probe.a);
   const aaaa = probe.aaaa === null ? "-" : part("aaaa", probe.aaaa);
@@ -216,124 +206,6 @@ export function gateVerdict(
 }
 
 /**
- * SHARED FRONTS — address ranges where DNS says nothing about what is served.
- *
- * WHY. The gate assumes a go-live moves DNS. Behind a shared anycast front it
- * does not: a parked page and a phishing kit on Cloudflare resolve to the SAME
- * Cloudflare /24s, so the fingerprint reads "unchanged" through the exact flip
- * we exist to catch. Measured in the #1261 review (2026-09-27): 58 of the 108
- * weaponised alerts with a known IP were on Cloudflare, and 429 of the 1,192
- * pool rows. A row whose A/AAAA set touches one of these ranges is OPAQUE:
- * it gets the 7-day urlscan floor at ANY age (isUrlscanFloorDue below) and
- * ranks first in stale fill (planUrlscanRechecks, clone-watch-lifecycle-recheck.ts).
- *
- * ONE list — add a front here, nowhere else.
- *   - Cloudflare: every published IPv4 range (cloudflare.com/ips-v4) plus the
- *     two IPv6 blocks that front customer zones. The review named the first
- *     five; the rest are the same anycast network, so leaving them out would
- *     make "opaque" depend on which PoP answered.
- *   - GoDaddy's AWS Global Accelerator pair (named in the #1261 review) — many
- *     GoDaddy-hosted and GoDaddy-parked names resolve to exactly these two.
- *   - Vercel's shared apex and anycast ranges.
- */
-export const SHARED_FRONT_RANGES: readonly string[] = [
-  // Cloudflare IPv4
-  "104.16.0.0/13",
-  "172.64.0.0/13",
-  "188.114.96.0/20",
-  "173.245.48.0/20",
-  "103.21.244.0/22",
-  "103.22.200.0/22",
-  "103.31.4.0/22",
-  "141.101.64.0/18",
-  "108.162.192.0/18",
-  "190.93.240.0/20",
-  "197.234.240.0/22",
-  "198.41.128.0/17",
-  "162.158.0.0/15",
-  "131.0.72.0/22",
-  // Cloudflare IPv6
-  "2606:4700::/32",
-  "2a06:98c1::/32",
-  // GoDaddy (AWS Global Accelerator pair)
-  "3.33.130.190/32",
-  "15.197.148.33/32",
-  // Vercel
-  "76.76.21.0/24",
-  "216.198.79.0/24",
-];
-
-function v4ToBigInt(ip: string): bigint | null {
-  const o = ip.split(".");
-  if (o.length !== 4) return null;
-  let n = BigInt(0);
-  for (const part of o) {
-    if (!/^\d{1,3}$/.test(part) || Number(part) > 255) return null;
-    n = (n << BigInt(8)) | BigInt(Number(part));
-  }
-  return n;
-}
-
-function v6ToBigInt(ip: string): bigint | null {
-  const s = ip.toLowerCase().split("%")[0]!;
-  if (!s.includes(":")) return null;
-  const [head, tail] = s.split("::") as [string, string | undefined];
-  const h = head ? head.split(":") : [];
-  const t = tail !== undefined && tail !== "" ? tail.split(":") : [];
-  const groups =
-    tail === undefined
-      ? h
-      : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
-  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g)))
-    return null;
-  return groups.reduce(
-    (n, g) => (n << BigInt(16)) | BigInt(parseInt(g, 16)),
-    BigInt(0),
-  );
-}
-
-type ParsedRange = { v6: boolean; base: bigint; bits: number };
-
-const PARSED_FRONTS: readonly ParsedRange[] = SHARED_FRONT_RANGES.map(
-  (cidr) => {
-    const [addr, len] = cidr.split("/") as [string, string];
-    const v6 = addr.includes(":");
-    const base = v6 ? v6ToBigInt(addr) : v4ToBigInt(addr);
-    if (base === null)
-      throw new Error(`SHARED_FRONT_RANGES: bad address ${cidr}`);
-    return { v6, base, bits: Number(len) };
-  },
-);
-
-/** Is this one address inside a shared front? Unparseable → false. */
-export function isSharedFrontAddress(ip: string): boolean {
-  const v6 = ip.includes(":");
-  const n = v6 ? v6ToBigInt(ip) : v4ToBigInt(ip.trim());
-  if (n === null) return false;
-  const width = v6 ? 128 : 32;
-  return PARSED_FRONTS.some((r) => {
-    if (r.v6 !== v6) return false;
-    const shift = BigInt(width - r.bits);
-    return n >> shift === r.base >> shift;
-  });
-}
-
-/**
- * Opaque = ANY A or AAAA record sits on a shared front. "Any", not "all": a
- * mixed set still routes some visitors through the front, where DNS cannot
- * see a content change — the conservative reading costs only earlier rescans.
- */
-export function isOpaqueProbe(
-  probe: Parameters<typeof dnsFingerprint>[0],
-): boolean {
-  if (!probe) return false;
-  const addrs = [probe.a, probe.aaaa].flatMap((l) =>
-    l && "records" in l ? l.records : [],
-  );
-  return addrs.some(isSharedFrontAddress);
-}
-
-/**
  * Is this row due a mandatory urlscan rescan? Keys on `last_rechecked_at` —
  * the URLSCAN recheck clock, which a DNS read never moves. A row never
  * rescanned, or with an unreadable clock or age, is floor-due: fail toward
@@ -360,14 +232,16 @@ export interface DnsRead {
   /** null = inconclusive. */
   fingerprint: string | null;
   verdict: DnsGateVerdict;
-  /** An address sits on a shared front (SHARED_FRONT_RANGES). Absent = false. */
+  /** An address sits on a shared anycast front — `DomainDnsState.opaque`
+   *  (liveness.ts SHARED_FRONT_RANGES). Absent = false. */
   opaque?: boolean;
 }
 
 /**
- * DNS-read each target until the budget expires, `concurrency` in flight. A
- * probe that throws reads as unknown — never as unchanged. Targets the budget
- * stopped before are counted, not read; they stay due.
+ * DNS-read each target until the budget expires, `concurrency` in flight —
+ * `sweepDomainDns`, the one sweep. A probe that throws reads as unknown —
+ * never as unchanged. Targets the budget stopped before are counted, not
+ * read; they stay due. Reads come back in target order.
  */
 export async function readRecheckDns(
   targets: readonly {
@@ -376,32 +250,24 @@ export async function readRecheckDns(
     recheck_dns_fingerprint?: string | null;
   }[],
   budget: Pick<BudgetClock, "expired">,
-  probe: (
-    host: string,
-  ) => Promise<Parameters<typeof dnsFingerprint>[0]> = probeStockDns,
+  probe: DnsProbe = probeDomainDns,
   concurrency: number = RECHECK_DNS.concurrency,
 ): Promise<{ reads: DnsRead[]; unreached: number }> {
+  const { states, unreached } = await sweepDomainDns(
+    targets,
+    (t) => t.candidate_domain,
+    { expired: () => budget.expired(), probe, concurrency },
+  );
   const reads: DnsRead[] = [];
-  let unreached = 0;
-  await mapWithConcurrency(targets, concurrency, async (t) => {
-    if (budget.expired()) {
-      unreached++;
-      return;
-    }
-    let fingerprint: string | null;
-    let opaque = false;
-    try {
-      const result = await probe(t.candidate_domain);
-      fingerprint = dnsFingerprint(result);
-      opaque = isOpaqueProbe(result);
-    } catch {
-      fingerprint = null;
-    }
+  targets.forEach((t, i) => {
+    const state = states[i];
+    if (!state) return;
+    const fingerprint = dnsFingerprint(state.dns);
     reads.push({
       id: t.id,
       fingerprint,
       verdict: gateVerdict(t.recheck_dns_fingerprint, fingerprint),
-      opaque,
+      opaque: state.opaque,
     });
   });
   return { reads, unreached };

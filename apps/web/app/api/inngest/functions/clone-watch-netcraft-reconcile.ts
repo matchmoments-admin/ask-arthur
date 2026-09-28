@@ -153,9 +153,12 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
       // half is already applied by then and must still write its row.
       // #1265: the escalation invariant that matters — a LIVE weaponised
       // clone whose Netcraft issue slot was spent on another alert of its
-      // submission uuid, with no other route yet. Dead or inconclusive rows are
-      // excluded: the resubmit lane defers them and the liveness sweep moves
-      // them to dormant. Expected 0 (the resubmit lane's batches self-heal via
+      // submission uuid, with no other route yet. "Live" is the sweep's stored
+      // verdict `present`, which since v341 means RESOLVES TO AN ADDRESS
+      // (liveness.ts livenessVerdictOf) — before v341 a name with NS but no
+      // A/AAAA also read `present` and counted here. Dead, address-less
+      // (`no_host`) and inconclusive rows are excluded: the resubmit lane
+      // defers them and the liveness sweep moves the gone ones to dormant. Expected 0 (the resubmit lane's batches self-heal via
       // v289). A failed head count reads null, never 0
       // (head-count-failures-carry-no-error).
       const countStrandedLive = async (): Promise<number | null> => {
@@ -183,6 +186,8 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
               p_dormant_cadence_hours: WEAPONISED_LIVENESS.dormantCadenceHours,
             });
             if (error) return { error: `list: ${error.message}` };
+            // v341 adds whois_statuses (the TS registry-hold rule's input);
+            // absent before v341, and the sweep then sends hold: null.
             const rows =
               (data as Array<LivenessTarget & { due_total: number }> | null) ?? [];
             // due_total is counted before the RPC's LIMIT: a truncated sweep
@@ -196,8 +201,12 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
               offline_confirmed: 0,
               inconclusive: 0,
               re_emerged: 0,
+              no_host: 0,
             };
             if (sweep.reads.length === 0) return { due, unreached: sweep.unreached, ...zero };
+            // Each read carries `verdict` (applied by v341) AND `gone` (the
+            // only key the v329 body reads), so either side of the migration
+            // is safe.
             const rec = await sb.rpc("record_weaponised_liveness", {
               p_results: sweep.reads,
               p_confirm_hours: WEAPONISED_LIVENESS.confirmHours,
@@ -215,6 +224,8 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
               offline_confirmed: Number(r?.offline_confirmed ?? 0),
               inconclusive: Number(r?.inconclusive ?? 0),
               re_emerged: Number(r?.re_emerged ?? 0),
+              // v341: named-server-but-no-address reads. Absent before v341.
+              no_host: Number(r?.no_host ?? 0),
             };
           },
         );
@@ -264,6 +275,7 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
                 liveness_due: liveness.due,
                 liveness_checked: liveness.checked,
                 liveness_present: liveness.present,
+                liveness_no_host: liveness.no_host,
                 liveness_gone_unconfirmed: liveness.gone_unconfirmed,
                 offline_confirmed: liveness.offline_confirmed,
                 liveness_inconclusive: liveness.inconclusive,

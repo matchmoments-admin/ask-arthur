@@ -16,13 +16,13 @@ import {
 import {
   classifyScan,
   suggestTriageTransition,
-  PARKED_HOST_PATTERNS,
   serialiseSubmitFailure,
   serialiseSubmitEvidence,
   serialiseRetrievalPending,
   reputationFromEvidence,
   type ReputationVerdict,
 } from "@/lib/clone-watch/urlscan-classify";
+import { PARKING_LANDING_HOSTS } from "@askarthur/scam-engine/parking-providers";
 import {
   groupByBrandRecipient,
   buildBatchSubject,
@@ -580,11 +580,11 @@ describe("clone-watch-urlscan — suggestTriageTransition", () => {
   });
 });
 
-describe("clone-watch-urlscan — PARKED_HOST_PATTERNS", () => {
+describe("clone-watch-urlscan — PARKING_LANDING_HOSTS", () => {
   it("includes the major domain marketplace operators", () => {
-    expect(PARKED_HOST_PATTERNS).toContain("afternic.com");
-    expect(PARKED_HOST_PATTERNS).toContain("sedo.com");
-    expect(PARKED_HOST_PATTERNS).toContain("dan.com");
+    expect(PARKING_LANDING_HOSTS).toContain("afternic.com");
+    expect(PARKING_LANDING_HOSTS).toContain("sedo.com");
+    expect(PARKING_LANDING_HOSTS).toContain("dan.com");
   });
 });
 

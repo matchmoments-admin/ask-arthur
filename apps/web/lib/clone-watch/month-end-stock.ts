@@ -9,15 +9,14 @@
  * resolver:
  *
  *   - `selectActiveStock` — which alerts are stock (pure);
- *   - `probeChunk` — DNS-probe one chunk under an in-step budget and turn each
- *     answer into a snapshot row through `stockStatus` (the ONE rule, in
- *     clone-metrics.ts);
+ *   - `probeChunk` — DNS-probe one chunk under an in-step budget (the shared
+ *     `sweepDomainDns`, liveness.ts) and turn each answer into a snapshot row
+ *     through `stockStatus` (the ONE rule, in clone-metrics.ts);
  *   - `unprobedSnapshot` — the honest row for a domain the run never reached.
  *
  * The status rule is NOT here: it lives beside `squatStatus` so the two
  * readings of "what is this lookalike now" share one home.
  */
-import { mapWithConcurrency } from "@askarthur/utils/concurrency";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
   AUDIT_SAMPLE_EMBED,
@@ -26,8 +25,10 @@ import {
 } from "@/lib/clone-watch/clone-cohort";
 import { TERMINAL_STATES } from "@/lib/clone-watch/lifecycle";
 import {
-  classifyHostLookups,
+  sweepDomainDns,
+  DNS_SWEEP_CONCURRENCY,
   type DnsLookup,
+  type DnsProbe,
 } from "@/lib/clone-watch/liveness";
 import {
   stockStatus,
@@ -35,8 +36,8 @@ import {
   type StockStatus,
 } from "@/lib/clone-watch/clone-metrics";
 
-/** DNS queries in flight per chunk. Each costs ~ms; a slow one caps at 4 s. */
-export const STOCK_PROBE_CONCURRENCY = 16;
+/** DNS probes in flight per chunk — the shared sweep default. */
+export const STOCK_PROBE_CONCURRENCY = DNS_SWEEP_CONCURRENCY;
 
 /** The columns `selectActiveStock` needs. */
 export interface StockCandidate {
@@ -113,6 +114,9 @@ export interface SnapshotInsert {
  * unresolvable eight times running, so the recheck worklist stopped offering
  * it. TS twin of the predicate `reset_clone_alert_dead_dormancy` re-checks in
  * SQL (v325) — the SQL is authoritative; this only decides whom to ask about.
+ * The EXIT is a Domain DNS State reading: only `presence === "resolves"` (an
+ * address) — the same bar as the weaponised sweep's dormant exit (v341) and
+ * the re-emergence monitor. A name with NS but no address stays dormant.
  */
 export function isDeadDormant(
   row: Pick<StockRow, "urlscan_uuid" | "urlscan_failure_streak" | "urlscan_evidence">,
@@ -171,34 +175,34 @@ export async function probeChunk(input: {
   ids: readonly number[];
   rows: readonly StockRow[];
   periodMonth: string;
-  probe: (hostname: string) => Promise<StockDns | null>;
+  /** The resolver seam (liveness.ts `probeDomainDns` in prod). */
+  probe: DnsProbe;
   expired: () => boolean;
   now?: () => Date;
   concurrency?: number;
 }): Promise<ProbeChunkResult> {
   const byId = new Map(input.rows.map((r) => [r.id, r]));
   const now = input.now ?? (() => new Date());
-  const results: Array<SnapshotInsert | "skip" | null> = new Array(
-    input.ids.length,
-  ).fill(null);
-  const dormantResolving: number[] = [];
+  // An id with no row is "handled" without a probe: probe "" (the adapter
+  // answers null for an empty name without touching the network) and skip it.
+  const { states } = await sweepDomainDns(
+    input.ids,
+    (id) => byId.get(id)?.candidate_domain ?? "",
+    {
+      expired: input.expired,
+      probe: async (host) => (host ? input.probe(host) : null),
+      concurrency: input.concurrency ?? STOCK_PROBE_CONCURRENCY,
+    },
+  );
 
-  await mapWithConcurrency(
-    input.ids.map((id, i) => ({ id, i })),
-    input.concurrency ?? STOCK_PROBE_CONCURRENCY,
-    async ({ id, i }) => {
-      if (input.expired()) return; // leaves results[i] null → not handled
+  const dormantResolving: number[] = [];
+  const results: Array<SnapshotInsert | "skip" | null> = input.ids.map(
+    (id, i) => {
+      const state = states[i];
+      if (!state) return null; // the budget stopped before it — not handled
       const row = byId.get(id);
-      if (!row) {
-        results[i] = "skip";
-        return;
-      }
-      let dns: StockDns | null = null;
-      try {
-        dns = await input.probe(row.candidate_domain);
-      } catch {
-        dns = null;
-      }
+      if (!row) return "skip";
+      const dns = state.dns;
       // #1256: a not-a-clone audit sample's verdict is not a fact about the
       // brand, so the stock status reads only DNS and attribution for it. The
       // mask is narrowed to the status input on purpose. `isDeadDormant` below
@@ -211,14 +215,10 @@ export async function probeChunk(input: {
           : row.urlscan_classification,
         lifecycle_state: row.lifecycle_state,
       });
-      if (
-        dns &&
-        isDeadDormant(row) &&
-        classifyHostLookups(dns.a, () => dns.aaaa ?? { errorCode: "UNKNOWN" }) === true
-      ) {
+      if (isDeadDormant(row) && state.presence === "resolves") {
         dormantResolving.push(row.id);
       }
-      results[i] = {
+      return {
         period_month: input.periodMonth,
         alert_id: row.id,
         candidate_domain: row.candidate_domain,

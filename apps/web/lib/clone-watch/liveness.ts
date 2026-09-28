@@ -1,10 +1,27 @@
 import { Resolver } from "node:dns/promises";
 import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
+import {
+  CLONE_WATCH_PARKING_NS,
+  hostUnder,
+} from "@askarthur/scam-engine/parking-providers";
+import { mapWithConcurrency } from "@askarthur/utils/concurrency";
 
 /**
- * Clone-watch liveness probing — used by the Netcraft issue reporter (never
- * spend a one-per-submission issue slot on a dead site), the submit DNS
- * precheck and re-emergence.
+ * Clone-watch liveness — the DOMAIN DNS STATE Module plus the HTTP liveness
+ * probe.
+ *
+ * DNS: one probe (`probeDomainDns`, the resolver adapter at the `DnsProbe`
+ * seam) → one `DomainDnsState` (`readDomainDnsState`: gone / resolves /
+ * no_host / unverified, plus parking NS, registry hold and shared-front
+ * opacity) → every DNS verdict is a reading of it: `isDomainGone`,
+ * `resolvesToHost`, `submitPrecheckOf`, `livenessVerdictOf` (the weaponised
+ * sweep), `stockStatus` (clone-metrics.ts) and the recheck gate's fingerprint
+ * (recheck-dns-gate.ts). `sweepDomainDns` is the one budgeted,
+ * bounded-concurrency walk the three DNS sweeps share.
+ *
+ * HTTP: `probeLivenessVerdict` — used by the Netcraft issue reporter (never
+ * spend a one-per-submission issue slot on a dead site) and the resubmit lane;
+ * its DNS fallback is `isDomainGone`.
  *
  * Moved from clone-watch-auto-triage.ts (F3). Auto-triage retired 2026-09-26
  * (#1230) and took its boolean `isCandidateLive` view with it (no other
@@ -24,9 +41,9 @@ import { safeFetch } from "@askarthur/scam-engine/safe-fetch";
  *
  * The rule now: **only NXDOMAIN counts as dead.** Everything else is `true`
  * (proved serving) or `null` (inconclusive) — "skip this round rather than
- * risk a false verdict". Two DNS verdicts live here, one per question:
- * `isDomainGone` (lifecycle: NXDOMAIN only) and `resolvesToHost` (scanning and
- * re-emergence: an A/AAAA record). Vercel egress IPs are routinely blocked by phishing kits, so a refused
+ * risk a false verdict". Two DNS questions, one state: `gone` (lifecycle:
+ * NXDOMAIN only) and `hasAddress` (scanning, re-emergence and "present": an
+ * A/AAAA record). Vercel egress IPs are routinely blocked by phishing kits, so a refused
  * connect or a timeout is indistinguishable from deadness from where we sit;
  * DNS is the only honest test we control.
  *
@@ -112,6 +129,29 @@ function isNoData(l: DnsLookup): boolean {
 }
 
 /**
+ * Is this lookup an ANSWER about the name — records, NXDOMAIN-class or NODATA
+ * — rather than a resolver failure (SERVFAIL, REFUSED, timeout, UNKNOWN)?
+ * The recheck gate's fingerprint is built only from answers (it used to carry
+ * its own copy of these codes, `ANSWER_CODES`).
+ */
+export function isDnsAnswer(l: DnsLookup): boolean {
+  return "records" in l || provesAbsent(l) || isNoData(l);
+}
+
+/** The lookup returned at least one record. */
+function hasRecords(l: DnsLookup): boolean {
+  return "records" in l && l.records.length > 0;
+}
+
+/** The lookup ANSWERED with no address: empty, NODATA or NXDOMAIN-class. */
+function answeredNoAddress(l: DnsLookup): boolean {
+  return ("records" in l && l.records.length === 0) || isNoData(l) || provesAbsent(l);
+}
+
+/** Stand-in for a lookup that was never made (AAAA skipped, probe failed). */
+const NOT_QUERIED: DnsLookup = { errorCode: "UNKNOWN" };
+
+/**
  * Decide deadness from an A lookup and an NS lookup. Pure, so the three-valued
  * logic is unit-testable without a live resolver. This is the LIFECYCLE
  * question ("is this domain gone?") — see {@link classifyHostLookups} for the
@@ -164,12 +204,9 @@ export function classifyHostLookups(
   a: DnsLookup,
   aaaa: () => DnsLookup,
 ): boolean | null {
-  const hasAddress = (l: DnsLookup) => "records" in l && l.records.length > 0;
-  const answeredNoAddress = (l: DnsLookup) =>
-    ("records" in l && l.records.length === 0) || isNoData(l) || provesAbsent(l);
-  if (hasAddress(a)) return true;
+  if (hasRecords(a)) return true;
   const v6 = aaaa();
-  if (hasAddress(v6)) return true;
+  if (hasRecords(v6)) return true;
   return answeredNoAddress(a) && answeredNoAddress(v6) ? false : null;
 }
 
@@ -213,9 +250,7 @@ export function classifySubmitPrecheck(
   if (verdict === true) return "host";
   if (verdict === false) return "no_host";
   const v6 = aaaa();
-  const noAddress = (l: DnsLookup) =>
-    ("records" in l && l.records.length === 0) || isNoData(l) || provesAbsent(l);
-  const servfailOrEmpty = (l: DnsLookup) => isServfail(l) || noAddress(l);
+  const servfailOrEmpty = (l: DnsLookup) => isServfail(l) || answeredNoAddress(l);
   return (isServfail(a) || isServfail(v6)) &&
     servfailOrEmpty(a) &&
     servfailOrEmpty(v6)
@@ -237,86 +272,403 @@ function resolver(): Resolver {
   return new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });
 }
 
-/**
- * DNS-only deadness — the LIFECYCLE verdict: true = NXDOMAIN-class (the name
- * does not exist), false = the name exists, null = the resolver proved
- * nothing. Cheap (~ms, 4 s cap). The NS query runs only when A proved absence
- * or answered empty.
- */
-export async function isDomainGone(hostname: string): Promise<boolean | null> {
-  if (!hostname) return null;
-  const r = resolver();
-  try {
-    const a = await lookup(() => r.resolve4(hostname));
-    const needNs = ("records" in a && a.records.length === 0) || provesAbsent(a);
-    const ns = needNs ? await lookup(() => r.resolveNs(hostname)) : null;
-    return classifyDnsLookups(a, () => ns ?? { errorCode: "UNKNOWN" });
-  } catch {
-    return null; // resolver itself failed — prove nothing
-  }
-}
+// ════════════════════════════════════════════════════════════════════════════
+// Domain DNS State — ONE probe, ONE state, every DNS verdict a reading of it.
+// ════════════════════════════════════════════════════════════════════════════
+//
+// WHY (2026-09-28, architecture review of map #1224). Eight rules answered
+// "is this lookalike alive?" from four different probes, and two of them
+// disagreed on the one case that matters: a name whose NS still resolves but
+// which has NO address. The weaponised sweep called it `present` (isDomainGone
+// → false), so a dormant clone with its A record pulled came back to
+// `weaponised` and counted in the reconcile lane's `stranded_live`; the
+// re-emergence monitor, month-end stock (`no_host`) and the v326 dead-dormancy
+// exit all required an address. Two exit-from-dormant bars.
+//
+// Now: `probeDomainDns` asks the resolver once (A and NS together, AAAA when A
+// has no record); `readDomainDnsState` turns the answers into ONE state; every
+// caller reads that state. "Present" means RESOLVES TO AN ADDRESS, everywhere.
 
-/**
- * Does `hostname` resolve to a host (A or AAAA)? true / false / null as
- * {@link classifyHostLookups}. The precheck urlscan submits use before spending
- * a scan, and the re-emergence monitor's "is it back?" test. Cheap (~ms, 4 s
- * cap). The AAAA query runs only when A has no records.
- */
-export async function resolvesToHost(hostname: string): Promise<boolean | null> {
-  if (!hostname) return null;
-  const r = resolver();
-  try {
-    const a = await lookup(() => r.resolve4(hostname));
-    const needAaaa = !("records" in a && a.records.length > 0);
-    const aaaa = needAaaa ? await lookup(() => r.resolve6(hostname)) : null;
-    return classifyHostLookups(a, () => aaaa ?? { errorCode: "UNKNOWN" });
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The urlscan submit precheck — see {@link classifySubmitPrecheck}. Both A and
- * AAAA are always queried unless A already has records (the servfail verdict
- * needs both answers). Cheap (~ms, 4 s cap per query).
- */
-export async function submitPrecheck(hostname: string): Promise<SubmitPrecheck> {
-  if (!hostname) return "unknown";
-  const r = resolver();
-  try {
-    const a = await lookup(() => r.resolve4(hostname));
-    const needAaaa = !("records" in a && a.records.length > 0);
-    const aaaa = needAaaa ? await lookup(() => r.resolve6(hostname)) : null;
-    return classifySubmitPrecheck(a, () => aaaa ?? { errorCode: "UNKNOWN" });
-  } catch {
-    return "unknown";
-  }
-}
-
-/**
- * The month-end STOCK probe (v325): A, then AAAA only when A has no records,
- * and ALWAYS NS — the NS answer both confirms absence and names the parking
- * provider. Returns the raw lookups; the verdict is `stockStatus` in
- * clone-metrics.ts (pure). `null` = the resolver itself could not be built or
- * threw outside a query — the caller records "unverified". DNS only: no HTTP,
- * no paid calls. Cheap (~ms, 4 s cap per query).
- */
-export async function probeStockDns(hostname: string): Promise<{
+/** The raw answers of one probe. `aaaa` is null when A had records (not asked). */
+export interface DnsAnswers {
   a: DnsLookup;
   aaaa: DnsLookup | null;
   ns: DnsLookup;
-} | null> {
+}
+
+/**
+ * THE SEAM: hostname → answers, `null` when the resolver itself could not be
+ * built or threw outside a query. Two adapters: `probeDomainDns` (the real
+ * resolver) and the fakes the tests pass. Never throws in the real adapter; a
+ * fake that throws is read as `null` by `sweepDomainDns`.
+ */
+export type DnsProbe = (hostname: string) => Promise<DnsAnswers | null>;
+
+/**
+ * The real resolver adapter. A and NS in parallel (the NS answer both confirms
+ * absence and names the parking provider), then AAAA only when A has no
+ * records. DNS only: no HTTP, no paid calls. ~ms, 4 s cap per query.
+ */
+export const probeDomainDns: DnsProbe = async (hostname) => {
   if (!hostname) return null;
-  const r = resolver();
   try {
-    const a = await lookup(() => r.resolve4(hostname));
-    const needAaaa = !("records" in a && a.records.length > 0);
-    const aaaa = needAaaa ? await lookup(() => r.resolve6(hostname)) : null;
-    const ns = await lookup(() => r.resolveNs(hostname));
+    const r = resolver();
+    const [a, ns] = await Promise.all([
+      lookup(() => r.resolve4(hostname)),
+      lookup(() => r.resolveNs(hostname)),
+    ]);
+    const aaaa = hasRecords(a) ? null : await lookup(() => r.resolve6(hostname));
     return { a, aaaa, ns };
   } catch {
     return null;
   }
+};
+
+/**
+ * gone        — NXDOMAIN on A and NS (classifyDnsLookups: the only honest gone)
+ * resolves    — an A or AAAA record exists
+ * no_host     — the name answered, but points at no address (NS-only zones,
+ *               a pulled A record, NODATA on both address types)
+ * unverified  — the resolver proved nothing (SERVFAIL / timeout / refused),
+ *               or the probe itself failed
+ */
+export type DnsPresence = "gone" | "resolves" | "no_host" | "unverified";
+
+export interface DomainDnsState {
+  /** The answers the state was read from; null = the probe failed. */
+  dns: DnsAnswers | null;
+  presence: DnsPresence;
+  /** The LIFECYCLE three-valued answer (isDomainGone): true only on NXDOMAIN. */
+  gone: boolean | null;
+  /** The SCANNING three-valued answer (resolvesToHost): an A/AAAA record. */
+  hasAddress: boolean | null;
+  /** The FRESH NS is a parking / aftermarket provider. null = no NS records
+   *  came back (lookup failed or empty), so DNS cannot say. */
+  parkingNs: boolean | null;
+  /** Registry/registrar hold on the STORED RDAP statuses (DNS cannot see a
+   *  hold; the caller passes what it stored). false when none were passed. */
+  hold: boolean;
+  /** An A/AAAA record sits on a shared anycast front (SHARED_FRONT_RANGES),
+   *  where DNS cannot see a content change. */
+  opaque: boolean;
+}
+
+/** Read the one state from a probe's answers (+ stored RDAP statuses). Pure. */
+export function readDomainDnsState(
+  dns: DnsAnswers | null,
+  stored: { statuses?: readonly string[] } = {},
+): DomainDnsState {
+  const hold = isRegistryHold(stored.statuses ?? []);
+  if (!dns) {
+    return {
+      dns: null,
+      presence: "unverified",
+      gone: null,
+      hasAddress: null,
+      parkingNs: null,
+      hold,
+      opaque: false,
+    };
+  }
+  const gone = classifyDnsLookups(dns.a, () => dns.ns);
+  const hasAddress = classifyHostLookups(dns.a, () => dns.aaaa ?? NOT_QUERIED);
+  const presence: DnsPresence =
+    gone === true
+      ? "gone"
+      : hasAddress === true
+        ? "resolves"
+        : hasAddress === false
+          ? "no_host"
+          : "unverified";
+  const nsRecords = hasRecords(dns.ns) && "records" in dns.ns ? dns.ns.records : null;
+  return {
+    dns,
+    presence,
+    gone,
+    hasAddress,
+    parkingNs: nsRecords ? isParkingNameserver(nsRecords) : null,
+    hold,
+    opaque: isOpaqueAnswers(dns),
+  };
+}
+
+// ── Readings — each verdict is a few lines over the state ─────────────────
+
+/**
+ * What the weaponised liveness sweep stores in `liveness_last_verdict` (and
+ * what record_weaponised_liveness applies, v341). It reads BOTH questions of
+ * the state, because the stored verdict drives two different rules:
+ *
+ *   present      — resolves to an ADDRESS (hasAddress true). The only verdict
+ *                  that brings a dormant clone back, and the only one
+ *                  `stranded_live` counts — the same bar as the re-emergence
+ *                  monitor, month-end stock and the v326 dead-dormancy exit.
+ *   no_host      — the name EXISTS (gone false) AND both address lookups
+ *                  ANSWERED with no address (hasAddress false): NS-only
+ *                  zones, a pulled A record. Before v341 this was `present`.
+ *                  Not gone, so the NXDOMAIN clock resets.
+ *   gone         — NXDOMAIN on A and NS (gone true). Starts / confirms the
+ *                  dormancy clock.
+ *   inconclusive — everything else: the resolver did not prove the answer.
+ *                  Only stamps (v341 applies it exactly as v329 did).
+ *
+ * The dormancy ENTRY clock is v329's (it keys on `gone`). Where the verdict
+ * differs from `presence`, and from what v329 stored (pinned in
+ * domainDnsState.test.ts SWEEP_DELTAS / the presence cases):
+ *   - A and AAAA NXDOMAIN, NS failed: presence `no_host` (month-end stock's
+ *     reading), verdict `inconclusive` (gone null — v329's, unchanged).
+ *   - A NODATA, AAAA timed out: presence `unverified`, verdict `inconclusive`
+ *     (v329 stored `present`). The address was never checked, so an IPv6-only
+ *     phish with a flaky AAAA read must not read "no address" and drop out of
+ *     `stranded_live`; it keeps its last offline_since and is re-read.
+ *   - A failed, AAAA has a record: presence `resolves`, verdict `present`
+ *     (v329 stored `inconclusive`). An address exists.
+ *   - A NODATA/empty, AAAA answered empty, NS present: `no_host` (v329
+ *     `present`) — the defect this Module fixes.
+ */
+export type LivenessRecordVerdict = "present" | "no_host" | "gone" | "inconclusive";
+
+export function livenessVerdictOf(state: DomainDnsState): LivenessRecordVerdict {
+  if (state.gone === true) return "gone";
+  if (state.hasAddress === true) return "present";
+  if (state.gone === false && state.hasAddress === false) return "no_host";
+  return "inconclusive";
+}
+
+/** The urlscan submit precheck over the state — see {@link classifySubmitPrecheck}. */
+export function submitPrecheckOf(state: DomainDnsState): SubmitPrecheck {
+  if (!state.dns) return "unknown";
+  const { a, aaaa } = state.dns;
+  return classifySubmitPrecheck(a, () => aaaa ?? NOT_QUERIED);
+}
+
+/**
+ * DNS-only deadness — the LIFECYCLE verdict: true = NXDOMAIN-class (the name
+ * does not exist), false = the name exists, null = the resolver proved
+ * nothing. Used by `probeLivenessVerdict`'s DNS fallback (`dead_at_probe`).
+ */
+export async function isDomainGone(hostname: string): Promise<boolean | null> {
+  return readDomainDnsState(await probeDomainDns(hostname)).gone;
+}
+
+/**
+ * Does `hostname` resolve to a host (A or AAAA)? true / false / null as
+ * {@link classifyHostLookups}. The re-emergence monitor's "is it back?" test.
+ */
+export async function resolvesToHost(hostname: string): Promise<boolean | null> {
+  return readDomainDnsState(await probeDomainDns(hostname)).hasAddress;
+}
+
+/** The urlscan submit precheck — see {@link classifySubmitPrecheck}. */
+export async function submitPrecheck(hostname: string): Promise<SubmitPrecheck> {
+  return submitPrecheckOf(readDomainDnsState(await probeDomainDns(hostname)));
+}
+
+// ── Parking and registry hold ─────────────────────────────────────────────
+
+/** A nameserver list on a parking / aftermarket provider (clone-watch's
+ *  reading of the ONE table, @askarthur/scam-engine/parking-providers). */
+export function isParkingNameserver(ns: readonly string[]): boolean {
+  return ns.some((n) => hostUnder(n, CLONE_WATCH_PARKING_NS));
+}
+
+/**
+ * EPP clientHold / serverHold on stored RDAP statuses, in any spelling the
+ * writers store ("client hold", "clientHold", "server_hold" …). The ONE TS
+ * rule; record_weaponised_liveness takes it per read (`hold`, v341) and keeps
+ * its regex only for a caller that sends none. Parity pinned by
+ * weaponisedLivenessVerdictSql.test.ts.
+ */
+export function isRegistryHold(statuses: readonly string[]): boolean {
+  return statuses
+    .map((s) => s.toLowerCase().replace(/[^a-z]/g, ""))
+    .some((s) => s === "clienthold" || s === "serverhold");
+}
+
+// ── Shared fronts ─────────────────────────────────────────────────────────
+
+/**
+ * SHARED FRONTS — address ranges where DNS says nothing about what is served.
+ *
+ * WHY. The recheck gate assumes a go-live moves DNS. Behind a shared anycast
+ * front it does not: a parked page and a phishing kit on Cloudflare resolve to
+ * the SAME Cloudflare /24s, so the fingerprint reads "unchanged" through the
+ * exact flip we exist to catch. Measured in the #1261 review (2026-09-27): 58
+ * of the 108 weaponised alerts with a known IP were on Cloudflare, and 429 of
+ * the 1,192 pool rows. A probe whose A/AAAA set touches one of these ranges is
+ * OPAQUE (`DomainDnsState.opaque`): the recheck gate gives it the 7-day urlscan
+ * floor at ANY age and ranks it first in stale fill.
+ *
+ * ONE list — add a front here, nowhere else.
+ *   - Cloudflare: every published IPv4 range (cloudflare.com/ips-v4) plus the
+ *     two IPv6 blocks that front customer zones.
+ *   - GoDaddy's AWS Global Accelerator pair (named in the #1261 review) — many
+ *     GoDaddy-hosted and GoDaddy-parked names resolve to exactly these two.
+ *   - Vercel's shared apex and anycast ranges.
+ */
+export const SHARED_FRONT_RANGES: readonly string[] = [
+  // Cloudflare IPv4
+  "104.16.0.0/13",
+  "172.64.0.0/13",
+  "188.114.96.0/20",
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "131.0.72.0/22",
+  // Cloudflare IPv6
+  "2606:4700::/32",
+  "2a06:98c1::/32",
+  // GoDaddy (AWS Global Accelerator pair)
+  "3.33.130.190/32",
+  "15.197.148.33/32",
+  // Vercel
+  "76.76.21.0/24",
+  "216.198.79.0/24",
+];
+
+/**
+ * IPv6 text → its hextets with `::` expanded to zeros, lower-cased, zone id
+ * dropped. NOT validated: each caller checks what it needs (the recheck
+ * fingerprint only the first three groups, the front match all eight). The
+ * ONE IPv6 parser (it was written twice).
+ */
+export function ipv6Groups(ip: string): string[] | null {
+  const s = ip.toLowerCase().split("%")[0]!;
+  if (!s.includes(":")) return null;
+  const [head, tail] = s.split("::") as [string, string | undefined];
+  const h = head ? head.split(":") : [];
+  const t = tail !== undefined && tail !== "" ? tail.split(":") : [];
+  return tail === undefined
+    ? h
+    : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+}
+
+function v4ToBigInt(ip: string): bigint | null {
+  const o = ip.split(".");
+  if (o.length !== 4) return null;
+  let n = BigInt(0);
+  for (const part of o) {
+    if (!/^\d{1,3}$/.test(part) || Number(part) > 255) return null;
+    n = (n << BigInt(8)) | BigInt(Number(part));
+  }
+  return n;
+}
+
+function v6ToBigInt(ip: string): bigint | null {
+  const groups = ipv6Groups(ip);
+  if (!groups || groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g)))
+    return null;
+  return groups.reduce(
+    (n, g) => (n << BigInt(16)) | BigInt(parseInt(g, 16)),
+    BigInt(0),
+  );
+}
+
+type ParsedRange = { v6: boolean; base: bigint; bits: number };
+
+const PARSED_FRONTS: readonly ParsedRange[] = SHARED_FRONT_RANGES.map(
+  (cidr) => {
+    const [addr, len] = cidr.split("/") as [string, string];
+    const v6 = addr.includes(":");
+    const base = v6 ? v6ToBigInt(addr) : v4ToBigInt(addr);
+    if (base === null)
+      throw new Error(`SHARED_FRONT_RANGES: bad address ${cidr}`);
+    return { v6, base, bits: Number(len) };
+  },
+);
+
+/** Is this one address inside a shared front? Unparseable → false. */
+export function isSharedFrontAddress(ip: string): boolean {
+  const v6 = ip.includes(":");
+  const n = v6 ? v6ToBigInt(ip) : v4ToBigInt(ip.trim());
+  if (n === null) return false;
+  const width = v6 ? 128 : 32;
+  return PARSED_FRONTS.some((r) => {
+    if (r.v6 !== v6) return false;
+    const shift = BigInt(width - r.bits);
+    return n >> shift === r.base >> shift;
+  });
+}
+
+/**
+ * Opaque = ANY A or AAAA record sits on a shared front. "Any", not "all": a
+ * mixed set still routes some visitors through the front, where DNS cannot
+ * see a content change — the conservative reading costs only earlier rescans.
+ */
+export function isOpaqueAnswers(dns: DnsAnswers | null): boolean {
+  if (!dns) return false;
+  const addrs = [dns.a, dns.aaaa].flatMap((l) =>
+    l && "records" in l ? l.records : [],
+  );
+  return addrs.some(isSharedFrontAddress);
+}
+
+// ── The one bounded-concurrency sweep ─────────────────────────────────────
+
+/** DNS probes in flight for a sweep. Each costs ~ms; a slow one caps at 4 s
+ *  per query. The weaponised sweep and month-end stock both ran 16. */
+export const DNS_SWEEP_CONCURRENCY = 16;
+
+/**
+ * Probe each target's hostname under a budget, `concurrency` in flight — the
+ * ONE sweep behind the weaponised liveness sweep, the recheck DNS gate and the
+ * month-end stock walk (three hand-rolled copies before 2026-09-28).
+ *
+ * Returns states INDEX-ALIGNED with `targets`: `states[i]` is null when the
+ * budget expired before target i was picked (it stays due). Targets are picked
+ * in order and none is picked after expiry, so the non-null entries are a
+ * prefix of the picked set — month-end relies on that to carry its tail. A
+ * probe that throws reads as `unverified`, never as gone or unchanged.
+ *
+ * HOLD IS NOT SWEPT. The sweep reads DNS only and passes no stored RDAP
+ * statuses, so every state it returns carries `hold: false`. A caller that
+ * needs the hold computes it from its own stored statuses (`isRegistryHold` —
+ * the weaponised sweep does, per target; `stockStatus` re-reads the state
+ * with the row's attribution).
+ *
+ * Accumulators live inside the call: run it inside ONE step.run so a replay
+ * re-runs it whole and never resumes a half-counted tally.
+ */
+export async function sweepDomainDns<T>(
+  targets: readonly T[],
+  hostnameOf: (t: T) => string,
+  opts: {
+    expired: () => boolean;
+    /** The resolver seam. Required, never defaulted in here: a caller's own
+     *  `probe = probeDomainDns` default goes through the module import, which
+     *  is what a test's vi.mock of liveness.ts replaces. */
+    probe: DnsProbe;
+    concurrency?: number;
+  },
+): Promise<{ states: Array<DomainDnsState | null>; unreached: number }> {
+  const { probe } = opts;
+  const states: Array<DomainDnsState | null> = new Array(targets.length).fill(null);
+  let unreached = 0;
+  await mapWithConcurrency(
+    targets.map((t, i) => ({ t, i })),
+    opts.concurrency ?? DNS_SWEEP_CONCURRENCY,
+    async ({ t, i }) => {
+      if (opts.expired()) {
+        unreached++;
+        return;
+      }
+      let dns: DnsAnswers | null;
+      try {
+        dns = await probe(hostnameOf(t));
+      } catch {
+        dns = null;
+      }
+      states[i] = readDomainDnsState(dns);
+    },
+  );
+  return { states, unreached };
 }
 
 /** One bounded GET. Returns the status, or throws for the caller to classify
@@ -424,27 +776,9 @@ export async function probeLivenessVerdict(
   }
 }
 
-/** Bounded-concurrency map over unique URLs. Never throws. */
-async function probeMap<T>(
-  urls: string[],
-  concurrency: number,
-  probe: (url: string) => Promise<T>,
-): Promise<Map<string, T>> {
-  const unique = [...new Set(urls)];
-  const out = new Map<string, T>();
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.min(concurrency, unique.length) },
-    async () => {
-      while (cursor < unique.length) {
-        const url = unique[cursor++];
-        out.set(url, await probe(url));
-      }
-    },
-  );
-  await Promise.all(workers);
-  return out;
-}
+/** HTTP liveness probes in flight (the netcraft-auto resubmit and
+ *  netcraft-issue lanes). HTTP, not DNS — distinct from DNS_SWEEP_CONCURRENCY. */
+export const HTTP_PROBE_CONCURRENCY = 4;
 
 /**
  * Probe a batch of URLs with bounded concurrency; duplicates are probed once.
@@ -458,7 +792,11 @@ async function probeMap<T>(
  */
 export async function probeLivenessDetailed(
   urls: string[],
-  concurrency = 4,
+  concurrency = HTTP_PROBE_CONCURRENCY,
 ): Promise<Map<string, LivenessVerdict>> {
-  return probeMap(urls, concurrency, probeLivenessVerdict);
+  const out = new Map<string, LivenessVerdict>();
+  await mapWithConcurrency([...new Set(urls)], concurrency, async (url) => {
+    out.set(url, await probeLivenessVerdict(url));
+  });
+  return out;
 }
