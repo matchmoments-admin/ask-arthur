@@ -18,7 +18,13 @@ import { checkBrandSend, refusalStatus } from "@/lib/clone-watch/brand-send-gate
 
 export const dynamic = "force-dynamic";
 
-const UNSUBSCRIBE_BASE = "https://askarthur.au/unsubscribe";
+// The brand-contact opt-out endpoint: it writes brand_report_unsubscribes,
+// which the Brand Send Gate's `unsubscribe` check reads before every real
+// brand send (outreach included). The consumer /unsubscribe page used here
+// before only UPDATEs an existing email_subscribers row, so a brand contact's
+// opt-out was recorded nowhere. `src` (appended after signing — it is not
+// part of the HMAC) only labels the row's source.
+const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
 // The Zod key name is verbose on purpose — the field carries the founder's
 // own prose (light markdown), which the email builder sanitises before it is
@@ -165,7 +171,7 @@ export async function POST(req: NextRequest) {
   // the ACTUAL recipient so a shadow test unsubscribes the founder, not the
   // brand. The stable idempotencyKey (recipient+subject+day) means a
   // double-click never double-sends.
-  const unsubscribeUrl = signUnsubscribeUrl(recipient, UNSUBSCRIBE_BASE);
+  const unsubscribeUrl = `${signUnsubscribeUrl(recipient, UNSUBSCRIBE_BASE)}&src=brand_outreach`;
   const stopMailto = `mailto:brendan@askarthur.au?subject=${encodeURIComponent(
     `STOP — ${body.brandName}`,
   )}`;

@@ -93,11 +93,19 @@ function makeQueryBuilder(table?: string): Record<string, unknown> {
     order: () => b,
     in: () => Promise.resolve(table === "clone_watch_readiness" ? readinessRes : { data: [], error: null }),
     limit: () => Promise.resolve({ data: cloneSampleRows, error: null }),
+    // The gate's `unsubscribe` check (outreach profile, PR-C review).
+    maybeSingle: () =>
+      Promise.resolve(table === "brand_report_unsubscribes" ? unsubRes : { data: null, error: null }),
   };
   return b;
 }
+let unsubRes: { data: unknown; error: unknown } = { data: null, error: null };
+let stopRes: { data: unknown; error: unknown } = { data: false, error: null };
 vi.mock("@askarthur/supabase/server", () => ({
-  createServiceClient: () => ({ from: (t: string) => makeQueryBuilder(t) }),
+  createServiceClient: () => ({
+    from: (t: string) => makeQueryBuilder(t),
+    rpc: async () => stopRes,
+  }),
 }));
 
 let readinessOverride = false;
@@ -144,6 +152,8 @@ beforeEach(() => {
   cloneSampleRows = [];
   readinessRes = { data: readyRows(), error: null };
   readinessOverride = false;
+  unsubRes = { data: null, error: null };
+  stopRes = { data: false, error: null };
   loggerMock.warn.mockReset();
   costInsertMock.mockReset().mockResolvedValue({ error: null });
   delete process.env.BRAND_OUTREACH_SHADOW_RECIPIENT;
@@ -430,6 +440,49 @@ describe("POST /api/admin/brand-outreach/send — Brand Send Gate", () => {
         estimated_cost_usd: 0,
       }),
     );
+  });
+
+  // PR-C review (2026-09-28): outreach also checks unsubscribe / STOP, and its
+  // unsubscribe link writes the store that check reads.
+  // Go-red: "unsubscribe" removed from the outreach profile → the three
+  // opt-out tests below FAILED (Resend called); UNSUBSCRIBE_BASE reverted to
+  // "https://askarthur.au/unsubscribe" → "the unsubscribe link targets …" FAILED.
+  it("a REAL send to an unsubscribed contact is refused — nothing sent", async () => {
+    unsubRes = { data: { email: "security@pnbank.com.au" }, error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("recipient_unsubscribed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("a REAL send to a STOP-replied contact is refused", async () => {
+    stopRes = { data: true, error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect((await res.json()).error).toBe("recipient_suppressed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("the readiness override never overrides an opt-out", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    readinessOverride = true;
+    unsubRes = { data: { email: "security@pnbank.com.au" }, error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect((await res.json()).error).toBe("recipient_unsubscribed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+    expect(costInsertMock).not.toHaveBeenCalled();
+  });
+
+  it("the unsubscribe link targets the brand opt-out store the gate reads", async () => {
+    const { POST } = await loadRoute();
+    await POST(makeRequest(validPayload));
+    const [payload] = resendSendMock.mock.calls[0];
+    expect(payload.headers["List-Unsubscribe"]).toContain(
+      "https://askarthur.au/api/brand-stewardship/unsubscribe?email=",
+    );
+    expect(payload.headers["List-Unsubscribe"]).toContain("&src=brand_outreach");
   });
 
   it("the override is not honoured if its record cannot be written", async () => {

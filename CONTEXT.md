@@ -230,9 +230,12 @@ a **send profile** (`stewardship-real`, `batch`, `auto-send`, `outreach`) — th
 list of checks that apply to it — so a difference between paths is a line in
 `BRAND_SEND_PROFILES`, not a missing block in a route. Returns
 `{ allowed, reasons[] }`; any read error refuses. Shadow sends (to our own
-inbox) never reach it. The one override is `BRAND_OUTREACH_READINESS_OVERRIDE`
-(outreach profile, readiness only), which is logged and recorded or not
-honoured. `brandSendGateScan.test.ts` fails any Resend sender carrying Clone
+inbox) never reach it. Every automated real brand contact (stewardship, batch,
+auto-send) needs the #371 sign-off; every real send, outreach included, honours
+the **brand opt-out store** (`brand_report_unsubscribes`, written by every brand
+email's unsubscribe link) plus STOP replies. The one override is
+`BRAND_OUTREACH_READINESS_OVERRIDE` (outreach profile, readiness only — never an
+opt-out), which is logged and recorded or not honoured. `brandSendGateScan.test.ts` fails any Resend sender carrying Clone
 Watch brand data that does not call it.
 _Avoid_: "send checks", "outreach guard", "preconditions" (for this set).
 

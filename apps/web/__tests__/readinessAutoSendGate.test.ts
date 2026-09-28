@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   rpc: vi.fn(),
   readiness: { data: [] as unknown, error: null as unknown },
   directory: { data: [] as unknown, error: null as unknown },
+  flagsOff: {} as Record<string, boolean>,
 }));
 
 vi.mock("@askarthur/scam-engine/inngest/client", () => ({
@@ -30,7 +31,7 @@ vi.mock("@askarthur/scam-engine/inngest/with-axiom-logging", () => ({
   withAxiomLogging: (_c: unknown, h: unknown) => h,
 }));
 vi.mock("@askarthur/utils/feature-flags", () => ({
-  featureFlags: new Proxy({}, { get: () => true }),
+  featureFlags: new Proxy({}, { get: (_t, k) => m.flagsOff[String(k)] !== true }),
 }));
 vi.mock("@askarthur/utils/env", () => ({
   readStringEnv: () => "alerts@askarthur.au",
@@ -173,5 +174,20 @@ describe("notify-brand-prepare auto-send × Brand Send Gate (directory cross-che
     expect(m.send).not.toHaveBeenCalled();
     expect(assignCalls()[0]).toMatchObject({ p_auto_approved: false });
     expect(out.auto_send_refused).toEqual({ recipient_mismatch: 1 });
+  });
+
+  // PR-C review go-red: "legal_signoff" removed from the auto-send profile → this FAILED.
+  it("no #371 sign-off (FF_BRAND_STEWARDSHIP_SEND OFF) keeps the batch for manual approval", async () => {
+    const [a, b] = required();
+    m.readiness = { data: [{ period_month: a, ready: true }, { period_month: b, ready: true }], error: null };
+    m.flagsOff = { brandStewardshipSend: true };
+    try {
+      const out = await run();
+      expect(m.send).not.toHaveBeenCalled();
+      expect(assignCalls()[0]).toMatchObject({ p_auto_approved: false });
+      expect(out.auto_send_refused).toEqual({ send_disabled: 1 });
+    } finally {
+      m.flagsOff = {};
+    }
   });
 });

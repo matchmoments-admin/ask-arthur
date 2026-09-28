@@ -107,17 +107,17 @@ export const BRAND_SEND_PROFILES = {
     checks: ["legal_signoff", "readiness", "brake", "unsubscribe", "verified_contact"],
   },
   /** Admin-approved brand-notify batch (api/admin/clone-watch/batches/[batchId]/send).
-   *  No `legal_signoff`: this path has never been gated on #371 (open
-   *  founder question — see docs/ops/clone-watch-config.md § Brand Send Gate).
+   *  `legal_signoff` added 2026-09-28 (PR-C review): real brand contact of any
+   *  kind needs the #371 sign-off — the founder's no-contact rule.
    *  No `verified_contact`: the directory cross-check is its recipient check. */
   batch: {
-    checks: ["flags", "readiness", "brake", "directory", "unsubscribe"],
+    checks: ["flags", "legal_signoff", "readiness", "brake", "directory", "unsubscribe"],
     flags: ["shopfrontCloneOutreach", "shopfrontCloneNotifyBrand"],
   },
   /** notify-brand-prepare auto-send. Same as `batch` plus the auto-send flag:
    *  an auto-sent batch must pass everything a human-approved one does. */
   "auto-send": {
-    checks: ["flags", "readiness", "brake", "directory", "unsubscribe"],
+    checks: ["flags", "legal_signoff", "readiness", "brake", "directory", "unsubscribe"],
     flags: [
       "shopfrontCloneOutreach",
       "shopfrontCloneNotifyBrand",
@@ -127,10 +127,16 @@ export const BRAND_SEND_PROFILES = {
   /** Founder-composed outreach (api/admin/brand-outreach/send). Founder
    *  decision 2026-09-28: gated on readiness because it embeds real Clone
    *  Watch detections (getBrandCloneSample); the escape hatch is an explicit,
-   *  logged env override. Nothing else is added — a person wrote and approved
-   *  the email to an address they chose. */
+   *  logged env override (readiness ONLY — it never overrides an opt-out).
+   *  `unsubscribe` added 2026-09-28 (PR-C review): the outreach email's
+   *  unsubscribe link now points at /api/brand-stewardship/unsubscribe, which
+   *  writes brand_report_unsubscribes — the store this check reads. (The old
+   *  link went to the consumer /unsubscribe page, whose RPC only UPDATEs an
+   *  existing email_subscribers row, so for a brand contact it recorded
+   *  nothing.) No `legal_signoff`, `brake`, `directory` or `verified_contact`:
+   *  a person wrote and approved the email to an address they chose. */
   outreach: {
-    checks: ["readiness"],
+    checks: ["readiness", "unsubscribe"],
     overrides: { readiness: "BRAND_OUTREACH_READINESS_OVERRIDE" },
     auditFeature: "brand_outreach",
   },

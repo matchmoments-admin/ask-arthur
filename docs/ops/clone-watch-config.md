@@ -2047,12 +2047,12 @@ the gate returns `{ allowed, reasons[] }`. Every read error refuses.
 | `verified_contact` | `known_brands.last_verified_at` for brand_key + recipient                                                                           | `contact_unverified` (403), `contact_unreadable` (503)                                  |
 | `directory`        | `brand_contact_directory` by `brand`: same recipient, channel `security_txt`/`fraud_inbox`                                          | `directory_row_missing` / `recipient_mismatch` (409), `directory_lookup_failed` (500)   |
 
-| Profile            | Path                                                            | Checks                                                                    |
-| ------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `stewardship-real` | `api/admin/brand-stewardship/[id]/send` (real recipient only)   | legal_signoff, readiness, brake, unsubscribe, verified_contact            |
-| `batch`            | `api/admin/clone-watch/batches/[batchId]/send`                  | flags (outreach + notify-brand), readiness, brake, directory, unsubscribe |
-| `auto-send`        | `clone-watch-notify-brand-prepare`, step `check-auto-send-gate` | batch's checks + the auto-send flag                                       |
-| `outreach`         | `api/admin/brand-outreach/send` (real sends only)               | readiness — overridable by `BRAND_OUTREACH_READINESS_OVERRIDE`            |
+| Profile            | Path                                                            | Checks                                                                                          |
+| ------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `stewardship-real` | `api/admin/brand-stewardship/[id]/send` (real recipient only)   | legal_signoff, readiness, brake, unsubscribe, verified_contact                                  |
+| `batch`            | `api/admin/clone-watch/batches/[batchId]/send`                  | flags (outreach + notify-brand), legal_signoff, readiness, brake, directory, unsubscribe        |
+| `auto-send`        | `clone-watch-notify-brand-prepare`, step `check-auto-send-gate` | batch's checks + the auto-send flag                                                             |
+| `outreach`         | `api/admin/brand-outreach/send` (real sends only)               | readiness (overridable by `BRAND_OUTREACH_READINESS_OVERRIDE`), unsubscribe (never overridable) |
 
 - **Shadow sends are never gated** (stewardship `BRAND_STEWARDSHIP_SHADOW_RECIPIENT`,
   outreach `testMode` / `BRAND_OUTREACH_SHADOW_RECIPIENT`) — unchanged.
@@ -2079,9 +2079,24 @@ false`). The run result carries `auto_send_refused` (code → count). The step
   modules, `brand_stewardship_reports`, the notify-brand batch RPCs) without
   calling `createBrandSendGate(`/`checkBrandSend(`. One exemption:
   `api/clone-watch/sample-report` (fictional sample to the requester).
-- **Open founder question**: batch and auto-send have never checked the #371
-  sign-off (`legal_signoff` is only in `stewardship-real`). Adding it there is a
-  one-line profile change.
+- **#371 sign-off on every real brand contact** (PR-C review, 2026-09-28):
+  `legal_signoff` is in `stewardship-real`, `batch` and `auto-send` — real brand
+  contact of any kind needs the sign-off (the founder's no-contact rule). Not in
+  `outreach` (founder decision: readiness only, a person wrote the email).
+- **One brand opt-out store.** `brand_report_unsubscribes` is the store the
+  `unsubscribe` check reads, and every brand email's unsubscribe link writes it via
+  `/api/brand-stewardship/unsubscribe` (stewardship: `source=brand_stewardship_email`;
+  founder outreach since PR-C: `&src=brand_outreach` → `source=brand_outreach`).
+  The outreach link used to point at the consumer `/unsubscribe` page, whose
+  `unsubscribe_newsletter` RPC only UPDATEs an existing `email_subscribers` row —
+  for a brand contact it recorded nothing. The gate does NOT read
+  `email_subscribers`: on 2026-09-28 none of the 5 real outreach recipients were in
+  it (so no opt-out could have landed there); 2 of the 5 ARE in
+  `brand_report_unsubscribes` and will now be refused. Links in the 5 already-sent
+  outreach emails still point at the old page (a no-op for a brand contact). Whether a STOP
+  reply to an outreach email reaches `clone_alert_brand_replies` is not verified —
+  add a reply opt-out to `brand_report_unsubscribes` by hand.
+  The readiness override never overrides an opt-out.
 
 **The compute can never fail the report run** (#1260 review L2): the step runs
 AFTER `log-outcome`; its body (`computeAndRecordReadiness`) catches everything

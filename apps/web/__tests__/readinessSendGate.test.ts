@@ -244,6 +244,20 @@ describe("Brand Send Gate — gaps closed on the real routes", () => {
     expect(resendSend).not.toHaveBeenCalled();
   });
 
+  // PR-C review go-red: "legal_signoff" removed from the batch profile → this FAILED.
+  it("batch refuses without the #371 sign-off (FF_BRAND_STEWARDSHIP_SEND OFF)", async () => {
+    flags.brandStewardshipSend = false;
+    try {
+      const { status, body } = await batchSend();
+      expect(status).toBe(403);
+      expect(body.error).toBe("send_disabled");
+      expect(rpc).not.toHaveBeenCalled();
+      expect(resendSend).not.toHaveBeenCalled();
+    } finally {
+      flags.brandStewardshipSend = true;
+    }
+  });
+
   it("stewardship shadow send still ignores the brake", async () => {
     shadowRecipient = "shadow@askarthur.au";
     const { status, body } = await stewardshipSend();

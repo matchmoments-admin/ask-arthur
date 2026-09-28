@@ -29,6 +29,12 @@
 //        → both override-record tests here and both in brandOutreach FAILED (4)
 //   - settle(): `if (!target)` preflight guard deleted
 //        → "preflight never lets an override through" FAILED
+// PR-C review additions (2026-09-28):
+//   - "legal_signoff" removed from batch → gaps test + "batch refuses without
+//     the #371 sign-off" FAILED (2); from auto-send → gaps test + "no #371
+//     sign-off … keeps the batch for manual approval" FAILED (2)
+//   - "unsubscribe" removed from outreach → gaps test + "the override never
+//     lets an opt-out through" + three brandOutreach opt-out tests FAILED (5)
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -179,9 +185,9 @@ describe("each profile refuses with the right code for each failing check", () =
 });
 
 describe("a check a profile does not name never refuses it", () => {
-  it("outreach ignores the brake, unsubscribe, contact and directory", async () => {
+  it("outreach ignores the #371 flag, brake, contact and directory", async () => {
+    m.flags.brandStewardshipSend = false;
     m.braked = true;
-    tables.brand_report_unsubscribes = { data: { email: RECIPIENT }, error: null };
     tables.known_brands = { data: null, error: null };
     tables.brand_contact_directory = { data: [], error: null };
     expect((await checkBrandSend("outreach", sb, TARGET)).allowed).toBe(true);
@@ -193,6 +199,11 @@ describe("the three copy gaps are closed", () => {
     expect(BRAND_SEND_PROFILES["stewardship-real"].checks).toContain("brake");
     expect(BRAND_SEND_PROFILES.batch.checks).toContain("unsubscribe");
     expect(BRAND_SEND_PROFILES["auto-send"].checks).toContain("directory");
+    // PR-C review: real brand contact of any kind needs the #371 sign-off,
+    // and outreach honours opt-outs.
+    expect(BRAND_SEND_PROFILES.batch.checks).toContain("legal_signoff");
+    expect(BRAND_SEND_PROFILES["auto-send"].checks).toContain("legal_signoff");
+    expect(BRAND_SEND_PROFILES.outreach.checks).toContain("unsubscribe");
     // …and auto-send is at least as strict as a human-approved batch.
     for (const c of BRAND_SEND_PROFILES.batch.checks) {
       expect(BRAND_SEND_PROFILES["auto-send"].checks).toContain(c);
@@ -288,6 +299,15 @@ describe("outreach readiness override", () => {
     m.override = true;
     const d = await createBrandSendGate("outreach", sb).preflight();
     expect(d.allowed).toBe(false);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("the override never lets an opt-out through", async () => {
+    m.override = true;
+    tables.brand_report_unsubscribes = { data: { email: RECIPIENT }, error: null };
+    const d = await checkBrandSend("outreach", sb, TARGET);
+    expect(d.allowed).toBe(false);
+    expect(d.reasons.map((r) => r.code)).toEqual(["recipient_unsubscribed"]);
     expect(inserts).toHaveLength(0);
   });
 
