@@ -2022,21 +2022,66 @@ without the key, is NOT measured (never "healthy").
 **The gate** (`readReadinessGate` → `evaluateReadinessGate`): a real send needs
 `ready = true` for each of the last `READINESS_REQUIRED_MONTHS` (2) closed
 months (UTC). A missing month, a not-ready month or an unreadable table refuses.
-Enforced at:
+It is one check of the **Brand Send Gate** below, which every brand send path
+calls.
 
-- `apps/web/app/api/admin/brand-stewardship/[id]/send/route.ts` — real sends
-  only (after `FF_BRAND_STEWARDSHIP_SEND`); the `BRAND_STEWARDSHIP_SHADOW_RECIPIENT`
-  shadow path is unchanged and stays available.
-- `apps/web/app/api/admin/clone-watch/batches/[batchId]/send/route.ts` — every
-  send (it mails the real contact; there is no shadow mode). 403 `not_ready`.
-- `clone-watch-notify-brand-prepare` — auto-send = `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND`
-  AND the gate (`check-readiness` step); otherwise batches are prepared for
-  manual approval, which runs the same gate. The lane is parked (#1230).
+Not gated: `onward-brand-abuse` (consumer-reported onward reporting). **Open
+founder question: does #1227 cover onward brand-abuse reports?**
 
-Not gated: `/api/admin/brand-outreach/send` (the founder's hand-composed pilot
-outreach — a sales email, not a Clone Watch report) and `onward-brand-abuse`
-(consumer-reported onward reporting). **Open founder question: does #1227 cover
-onward brand-abuse reports?**
+### Brand Send Gate — one conjunction for every brand send (PR-C, 2026-09-28)
+
+`apps/web/lib/clone-watch/brand-send-gate.ts`. Before it, each send path
+carried its own copy of the preconditions and each copy was missing something
+(stewardship: no brake; batch: no `brand_report_unsubscribes`; auto-send: no
+directory cross-check; founder outreach: nothing at all while embedding real
+detections via `getBrandCloneSample`). Now each path names a **profile** and
+the gate returns `{ allowed, reasons[] }`. Every read error refuses.
+
+| Check              | What it reads                                                                                                                       | Refusal code(s)                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `flags`            | the profile's flags (`FF_SHOPFRONT_CLONE_OUTREACH`, `FF_SHOPFRONT_CLONE_NOTIFY_BRAND`, `…_AUTO_SEND`)                               | `clone_outreach_disabled` / `clone_notify_brand_disabled` / `auto_send_disabled` (503)  |
+| `legal_signoff`    | `FF_BRAND_STEWARDSHIP_SEND` — the only encoding of the #371 sign-off                                                                | `send_disabled` (403)                                                                   |
+| `readiness`        | `clone_watch_readiness`, last 2 closed months                                                                                       | `not_ready` (403)                                                                       |
+| `brake`            | `feature_brakes.shopfront_clone_outreach` via `isFeatureBrakedOrUnknown` (unreadable = engaged)                                     | `cost_brake_engaged` (503)                                                              |
+| `unsubscribe`      | `brand_report_unsubscribes` (lowercased email) AND `clone_alert_recipient_is_suppressed` (STOP replies; a non-boolean answer fails) | `recipient_unsubscribed` / `recipient_suppressed` (409), `unsubscribe_unreadable` (503) |
+| `verified_contact` | `known_brands.last_verified_at` for brand_key + recipient                                                                           | `contact_unverified` (403), `contact_unreadable` (503)                                  |
+| `directory`        | `brand_contact_directory` by `brand`: same recipient, channel `security_txt`/`fraud_inbox`                                          | `directory_row_missing` / `recipient_mismatch` (409), `directory_lookup_failed` (500)   |
+
+| Profile            | Path                                                            | Checks                                                                    |
+| ------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `stewardship-real` | `api/admin/brand-stewardship/[id]/send` (real recipient only)   | legal_signoff, readiness, brake, unsubscribe, verified_contact            |
+| `batch`            | `api/admin/clone-watch/batches/[batchId]/send`                  | flags (outreach + notify-brand), readiness, brake, directory, unsubscribe |
+| `auto-send`        | `clone-watch-notify-brand-prepare`, step `check-auto-send-gate` | batch's checks + the auto-send flag                                       |
+| `outreach`         | `api/admin/brand-outreach/send` (real sends only)               | readiness — overridable by `BRAND_OUTREACH_READINESS_OVERRIDE`            |
+
+- **Shadow sends are never gated** (stewardship `BRAND_STEWARDSHIP_SHADOW_RECIPIENT`,
+  outreach `testMode` / `BRAND_OUTREACH_SHADOW_RECIPIENT`) — unchanged.
+- **Stewardship**: an unsubscribed or STOP-suppressed recipient still marks the
+  row `skipped` (status_reason = the code) and returns 200, as before.
+- **Batch** runs `gate.preflight()` (flags, readiness, brake) before loading the
+  batch, then `gate.check()` for the recipient checks.
+- **Auto-send**: one step gates every group (one readiness + one brake read); a
+  refused group is still prepared for manual approval (`p_auto_approved =
+false`). The run result carries `auto_send_refused` (code → count). The step
+  replaced `check-readiness` one-for-one (finish budget unchanged at 70
+  boundaries / 37m).
+- **Outreach override** (founder decision 2026-09-28): `BRAND_OUTREACH_READINESS_OVERRIDE=true`
+  (read with `readBoolEnv`) lets a not-ready REAL outreach send through. Every
+  use emits an always-ship `logger.warn("brand_send_gate_override", …)` and
+  inserts a `cost_telemetry` row (`feature='brand_outreach'`,
+  `provider='internal'`, `operation='readiness_override'`, $0, metadata: profile,
+  refusal detail, recipient **hash**, brand_key, brand). If that insert fails
+  the override is **not** honoured (503 `override_unrecorded`). Find uses:
+  `SELECT created_at, metadata FROM cost_telemetry WHERE feature='brand_outreach' AND operation='readiness_override' ORDER BY created_at DESC;`
+- **Fitness test**: `apps/web/__tests__/brandSendGateScan.test.ts` fails any file
+  under `app/`/`lib/` that imports Resend (SDK or `@/lib/resend`) and Clone Watch
+  brand data (`getBrandCloneSample`, brand-stewardship / notify-brand email
+  modules, `brand_stewardship_reports`, the notify-brand batch RPCs) without
+  calling `createBrandSendGate(`/`checkBrandSend(`. One exemption:
+  `api/clone-watch/sample-report` (fictional sample to the requester).
+- **Open founder question**: batch and auto-send have never checked the #371
+  sign-off (`legal_signoff` is only in `stewardship-real`). Adding it there is a
+  one-line profile change.
 
 **The compute can never fail the report run** (#1260 review L2): the step runs
 AFTER `log-outcome`; its body (`computeAndRecordReadiness`) catches everything

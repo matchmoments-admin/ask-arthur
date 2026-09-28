@@ -2,13 +2,15 @@ import { createHash } from "crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { Resend } from "resend";
 import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
-import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
-import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
+import {
+  createBrandSendGate,
+  refusalStatus,
+  type BrandSendRefusal,
+} from "@/lib/clone-watch/brand-send-gate";
 
 // POST /api/admin/clone-watch/batches/[batchId]/send
 //
@@ -17,6 +19,11 @@ import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
 // from the queue, send via Resend with an idempotency key, transition the
 // batch to 'sent', and stamp brand_contact_directory.last_notified_at +
 // shopfront_clone_alerts.submitted_to.brand_notification.status='sent'.
+//
+// Every precondition below the admin check is the Brand Send Gate's "batch"
+// profile (lib/clone-watch/brand-send-gate.ts) — this route no longer
+// carries its own copy of the conjunction (PR-C, 2026-09-28; it gained the
+// brand_report_unsubscribes check it was missing).
 //
 // Hardening pass v152 (2026-05-27):
 //   • Re-check FF_SHOPFRONT_CLONE_NOTIFY_BRAND (was only checking the
@@ -65,19 +72,6 @@ export async function POST(
 ) {
   await requireAdmin();
 
-  if (!featureFlags.shopfrontCloneOutreach) {
-    return NextResponse.json(
-      { error: "clone_outreach_disabled" },
-      { status: 503 },
-    );
-  }
-  if (!featureFlags.shopfrontCloneNotifyBrand) {
-    return NextResponse.json(
-      { error: "clone_notify_brand_disabled" },
-      { status: 503 },
-    );
-  }
-
   const fromEmail = readStringEnv("RESEND_FROM_EMAIL");
   if (!fromEmail) {
     // Fail closed: missing RESEND_FROM_EMAIL used to silently fall back
@@ -109,30 +103,13 @@ export async function POST(
     );
   }
 
-  // 0. Readiness gate (#1237, founder decision #1227). This route mails the
-  //    brand's REAL contact — it has no shadow mode — so it refuses unless
-  //    the last READINESS_REQUIRED_MONTHS closed months read ready in
-  //    clone_watch_readiness. Missing or unreadable scorecard → refused.
-  const readiness = await readReadinessGate(sb);
-  if (!readiness.ready) {
-    return NextResponse.json(
-      {
-        error: "not_ready",
-        detail: `Clone Watch readiness scorecard is not ready for ${readiness.months.join(", ")} (${readiness.reason}). No brand is contacted until it is — see /admin/clone-watch.`,
-      },
-      { status: 403 },
-    );
-  }
-
-  // 1. Cost brake — if shopfront_clone_outreach is paused, refuse pre-send.
-  // Outbound email → fail-closed: an unreadable brake refuses the send.
-  const brakeEngaged = await isFeatureBrakedOrUnknown("shopfront_clone_outreach");
-  if (brakeEngaged) {
-    return NextResponse.json(
-      { error: "cost_brake_engaged" },
-      { status: 503 },
-    );
-  }
+  // 0-1. Brand Send Gate preflight (profile "batch"): both flags, readiness
+  //      (#1237 — this route mails the REAL contact, it has no shadow mode)
+  //      and the shopfront_clone_outreach brake, before the batch is loaded.
+  //      The recipient checks run below once the batch is known.
+  const gate = createBrandSendGate("batch", sb);
+  const pre = await gate.preflight();
+  if (!pre.allowed) return refuse(pre.reasons[0]);
 
   // 2. Load the batch — frozen subject + body live on the queue rows.
   const { data: rows, error: loadErr } = await sb.rpc("load_clone_alert_batch", {
@@ -187,68 +164,23 @@ export async function POST(
     );
   }
 
-  // 4. Cross-validate recipient against brand_contact_directory. A
-  //    mismatch means either (a) directory was edited after the batch
-  //    was prepared, or (b) the queue row has been tampered with. Refuse.
-  //
-  //    Lookup is by `brand` because the notify-brand enqueue path stores
-  //    directoryRow.brand into queue.brand (see clone-watch-notify-brand
-  //    Inngest fn's `enqueue_clone_alert_notification` call). The earlier
-  //    code used `legitimate_domain`, which happened to match for cases
-  //    where the brand name and the legitimate domain were the same
-  //    string (e.g. "dominos.com.au"), but failed with 409
-  //    `directory_row_missing` for any brand whose name differs from its
-  //    domain — e.g. Domain (brand="Domain", legitimate_domain="domain.com.au").
-  //    Caught 2026-05-27 during the PR #459 live e2e test when the user
-  //    clicked Send on the Domain batch.
-  const { data: directoryRows, error: directoryErr } = await sb
-    .from("brand_contact_directory")
-    .select("recipient, channel_type")
-    .eq("brand", first.brand)
-    .limit(1);
-  if (directoryErr) {
-    logger.error("clone-watch send: directory lookup failed", {
+  // 4-5. Recipient checks through the same gate: the queue recipient must
+  //      match brand_contact_directory on an accepted channel (a mismatch
+  //      means the directory changed after prepare, or the row was tampered
+  //      with), and must not have unsubscribed or STOP-replied since enqueue.
+  //      Lookup is by `brand` — the enqueue path stores directoryRow.brand
+  //      into queue.brand (legitimate_domain broke brands like "Domain",
+  //      PR #459).
+  const decision = await gate.check({ recipient: first.recipient, brand: first.brand });
+  if (!decision.allowed) {
+    const reason = decision.reasons[0];
+    logger.warn("clone-watch send: refused by brand send gate", {
       batchId,
       brand: first.brand,
-      error: directoryErr.message,
+      code: reason.code,
+      recipientHash: hashEmail(first.recipient),
     });
-    return NextResponse.json({ error: "directory_lookup_failed" }, { status: 500 });
-  }
-  const directoryRow = directoryRows?.[0];
-  if (!directoryRow) {
-    return NextResponse.json(
-      { error: "directory_row_missing" },
-      { status: 409 },
-    );
-  }
-  if (
-    directoryRow.recipient !== first.recipient ||
-    (directoryRow.channel_type !== "security_txt" &&
-      directoryRow.channel_type !== "fraud_inbox")
-  ) {
-    logger.warn("clone-watch send: recipient mismatch", {
-      batchId,
-      brand: first.brand,
-      queueRecipientHash: hashEmail(first.recipient),
-      directoryRecipientHash: hashEmail(directoryRow.recipient),
-    });
-    return NextResponse.json(
-      { error: "recipient_mismatch" },
-      { status: 409 },
-    );
-  }
-
-  // 5. Re-check suppression. Between enqueue and admin click the brand
-  //    may have STOP-replied.
-  const { data: suppressed } = await sb.rpc(
-    "clone_alert_recipient_is_suppressed",
-    { p_email: first.recipient },
-  );
-  if (suppressed === true) {
-    return NextResponse.json(
-      { error: "recipient_suppressed" },
-      { status: 409 },
-    );
+    return refuse(reason);
   }
 
   const apiKey = process.env.RESEND_API_KEY;
@@ -385,6 +317,11 @@ export async function POST(
     providerMessageId,
     raceLoser: transition.updated_count === 0,
   });
+}
+
+function refuse(r: BrandSendRefusal) {
+  // `detail` is only set for codes whose text carries no address (hashes only).
+  return NextResponse.json({ error: r.code, detail: r.detail }, { status: refusalStatus(r) });
 }
 
 /**

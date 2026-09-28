@@ -69,22 +69,46 @@ vi.mock("@/lib/unsubscribe", () => ({
 // insert path (brand_outreach_log) and the select-chain (shopfront_clone_alerts
 // → getBrandCloneSample). `cloneSampleRows` is per-test mutable.
 const insertMock = vi.fn().mockResolvedValue({ error: null });
+// The gate's override record (cost_telemetry) — kept apart from the ledger.
+const costInsertMock = vi.fn().mockResolvedValue({ error: null });
 let cloneSampleRows: unknown[] = [];
-function makeQueryBuilder(): Record<string, unknown> {
+// The Brand Send Gate's "outreach" profile (PR-C) reads the readiness
+// scorecard for a REAL send: `select(...).in("period_month", months)`.
+// Default READY for the two months the gate requires (real clock).
+function requiredMonths(): [string, string] {
+  const d = new Date();
+  const a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
+  const b = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 2, 1));
+  return [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)];
+}
+const readyRows = () => requiredMonths().map((m) => ({ period_month: m, ready: true }));
+let readinessRes: { data: unknown; error: unknown } = { data: [], error: null };
+function makeQueryBuilder(table?: string): Record<string, unknown> {
   const b: Record<string, unknown> = {
-    insert: insertMock,
+    insert: table === "cost_telemetry" ? costInsertMock : insertMock,
     select: () => b,
     eq: () => b,
     gte: () => b,
     or: () => b,
     order: () => b,
+    in: () => Promise.resolve(table === "clone_watch_readiness" ? readinessRes : { data: [], error: null }),
     limit: () => Promise.resolve({ data: cloneSampleRows, error: null }),
   };
   return b;
 }
 vi.mock("@askarthur/supabase/server", () => ({
-  createServiceClient: () => ({ from: () => makeQueryBuilder() }),
+  createServiceClient: () => ({ from: (t: string) => makeQueryBuilder(t) }),
 }));
+
+let readinessOverride = false;
+vi.mock("@askarthur/utils/env", async (orig) => {
+  const actual = await orig<typeof import("@askarthur/utils/env")>();
+  return {
+    ...actual,
+    readBoolEnv: (name: string) =>
+      name === "BRAND_OUTREACH_READINESS_OVERRIDE" ? readinessOverride : actual.readBoolEnv(name),
+  };
+});
 
 // ── Helpers ──
 
@@ -118,6 +142,10 @@ beforeEach(() => {
   insertMock.mockReset().mockResolvedValue({ error: null });
   loggerMock.error.mockReset();
   cloneSampleRows = [];
+  readinessRes = { data: readyRows(), error: null };
+  readinessOverride = false;
+  loggerMock.warn.mockReset();
+  costInsertMock.mockReset().mockResolvedValue({ error: null });
   delete process.env.BRAND_OUTREACH_SHADOW_RECIPIENT;
 });
 
@@ -342,6 +370,76 @@ describe("POST /api/admin/brand-outreach/send", () => {
     delete process.env.RESEND_API_KEY;
     const res = await POST(makeRequest(validPayload));
     expect(res.status).toBe(503);
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+});
+
+// Founder decision 2026-09-28 (PR-C): a REAL outreach send embeds real Clone
+// Watch detections, so it passes the Brand Send Gate's "outreach" profile —
+// readiness, with an explicit logged override.
+//
+// Go-red record (2026-09-28): deleted the `checkBrandSend("outreach", …)` block
+// in the route → "a REAL send is refused not_ready …" FAILED (Resend called)
+// and the scan test (brandSendGateScan) FAILED on this file; made settle()
+// skip recordOverride → "the override lets it through …" FAILED.
+describe("POST /api/admin/brand-outreach/send — Brand Send Gate", () => {
+  it("a REAL send is refused not_ready when the scorecard is not ready — nothing sent, nothing ledgered", async () => {
+    readinessRes = { data: [readyRows()[0]], error: null };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, brandKey: "pnbank.com.au" }));
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("not_ready");
+    expect(String(json.detail)).toContain("not_computed");
+    expect(resendSendMock).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(logCostMock).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable scorecard refuses too (fail closed)", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(403);
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("a test / shadow send is not gated (unchanged)", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, testMode: true }));
+    expect(res.status).toBe(200);
+    expect(resendSendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("the override lets it through, warns always-ship and writes a cost_telemetry record", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    readinessOverride = true;
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, brandKey: "pnbank.com.au" }));
+    expect(res.status).toBe(200);
+    expect(resendSendMock).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      "brand_send_gate_override",
+      expect.objectContaining({ profile: "outreach", brand: "P&N Bank", brand_key: "pnbank.com.au" }),
+    );
+    expect(costInsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "brand_outreach",
+        operation: "readiness_override",
+        estimated_cost_usd: 0,
+      }),
+    );
+  });
+
+  it("the override is not honoured if its record cannot be written", async () => {
+    readinessRes = { data: null, error: { message: "down" } };
+    readinessOverride = true;
+    costInsertMock.mockResolvedValue({ error: { message: "insert failed" } });
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("override_unrecorded");
     expect(resendSendMock).not.toHaveBeenCalled();
   });
 });

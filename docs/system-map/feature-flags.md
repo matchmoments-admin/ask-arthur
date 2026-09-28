@@ -37,16 +37,16 @@ All feature flags live in `packages/utils/src/feature-flags.ts`. Default is **OF
 
 ## Intelligence core & enrichment
 
-| Flag               | Default | Purpose                               |
-| ------------------ | ------- | ------------------------------------- |
-| `intelligenceCore` | OFF     | Unified report store + entity linkage |
-| `entityEnrichment` | OFF     | Auto-enrich high-report entities      |
-| `clusterBuilder`   | OFF     | Auto-group scam reports by entities   |
-| `riskScoring`      | OFF     | 0–100 risk scores per entity          |
-| `abuseIPDB`        | OFF     | IP reputation lookups                 |
-| `urlScanIO`        | OFF     | Async URL scanning                    |
+| Flag               | Default | Purpose                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `intelligenceCore` | OFF     | Unified report store + entity linkage                                                                                                                                                                                                                                                                                           |
+| `entityEnrichment` | OFF     | Auto-enrich high-report entities                                                                                                                                                                                                                                                                                                |
+| `clusterBuilder`   | OFF     | Auto-group scam reports by entities                                                                                                                                                                                                                                                                                             |
+| `riskScoring`      | OFF     | 0–100 risk scores per entity                                                                                                                                                                                                                                                                                                    |
+| `abuseIPDB`        | OFF     | IP reputation lookups                                                                                                                                                                                                                                                                                                           |
+| `urlScanIO`        | OFF     | Async URL scanning                                                                                                                                                                                                                                                                                                              |
 | `hibpCheck`        | OFF     | Email-breach checking — **DORMANT: the paid HIBP subscription was cancelled 2026-09-27.** `HIBP_API_KEY` is gone, so the flag cannot do anything even if flipped. Zero `cost_telemetry` rows for `feature='breach-check'` across the table's whole retention window, i.e. it had not been called for months before cancellation |
-| `ipqualityScore`   | OFF     | Phone fraud scoring (IPQualityScore)  |
+| `ipqualityScore`   | OFF     | Phone fraud scoring (IPQualityScore)                                                                                                                                                                                                                                                                                            |
 
 ## Auth & billing
 
@@ -244,6 +244,7 @@ Distinct from the `*_CAP_USD` env-var caps above: some `feature_brakes` rows are
 - `NETCRAFT_REPORTER_EMAIL` — identity included in Netcraft submissions. Defaults to `brendan@askarthur.au`.
 - `URLSCAN_API_KEY` — urlscan.io API key. Powers Phase A.3 auto-scan + the clone-watch submit/recheck lanes. **Real quota, measured 2026-08-23: unlisted 1,000/day** (what we submit as), public 5,000, retrieve 10,000 — the "100/day" figure carried here for months was never verified and was wrong by 10x. Usage after v285 is ~275/day (submit 75 + recheck ~200).
 - `TYPESAFE_API_KEY` — TypeSafe Jev key for the clone-watch Jev shadow lane (v311) + `apps/web/scripts/backfill-jev-classifications.ts`. When unset the `jev-shadow` step skips every row as `no-key` (visible as `$0` `shopfront_clone_preclassify_jev_error` telemetry) and the backfill refuses to start. Store as a **Sensitive** var on Vercel.
+- `BRAND_OUTREACH_READINESS_OVERRIDE` — default unset (OFF). Read with `readBoolEnv` by the Brand Send Gate's `outreach` profile (`apps/web/lib/clone-watch/brand-send-gate.ts`): when `true`, a REAL founder-outreach send (`/api/admin/brand-outreach/send`) is let through while the readiness scorecard is not ready. Every use logs always-ship `brand_send_gate_override` and writes a `$0` `cost_telemetry` row (`feature='brand_outreach'`, `operation='readiness_override'`); if that row cannot be written the send is refused (`override_unrecorded`). Affects no other send path. Founder decision 2026-09-28; see [clone-watch-config § Brand Send Gate](../ops/clone-watch-config.md).
 - `WHOISDS_NRD_ZIP_URL` — optional override for the Layer 0 daily NRD source. Leave unset; computed deterministically from yesterday's UTC date.
 - `RESEND_FROM_EMAIL` — sender for Layers 3+4 brand-notification emails. Required for both the `notify-brand-prepare` auto-send path and the dashboard send route — both fail closed with `resend_from_email_unset` when missing. Recommended shape `"Ask Arthur <brendan@askarthur.au>"`; read via `readStringEnv` to defeat trailing-whitespace + DefinePlugin static-inlining (see [memory `feedback_inngest_auto_sync_silent_fail`](../../packages/utils/src/env.ts)).
 

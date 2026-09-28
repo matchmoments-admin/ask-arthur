@@ -4,7 +4,6 @@ import { render } from "@react-email/components";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
@@ -12,7 +11,7 @@ import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { html, joinHtml } from "@askarthur/utils/html";
-import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
+import { checkBrandSend, refusalStatus } from "@/lib/clone-watch/brand-send-gate";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -44,11 +43,11 @@ function periodLabel(periodMonth: string): string {
  *     (e.g. ours), regardless of the brand's real contact. This is the
  *     first-month "see it work" path: sending to ourselves carries no
  *     defamation/legal risk, so it does NOT require the #371 sign-off gate.
- *   • Otherwise → the real brand contact (recipient_email), gated by
- *     FF_BRAND_STEWARDSHIP_SEND (default OFF; #371 legal sign-off of the
- *     outreach copy is the precondition to flip it) AND by the readiness
- *     scorecard (#1237): ready for the last READINESS_REQUIRED_MONTHS closed
- *     months, fail-closed on a missing or unreadable scorecard.
+ *   • Otherwise → the real brand contact (recipient_email), through the Brand
+ *     Send Gate's "stewardship-real" profile: FF_BRAND_STEWARDSHIP_SEND
+ *     (default OFF; #371 legal sign-off is the precondition to flip it), the
+ *     readiness scorecard (#1237), the shopfront_clone_outreach cost brake,
+ *     unsubscribe / STOP, and a verified contact — all fail-closed.
  *
  * Idempotent: refuses if the row is already 'sent', and passes a stable Resend
  * idempotencyKey so a retry never double-sends. On Resend failure the row is
@@ -90,71 +89,29 @@ export async function POST(
   const recipient = isShadow ? shadow! : row.recipient_email;
 
   if (!isShadow) {
-    if (!featureFlags.brandStewardshipSend) {
+    // The Brand Send Gate (lib/clone-watch/brand-send-gate.ts, profile
+    // "stewardship-real"): #371 sign-off flag, readiness (#1237), the
+    // shopfront_clone_outreach brake, unsubscribe / STOP, verified contact.
+    // Fail closed on any read error. The shadow path above never reaches it.
+    const decision = await checkBrandSend("stewardship-real", sb, {
+      recipient: row.recipient_email as string | null,
+      brandKey: row.brand_key as string,
+    });
+    if (!decision.allowed) {
+      const first = decision.reasons[0];
+      // An opted-out recipient is a terminal outcome for this row, not an
+      // error: mark it skipped (as before) so it leaves the worklist.
+      if (first.code === "recipient_unsubscribed" || first.code === "recipient_suppressed") {
+        await sb
+          .from("brand_stewardship_reports")
+          .update({ status: "skipped", status_reason: first.code })
+          .eq("id", id)
+          .neq("status", "sent");
+        return NextResponse.json({ ok: true, status: "skipped", reason: first.code });
+      }
       return NextResponse.json(
-        { error: "send_disabled", detail: "FF_BRAND_STEWARDSHIP_SEND is OFF (pending #371 legal sign-off)" },
-        { status: 403 },
-      );
-    }
-    // Readiness gate (#1237, founder decision #1227): a REAL brand send also
-    // needs the last READINESS_REQUIRED_MONTHS closed months to read ready in
-    // clone_watch_readiness. Not ready, not computed, or unreadable → refused;
-    // the shadow path above is untouched and stays the only way to send.
-    const readiness = await readReadinessGate(sb);
-    if (!readiness.ready) {
-      return NextResponse.json(
-        {
-          error: "not_ready",
-          detail: `Clone Watch readiness scorecard is not ready for ${readiness.months.join(", ")} (${readiness.reason}). Real brand sends stay in shadow until it is — see /admin/clone-watch.`,
-        },
-        { status: 403 },
-      );
-    }
-    if (!recipient) {
-      return NextResponse.json(
-        { error: "no_recipient" },
-        { status: 422 },
-      );
-    }
-    // Unsubscribe-gate: honour an opt-out before any real send. Shadow sends
-    // (to ourselves) skip this — they're for our own validation.
-    const { data: unsub } = await sb
-      .from("brand_report_unsubscribes")
-      .select("email")
-      .eq("email", (recipient as string).toLowerCase())
-      .maybeSingle();
-    if (unsub) {
-      await sb
-        .from("brand_stewardship_reports")
-        .update({ status: "skipped", status_reason: "recipient_unsubscribed" })
-        .eq("id", id)
-        .neq("status", "sent");
-      return NextResponse.json({
-        ok: true,
-        status: "skipped",
-        reason: "recipient_unsubscribed",
-      });
-    }
-    // Verified-gate: a REAL-brand send requires an authoritatively-verified
-    // contact (known_brands.last_verified_at set, e.g. from the brand's own
-    // security.txt or a human check). Best-effort placeholder contacts (v179
-    // seed, last_verified_at NULL) can therefore ONLY ever reach the shadow
-    // inbox — never a real brand — until someone verifies the real address.
-    const { data: kb } = await sb
-      .from("known_brands")
-      .select("last_verified_at")
-      .eq("brand_key", row.brand_key as string)
-      .eq("security_contact_email", recipient as string)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!kb?.last_verified_at) {
-      return NextResponse.json(
-        {
-          error: "contact_unverified",
-          detail:
-            "Recipient contact is not verified (known_brands.last_verified_at is null). Verify the real security contact before sending to the brand.",
-        },
-        { status: 403 },
+        { error: first.code, detail: first.detail },
+        { status: refusalStatus(first) },
       );
     }
   }

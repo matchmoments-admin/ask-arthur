@@ -20,7 +20,10 @@ import {
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
-import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
+import {
+  createBrandSendGate,
+  type BrandSendDecision,
+} from "@/lib/clone-watch/brand-send-gate";
 import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
 /**
@@ -103,8 +106,8 @@ const MAX_CANDIDATES_PER_BATCH = 50;
 // it. 10 groups x 6 boundaries keeps a run inside a ~31m budget.
 const MAX_GROUPS_PER_RUN = 10;
 
-// inngest-finish-budget: 70 boundaries — 10 static (incl. #1237's
-// check-readiness) + 6 per-group steps
+// inngest-finish-budget: 70 boundaries — 10 static (incl. the Brand Send
+// Gate's check-auto-send-gate, which replaced #1237's check-readiness) + 6 per-group steps
 // (mint-batch-id/render/assign/mark-sent/record-sent/log-cost) x
 // MAX_GROUPS_PER_RUN (10). See #1074 for the batching fold.
 export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
@@ -243,17 +246,17 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       .slice(0, MAX_GROUPS_PER_RUN);
     const groupsDeferredForCap = Math.max(0, groups.length - cappedGroups.length);
 
-    // Auto-send needs the flag AND the readiness scorecard (#1237, founder
-    // decision #1227): ready for the last READINESS_REQUIRED_MONTHS closed
-    // months. Not ready / unreadable → the batches are still prepared, for
-    // manual approval (whose send route runs the same gate) — never sent.
-    const readiness = featureFlags.shopfrontCloneNotifyBrandAutoSend
-      ? await step.run("check-readiness", () => readReadinessGate(sb))
+    // Auto-send needs the flag AND the Brand Send Gate's "auto-send" profile
+    // for THIS group's recipient: flags, readiness (#1237), the brake, the
+    // brand_contact_directory cross-check and unsubscribe / STOP — the same
+    // conjunction a human-approved batch passes in the send route. One step
+    // for every group (one readiness + one brake read). A refused group is
+    // still prepared, for manual approval — never sent. Replaces the old
+    // `check-readiness` step one-for-one, so the boundary count is unchanged.
+    const autoSendFlag = featureFlags.shopfrontCloneNotifyBrandAutoSend;
+    const autoSendDecisions = autoSendFlag
+      ? await step.run("check-auto-send-gate", () => gateAutoSendGroups(sb, cappedGroups))
       : null;
-    const autoSend = resolveAutoSend(
-      featureFlags.shopfrontCloneNotifyBrandAutoSend,
-      readiness,
-    );
 
     let batchesPrepared = 0;
     let autoSent = 0;
@@ -262,6 +265,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     for (const group of cappedGroups) {
       try {
         const groupKey = `${group.brand}::${group.recipient}`;
+        const autoSend = resolveAutoSend(autoSendFlag, autoSendDecisions?.[groupKey]);
         const batchId = await step.run(
           `mint-batch-id:${groupKey}`,
           async () => crypto.randomUUID(),
@@ -462,7 +466,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       groups_skipped_cooldown: groupsSkippedCooldown,
       // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
       groups_deferred_for_cap: groupsDeferredForCap,
-      mode: autoSend ? "auto_send" : "manual_approval",
+      mode: autoSent > 0 ? "auto_send" : "manual_approval",
     });
 
     return {
@@ -473,7 +477,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       groups_skipped_cooldown: groupsSkippedCooldown,
       // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
       groups_deferred_for_cap: groupsDeferredForCap,
-      mode: autoSend ? "auto_send" : "manual_approval",
+      mode: autoSent > 0 ? "auto_send" : "manual_approval",
+      auto_send_refused: autoSendRefusals(autoSendDecisions),
     };
   }),
 );
@@ -500,15 +505,48 @@ export { urlscanEvidenceFromJsonb };
  * template gracefully handles the missing case.
  */
 /**
- * Auto-send only when the flag is on AND the readiness gate says ready. A null
- * or malformed gate (not read, or a replayed memo of another shape) is NOT
- * ready — this can only ever narrow auto-send, never widen it.
+ * Auto-send only when the flag is on AND the Brand Send Gate allowed this
+ * group. A null or malformed decision (not read, or a replayed memo of another
+ * shape) is NOT allowed — this can only ever narrow auto-send, never widen it.
  */
 export function resolveAutoSend(
   flag: boolean,
-  readiness: { ready?: unknown } | null | undefined,
+  decision: { allowed?: unknown } | null | undefined,
 ): boolean {
-  return flag === true && readiness?.ready === true;
+  return flag === true && decision?.allowed === true;
+}
+
+/**
+ * The "auto-send" profile for every group this run, keyed `brand::recipient`.
+ * One gate instance, so readiness and the brake are read once. Returns plain
+ * JSON (step.run memoises it).
+ */
+export async function gateAutoSendGroups(
+  sb: Parameters<typeof createBrandSendGate>[1],
+  groups: ReadonlyArray<Pick<BrandGroup, "brand" | "recipient">>,
+): Promise<Record<string, BrandSendDecision>> {
+  const gate = createBrandSendGate("auto-send", sb);
+  const out: Record<string, BrandSendDecision> = {};
+  for (const g of groups) {
+    out[`${g.brand}::${g.recipient}`] = await gate.check({
+      recipient: g.recipient,
+      brand: g.brand,
+    });
+  }
+  return out;
+}
+
+/** Refusal codes per group, for the run result (no addresses). */
+function autoSendRefusals(
+  decisions: Record<string, BrandSendDecision> | null,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const d of Object.values(decisions ?? {})) {
+    if (d.allowed) continue;
+    const code = d.reasons[0]?.code ?? "unknown";
+    counts[code] = (counts[code] ?? 0) + 1;
+  }
+  return counts;
 }
 
 export async function fetchUrlscanEvidence(
