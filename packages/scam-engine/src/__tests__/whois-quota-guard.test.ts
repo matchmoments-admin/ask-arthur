@@ -5,7 +5,7 @@ const m = vi.hoisted(() => ({
   error: null as { message: string } | null,
   queries: 0,
 }));
-vi.mock("../cost-log", () => ({ logCost: vi.fn() }));
+vi.mock("../cost-log", () => ({ logCost: vi.fn(async () => undefined) }));
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: () => ({
     from: () => {
@@ -21,6 +21,8 @@ vi.mock("@askarthur/supabase/server", () => ({
   }),
 }));
 
+import { logCost } from "../cost-log";
+import { lookupDomainRegistration } from "../domain-registration";
 import {
   WHOISJSON_MONTHLY_GUARD,
   WHOIS_HTTP_RETRY_MS,
@@ -41,6 +43,8 @@ beforeEach(() => {
   m.count = 0;
   m.error = null;
   m.queries = 0;
+  vi.mocked(logCost).mockReset();
+  vi.mocked(logCost).mockImplementation(async () => undefined);
   fetchMock.mockClear();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -73,22 +77,24 @@ describe("whoisjson monthly quota guard", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("defaults to interactive", async () => {
-    m.count = WHOISJSON_MONTHLY_GUARD.batch + 10;
-    await lookupWhois("x.shop");
+  it("interactive fails OPEN when the count can't be read (null count, no error)", async () => {
+    m.count = null;
+    const r = await lookupWhois("x.shop", { priority: "interactive" });
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(r.deferral).toBeUndefined();
   });
 
-  it("fails OPEN when the count can't be read (null count, no error)", async () => {
+  it("interactive fails OPEN on a count read error too", async () => {
     m.count = null;
-    await lookupWhois("x.shop", { priority: "batch" });
+    m.error = { message: "timeout" };
+    await lookupWhois("x.shop", { priority: "interactive" });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("caches the count and advances it locally, so the guard trips without re-querying", async () => {
     m.count = WHOISJSON_MONTHLY_GUARD.interactive - 1;
-    await lookupWhois("a.shop"); // 949 read, +1 locally → 950
-    await lookupWhois("b.shop"); // cached 950 → skipped
+    await lookupWhois("a.shop", { priority: "interactive" }); // 949 read, +1 locally → 950
+    await lookupWhois("b.shop", { priority: "interactive" }); // cached 950 → skipped
     expect(m.queries).toBe(1);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
@@ -219,5 +225,82 @@ describe("whoisScamUrlColumns", () => {
         "T",
       ),
     ).toEqual({});
+  });
+});
+
+/**
+ * PR-F — the guard's count is durable, batch fails closed on an unreadable
+ * count, and priority cannot be forgotten.
+ *
+ * Go-red (2026-09-28, each reverted → failed → restored):
+ *   - "the counted row is written before the lookup returns": put `void` back
+ *     on the `logCost` call in whois.ts → the lookup settles while the insert
+ *     is still pending, and `settled` reads true.
+ *   - "batch fails CLOSED on an unreadable count": delete the
+ *     `used === null && priority === "batch"` branch → fetch is called and
+ *     `deferral` is undefined.
+ *   - "priority is required" (a TYPE guard — `pnpm --filter
+ *     @askarthur/scam-engine typecheck` is the runner): make `priority`
+ *     optional again on either function → the `@ts-expect-error` lines below
+ *     become unused and tsc fails with TS2578.
+ */
+describe("whoisjson quota count — PR-F", () => {
+  it("the counted row is written before the lookup returns (awaited, not fire-and-forget)", async () => {
+    let release!: () => void;
+    vi.mocked(logCost).mockImplementation(
+      () => new Promise<void>((r) => (release = r)),
+    );
+    let settled = false;
+    const p = lookupWhois("x.shop", { priority: "batch" }).then((r) => {
+      settled = true;
+      return r;
+    });
+    // Let every microtask/macrotask ahead of the insert run.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(logCost).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: "whois", provider: "whoisjson" }),
+    );
+    expect(settled).toBe(false);
+    release();
+    const r = await p;
+    expect(settled).toBe(true);
+    expect(r.registrar).toBe("NameCheap, Inc.");
+  });
+
+  it("batch fails CLOSED on an unreadable count: quota_unknown, no request, retry in 24h", async () => {
+    m.count = null;
+    const before = Date.now();
+    const r = await lookupWhois("x.shop", { priority: "batch" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(r.registrar).toBeNull();
+    expect(r.deferral?.reason).toBe("quota_unknown");
+    expect(r.deferral?.status).toBeUndefined();
+    const at = new Date(r.deferral!.retryAfter).getTime();
+    expect(at - before).toBeGreaterThanOrEqual(WHOIS_HTTP_RETRY_MS - 1000);
+    expect(at - before).toBeLessThanOrEqual(WHOIS_HTTP_RETRY_MS + 5000);
+  });
+
+  it("batch fails CLOSED on a count read error as well", async () => {
+    m.count = null;
+    m.error = { message: "timeout" };
+    const r = await lookupWhois("x.shop", { priority: "batch" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(r.deferral?.reason).toBe("quota_unknown");
+  });
+
+  it("priority is required on lookupWhois and lookupDomainRegistration (type guard)", () => {
+    // Never invoked — the assertion is the compile. tsc fails (TS2578) if
+    // either `@ts-expect-error` stops being needed.
+    const typeOnly = () => {
+      // @ts-expect-error — priority is required: no default share for a caller that forgot it
+      void lookupWhois("x.shop");
+      // @ts-expect-error — the opts object itself is required too
+      void lookupWhois("x.shop", {});
+      // @ts-expect-error — lookupDomainRegistration used to pass `undefined` through
+      void lookupDomainRegistration("x.shop");
+      // @ts-expect-error — the opts object itself is required too
+      void lookupDomainRegistration("x.shop", {});
+    };
+    expect(typeof typeOnly).toBe("function");
   });
 });

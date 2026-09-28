@@ -64,7 +64,11 @@ export type LaneProblemKind =
   | "quota_exhausted"
   /** Every recent run was held by the Lane's OWN per-run cap, and the backlog
    *  it leaves is not draining — demand has outgrown the cap (#1231). */
-  | "cap_bound";
+  | "cap_bound"
+  /** The Lane is PARKED because its flags were dark, and its flag gate is now
+   *  open — so it will never run on schedule, and (being parked) it cannot
+   *  page `absent`. Un-park it or turn the flags back off. */
+  | "parked_enabled";
 
 export interface LaneProblem {
   lane: string;
@@ -113,12 +117,24 @@ interface Shape<L extends LaneId> {
   crons?: readonly string[];
   /**
    * PARKED (#1230): the Lane does nothing on its schedule today, so it runs
-   * only on its manual-trigger event. The value says why. `laneCrons()`
-   * returns no schedule and the digest expects no row, so a parked Lane never
-   * pages "absent" and burns no Inngest runs. Un-parking is deleting this one
-   * field — `crons` keeps the schedule to restore (one declaration, as ever).
+   * only on its manual-trigger event. `laneCrons()` returns no schedule and
+   * the digest expects no row, so a parked Lane never pages "absent" and
+   * burns no Inngest runs. Un-parking is deleting this one field — `crons`
+   * keeps the schedule to restore (one declaration, as ever). This is the ONE
+   * parking mechanism for roster Lanes: a Lane is never parked by leaving
+   * `...laneCrons()` out of its trigger array (laneParking.test.ts).
+   *
+   * `while` says which state the park assumes, so the digest can tell a
+   * forgotten un-park from a deliberate one:
+   *   - `"flags_dark"` — parked because its flags are off. If its flag gate
+   *     OPENS while still parked, the Lane will never run on schedule and
+   *     cannot page `absent` (∞ window), so the digest reports
+   *     `parked_enabled` instead: the flag-flip-without-un-park trap.
+   *   - `"gate_open"` — parked deliberately while its gate is ON (the schedule
+   *     does nothing useful today: brand contact on hold, no input). An open
+   *     gate is the expected state, so nothing is reported.
    */
-  parked?: string;
+  parked?: { why: string; while: "flags_dark" | "gate_open" };
   /**
    * ISO instant before which a MISSING row is not `absent` — a new Lane whose
    * first scheduled run is still ahead (a monthly one would otherwise page
@@ -369,8 +385,11 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-notify-brand-prepare": {
     crons: ["30 9 * * *"],
-    parked:
-      "no brand contact until the #1237 readiness gate holds (#1227); 100% no_unbatched_rows",
+    parked: {
+      why: "no brand contact until the #1237 readiness gate holds (#1227); 100% no_unbatched_rows",
+      // Its gate was open when parked (it wrote Outcome Rows to 2026-09-25).
+      while: "gate_open",
+    },
     flags: ["shopfrontCloneOutreach", "shopfrontCloneNotifyBrand"],
     consecutive: 1,
     shape: "every prepared group failed",
@@ -379,9 +398,13 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-reemergence-monitor": {
     crons: ["45 6 * * *"],
-    // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
-    // gate turns on without the cron restored, the lane pages `absent` — by
-    // design; clone-watch-config.md "Flipping a PARKED lane ON".
+    // Parked 2026-09-24 (event-only while dark). If this gate opens while
+    // still parked, the digest reports `parked_enabled`; clone-watch-config.md
+    // "Flipping a PARKED lane ON".
+    parked: {
+      why: "FF_CLONE_ENFORCEMENT + FF_CLONE_REEMERGENCE_MONITOR dark in prod; a scheduled tick only early-returned (fleet audit 2026-09-16)",
+      while: "flags_dark",
+    },
     flags: ["cloneEnforcement", "cloneReemergenceMonitor"],
     consecutive: 1,
     shape: "(absence only)",
@@ -389,9 +412,13 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-weekly-digest": {
     crons: ["0 10 * * 0"],
-    // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
-    // gate turns on without the cron restored, the lane pages `absent` — by
-    // design; clone-watch-config.md "Flipping a PARKED lane ON".
+    // Parked 2026-09-24 (event-only while dark). If this gate opens while
+    // still parked, the digest reports `parked_enabled`; clone-watch-config.md
+    // "Flipping a PARKED lane ON".
+    parked: {
+      why: "FF_SHOPFRONT_CLONE_WEEKLY_DIGEST dark in prod; the weekly tick only early-returned (fleet audit 2026-09-16)",
+      while: "flags_dark",
+    },
     flags: ["shopfrontCloneOutreach", "shopfrontCloneWeeklyDigest"],
     consecutive: 1,
     shape: "(absence only)",
@@ -399,9 +426,13 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-enforcement-execute": {
     crons: ["15 */3 * * *"],
-    // PARKED (event-only, 2026-09-24): the cron is removed while dark. If this
-    // gate turns on without the cron restored, the lane pages `absent` — by
-    // design; clone-watch-config.md "Flipping a PARKED lane ON".
+    // Parked 2026-09-24 (event-only while dark). If this gate opens while
+    // still parked, the digest reports `parked_enabled`; clone-watch-config.md
+    // "Flipping a PARKED lane ON".
+    parked: {
+      why: "FF_CLONE_ENFORCEMENT dark in prod; 56/56 scheduled ticks early-returned (fleet audit 2026-09-16)",
+      while: "flags_dark",
+    },
     flags: ["cloneEnforcement", "cloneEnforceAutoBlocklist"],
     consecutive: 1,
     // A fully-deduped batch legitimately enqueues 0, so there is no honest
@@ -456,7 +487,11 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
   },
   "shopfront-clone-fp-cluster-digest": {
     crons: ["30 9 * * 0"],
-    parked: "no FP-cluster input since 2026-09-04; triage is paused with brand contact (#1227)",
+    parked: {
+      why: "no FP-cluster input since 2026-09-04; triage is paused with brand contact (#1227)",
+      // Its gate (shopfrontCloneWatch) is the live feature's own flag.
+      while: "gate_open",
+    },
     flags: ["shopfrontCloneWatch"],
     consecutive: 1,
     shape: "(absence only)",
@@ -688,6 +723,18 @@ export function classifyLaneHealth(
     const key = LANES[lane];
     const shape = LANE_SHAPES[lane];
     if (!laneGate(lane).ok) continue;
+
+    // Gate open on a Lane parked BECAUSE its flags were dark: nothing will
+    // run it on schedule and its infinite window can never read `absent`, so
+    // this is the only line that says so. A `gate_open` park is deliberate.
+    if (shape.parked?.while === "flags_dark") {
+      problems.push({
+        lane,
+        kind: "parked_enabled",
+        detail: `flags ON but parked (${shape.parked.why}) — no scheduled run will happen; un-park (delete LANE_SHAPES.parked, deploy, PUT /api/inngest) or turn the flags off`,
+      });
+      continue;
+    }
     const mine = rowsFor(rows, key.feature, key.operation);
 
     // Brake FIRST: a braked lane skips without writing a row, so judging

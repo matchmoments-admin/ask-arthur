@@ -12,7 +12,7 @@ import {
   type UrlReportRequest,
 } from "@/lib/onward/url-blocklist-report";
 import { LANES, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
-import { laneGate } from "@/lib/laneHealth";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch enforcement — EXECUTE step: a PRODUCER into the onward ledger.
@@ -81,14 +81,14 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
     // 7 boundaries × 30s + 60s slack = 4.5m; 6m leaves queue headroom.
     timeouts: { finish: "6m" },
   },
-  // Manual-trigger only (no cron). FF_CLONE_ENFORCEMENT is dark in prod, so a
-  // scheduled tick just burned 8 executions/day to early-return (fleet audit
-  // 2026-09-16: 56/56 dark). Invoke on demand via the
-  // `shopfront/clone.enforcement-execute.manual-trigger.v1` event. **At launch,
-  // restore the sweep by re-adding
-  // `...laneCrons("shopfront-clone-enforcement-execute")`** (every 3h at :15,
-  // declared in LANE_SHAPES) alongside this event trigger.
-  { event: "shopfront/clone.enforcement-execute.manual-trigger.v1" },
+  [
+    // PARKED via LANE_SHAPES.parked (FF_CLONE_ENFORCEMENT dark in prod; fleet
+    // audit 2026-09-16: 56/56 ticks early-returned): laneCrons() is empty
+    // while parked, so the event below is the only trigger. Un-park = delete
+    // `parked` in LANE_SHAPES, deploy, PUT /api/inngest.
+    ...laneCrons("shopfront-clone-enforcement-execute"),
+    { event: "shopfront/clone.enforcement-execute.manual-trigger.v1" },
+  ],
   withAxiomLogging(
     { fnId: "shopfront-clone-enforcement-execute" },
     async ({ step, runId }) => {

@@ -53,7 +53,7 @@ const reg = (over: Partial<DomainRegistration> = {}): DomainRegistration => ({
 });
 
 const deferredReg = (
-  reason: "quota_deferred" | "http_error" | "not_configured",
+  reason: "quota_deferred" | "quota_unknown" | "http_error" | "not_configured",
   retryAfter = "2026-11-01T00:00:00.000Z",
 ) => reg({ source: "deferred", deferralReason: reason, retryAfter });
 
@@ -157,6 +157,23 @@ describe("planWhoisReoffer", () => {
       expect(p.verdict).toBe("redeferred");
       prev = p.whois;
     }
+  });
+
+  // PR-F: an unreadable monthly count holds a batch lookup (whois.ts fails
+  // closed). That is our telemetry, not the domain — never a strike.
+  it("quota_unknown is never a strike, and keeps the lookup's own retryAfter", () => {
+    let prev: WhoisBlock | null = PREV;
+    for (let i = 0; i < WHOIS_HTTP_ERROR_MAX_DEFERRALS + 1; i++) {
+      const p = planWhoisReoffer(
+        prev,
+        deferredReg("quota_unknown", "2026-10-02T13:00:00.000Z"),
+        NOW,
+      );
+      expect(p.verdict).toBe("redeferred");
+      expect(p.retryAfter).toBe("2026-10-02T13:00:00.000Z");
+      prev = p.whois;
+    }
+    expect(prev?.httpErrorDeferrals).toBeUndefined();
   });
 
   it("a thrown lookup (null) is an http_error deferral 24h out", () => {

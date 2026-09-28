@@ -2,8 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 // Every lane's gate reads a flag; the shape tests below judge lanes as if
 // they are ON (production), and the enabled() test flips flags explicitly.
+// EXCEPT the lane-specific flags of the three `flags_dark` parked lanes, which
+// are OFF as in prod — with them ON those lanes report `parked_enabled`
+// (PR-F), which is its own describe block below.
 vi.mock("@askarthur/utils/feature-flags", () => ({
-  featureFlags: new Proxy({} as Record<string, boolean>, {
+  featureFlags: new Proxy({
+    cloneReemergenceMonitor: false,
+    shopfrontCloneWeeklyDigest: false,
+    cloneEnforceAutoBlocklist: false,
+  } as Record<string, boolean>, {
     get: (t, k: string) => (k in t ? t[k] : true),
     set: (t, k: string, v: boolean) => ((t[k] = v), true),
   }),
@@ -453,7 +460,7 @@ describe("classifyLaneHealth", () => {
   });
 
   it("a PARKED lane has no schedule and never pages absent (#1230)", () => {
-    expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].parked).toBeTruthy();
+    expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].parked?.why).toBeTruthy();
     expect(laneCrons("shopfront-clone-fp-cluster-digest")).toEqual([]);
     expect(laneExpectEvery("shopfront-clone-fp-cluster-digest")).toBe(Number.POSITIVE_INFINITY);
     const problems = classifyLaneHealth(
@@ -758,21 +765,98 @@ describe("classifyLaneHealth — flag gate", () => {
   it("skips a disabled lane, flags it absent once enabled", async () => {
     const { featureFlags } = await import("@askarthur/utils/feature-flags");
     const flags = featureFlags as unknown as Record<string, boolean>;
-    const saved = { e: flags.cloneEnforcement, r: flags.cloneReemergenceMonitor };
+    const saved = flags.cloneNetcraftIssue;
     try {
-      flags.cloneEnforcement = false;
-      flags.cloneReemergenceMonitor = false;
+      flags.cloneNetcraftIssue = false;
       expect(
-        classifyLaneHealth([]).some((p) => p.lane === "shopfront-clone-reemergence-monitor"),
+        classifyLaneHealth([]).some((p) => p.lane === "shopfront-clone-netcraft-issue"),
       ).toBe(false);
-      flags.cloneEnforcement = true;
-      flags.cloneReemergenceMonitor = true;
+      flags.cloneNetcraftIssue = true;
       expect(
-        classifyLaneHealth([]).find((p) => p.lane === "shopfront-clone-reemergence-monitor")?.kind,
+        classifyLaneHealth([]).find((p) => p.lane === "shopfront-clone-netcraft-issue")?.kind,
       ).toBe("absent");
     } finally {
-      flags.cloneEnforcement = saved.e;
-      flags.cloneReemergenceMonitor = saved.r;
+      flags.cloneNetcraftIssue = saved;
+    }
+  });
+});
+
+/**
+ * PR-F — ONE parking mechanism. reemergence-monitor, weekly-digest and
+ * enforcement-execute used to be parked only by a comment (their trigger
+ * omitted `...laneCrons()`), while `LANE_SHAPES.parked` was the other
+ * mechanism. A `parked`-field lane is invisible to `absent` (∞ window), so a
+ * flag flipped ON without un-parking it would never run on schedule and
+ * nothing would say so. It now reports `parked_enabled`.
+ *
+ * Go-red (2026-09-28, each reverted → failed → restored):
+ *   - delete the `shape.parked?.while === "flags_dark"` block in
+ *     classifyLaneHealth → "reports parked_enabled" fails (no problem at all:
+ *     the ∞ window swallows it — the exact silent trap).
+ *   - flip reemergence-monitor's `while` to "gate_open" → its "is
+ *     field-parked" and "reports parked_enabled" cases fail.
+ *   - drop `parked` from weekly-digest → its "is field-parked" case fails
+ *     (laneCrons returns its Sunday schedule) and it pages `absent`, not
+ *     `parked_enabled`.
+ *   - re-type `{ cron: "0 10 * * 0" }` into weekly-digest's trigger → the
+ *     source-scan case fails.
+ */
+describe("parked lanes — one mechanism (PR-F)", () => {
+  const DARK_PARKED = [
+    ["shopfront-clone-reemergence-monitor", "cloneReemergenceMonitor"],
+    ["shopfront-clone-weekly-digest", "shopfrontCloneWeeklyDigest"],
+    ["shopfront-clone-enforcement-execute", "cloneEnforceAutoBlocklist"],
+  ] as const;
+
+  it.each(DARK_PARKED)("%s is field-parked (flags_dark): no cron, ∞ window, restore schedule kept", (lane) => {
+    expect(LANE_SHAPES[lane].parked?.while).toBe("flags_dark");
+    expect(laneCrons(lane)).toEqual([]);
+    expect(laneExpectEvery(lane)).toBe(Number.POSITIVE_INFINITY);
+    expect(LANE_SHAPES[lane].crons?.length).toBeGreaterThan(0);
+  });
+
+  it.each(DARK_PARKED)("%s reports parked_enabled when its gate opens while parked", async (lane, flag) => {
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
+    const flags = featureFlags as unknown as Record<string, boolean>;
+    const saved = flags[flag];
+    try {
+      // Dark (prod): nothing reported, whatever the rows say.
+      expect(classifyLaneHealth([], { now: NOW }).filter((p) => p.lane === lane)).toEqual([]);
+      flags[flag] = true;
+      const mine = classifyLaneHealth([], { now: NOW }).filter((p) => p.lane === lane);
+      expect(mine.map((p) => p.kind)).toEqual(["parked_enabled"]);
+      expect(mine[0]!.detail).toContain("un-park");
+    } finally {
+      flags[flag] = saved;
+    }
+  });
+
+  it("a gate_open park is deliberate — its open gate reports nothing", () => {
+    for (const lane of [
+      "shopfront-clone-notify-brand-prepare",
+      "shopfront-clone-fp-cluster-digest",
+    ] as const) {
+      expect(LANE_SHAPES[lane].parked?.while).toBe("gate_open");
+      expect(classifyLaneHealth([], { now: NOW }).filter((p) => p.lane === lane)).toEqual([]);
+    }
+  });
+
+  it("the three converted functions register no cron while parked and read their schedule only via laneCrons", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = join(process.cwd(), "app/api/inngest/functions");
+    for (const [file, lane] of [
+      ["clone-watch-reemergence-monitor.ts", "shopfront-clone-reemergence-monitor"],
+      ["clone-watch-weekly-digest.ts", "shopfront-clone-weekly-digest"],
+      ["clone-watch-enforcement-execute.ts", "shopfront-clone-enforcement-execute"],
+    ] as const) {
+      const src = readFileSync(join(dir, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+      // The trigger reads the ONE declaration — un-parking is a LANE_SHAPES edit.
+      expect(src, file).toContain(`...laneCrons("${lane}")`);
+      // No literal schedule re-typed beside it.
+      expect(src.match(/\bcron:\s*["']/g) ?? [], file).toEqual([]);
     }
   });
 });

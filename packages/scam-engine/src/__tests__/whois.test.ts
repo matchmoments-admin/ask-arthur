@@ -40,13 +40,13 @@ describe("lookupWhois — whoisjson object shape", () => {
   });
 
   it("extracts registrar name + abuse email from the registrar object", async () => {
-    const r = await lookupWhois("stakebank.org");
+    const r = await lookupWhois("stakebank.org", { priority: "interactive" });
     expect(r.registrar).toBe("NameCheap, Inc.");
     expect(r.registrarAbuseEmail).toBe("abuse@namecheap.com");
   });
 
   it("reads nameservers from the `nameserver` field (lowercased)", async () => {
-    const r = await lookupWhois("stakebank.org");
+    const r = await lookupWhois("stakebank.org", { priority: "interactive" });
     expect(r.nameServers).toEqual([
       "arnold.ns.cloudflare.com",
       "desiree.ns.cloudflare.com",
@@ -54,19 +54,19 @@ describe("lookupWhois — whoisjson object shape", () => {
   });
 
   it("parses the created date", async () => {
-    const r = await lookupWhois("stakebank.org");
+    const r = await lookupWhois("stakebank.org", { priority: "interactive" });
     expect(r.createdDate).toBe("2026-06-02");
   });
 
   it("returns the empty result (incl. registrarAbuseEmail:null) with no API key", async () => {
     delete process.env.WHOIS_API_KEY;
-    const r = await lookupWhois("x.com");
+    const r = await lookupWhois("x.com", { priority: "interactive" });
     expect(r.registrar).toBeNull();
     expect(r.registrarAbuseEmail).toBeNull();
   });
 
   it("logs one billable cost row (whois/whoisjson, $0) per successful lookup", async () => {
-    await lookupWhois("stakebank.org");
+    await lookupWhois("stakebank.org", { priority: "interactive" });
     expect(logCost).toHaveBeenCalledTimes(1);
     expect(logCost).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -80,7 +80,7 @@ describe("lookupWhois — whoisjson object shape", () => {
 
   it("does NOT log cost when the API key is missing (no upstream call)", async () => {
     delete process.env.WHOIS_API_KEY;
-    await lookupWhois("x.com");
+    await lookupWhois("x.com", { priority: "interactive" });
     expect(logCost).not.toHaveBeenCalled();
   });
 
@@ -89,7 +89,7 @@ describe("lookupWhois — whoisjson object shape", () => {
       "fetch",
       vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })),
     );
-    await lookupWhois("ratelimited.example");
+    await lookupWhois("ratelimited.example", { priority: "interactive" });
     expect(logCost).not.toHaveBeenCalled();
   });
 });

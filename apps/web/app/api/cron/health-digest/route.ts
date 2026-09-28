@@ -83,6 +83,7 @@ const LANE_PROBLEM_ORDER = [
   "brake_unknown",
   "quota_exhausted",
   "absent",
+  "parked_enabled",
   "braked",
   "silent_zero",
   "cap_bound",
@@ -158,6 +159,7 @@ function buildMessage(
       quota_exhausted: html`⛔ <b>Clone-watch lane stopped by a vendor quota:</b>`,
       silent_zero: html`🕳️ <b>Clone-watch lane running but doing nothing:</b>`,
       cap_bound: html`📈 <b>Clone-watch lane held by its own cap (demand outgrew it):</b>`,
+      parked_enabled: html`🅿️ <b>Clone-watch lane flags ON but still parked (no scheduled run will happen):</b>`,
     };
     for (const kind of LANE_PROBLEM_ORDER) {
       const group = laneProblems.filter((p) => p.kind === kind);

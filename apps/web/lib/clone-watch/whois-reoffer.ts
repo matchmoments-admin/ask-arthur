@@ -24,7 +24,9 @@
  *   - deferred again                   → column pushed to the new retryAfter
  *     (quota_deferred — the guard OR a whoisjson 429 — and not_configured
  *     retry on the 1st of next month and are never a strike: a 429 is quota
- *     exhaustion, not the domain refusing)
+ *     exhaustion, not the domain refusing); quota_unknown (the monthly
+ *     count was unreadable, so the batch guard held the lookup — whois.ts)
+ *     retries in 24h and is never a strike either
  *   - http_error for the Nth time      → column cleared (abandoned) — a domain
  *     whoisjson keeps refusing must not cost a lookup a day forever; non-200s
  *     are NOT counted by the monthly guard (whois.ts), so an unbounded retry
