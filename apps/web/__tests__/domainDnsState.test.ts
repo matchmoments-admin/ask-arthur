@@ -29,14 +29,21 @@ import BASELINE from "./fixtures/domain-dns-baseline.json";
  * classifySubmitPrecheck, stockStatus with its own parking list and hold
  * detector, dnsFingerprint + isOpaqueProbe with their own error codes and IPv6
  * parser) over `fixtures/domain-dns-fixtures.ts`. Every reading here must
- * equal it, except the ONE intended change, listed in SWEEP_DELTAS: the
- * weaponised sweep's stored verdict for a name that exists without a proven
- * address is `no_host`, no longer `present`.
+ * equal it, except the weaponised sweep's stored verdict, whose intended
+ * changes are listed in SWEEP_DELTAS — all from "present means an address":
+ *   1. a name that exists and ANSWERED with no address is `no_host`, no
+ *      longer `present` (the defect);
+ *   2. A failed but AAAA has a record is `present`, no longer `inconclusive`
+ *      (an address exists — review L1 of #1284);
+ *   3. A NODATA with the AAAA read failed is `inconclusive`, no longer
+ *      `present` — the address was never checked (review L2 of #1284).
+ * The baseline was re-captured from 7794cf03 when `a_fail_aaaa_record` was
+ * added; every earlier fixture's entry came back identical.
  *
  * GO-RED (2026-09-28; each: edit the named line, run this file, see the
  * named tests fail, restore):
  *   - livenessVerdictOf: return "present" whenever gone === false (drop the
- *     hasAddress bar) → "the sweep verdict" (4 fixtures), "NS without an
+ *     hasAddress bar) → "the sweep verdict" (the no_host fixtures), "NS without an
  *     address reads no_host EVERYWHERE" and "the weaponised sweep sends
  *     verdict…" fail (6).
  *   - readDomainDnsState: presence "resolves" on gone === false instead of
@@ -53,13 +60,21 @@ import BASELINE from "./fixtures/domain-dns-baseline.json";
  *     fails (1).
  *   - probeChunk: dead-dormancy exit on gone === false instead of an address
  *     → "only an address exits dead-dormancy" fails (1).
+ * Review round (#1284), each also red then restored:
+ *   - L2 reverted (`no_host` on gone === false alone, dropping the
+ *     hasAddress === false bar) → "A NODATA + AAAA timeout is inconclusive",
+ *     "every presence maps to exactly the verdicts…" and "the sweep verdict"
+ *     fail (3).
+ *   - L1 reverted (`present` only when also gone === false) → "every presence
+ *     maps…" and "the sweep verdict" (a_fail_aaaa_record) fail (2).
  */
 
 const SWEEP_DELTAS: Record<string, string> = {
   ns_no_address: "no_host",
   ns_no_address_empty: "no_host",
   parked_no_address: "no_host",
-  a_nodata_aaaa_timeout: "no_host",
+  a_fail_aaaa_record: "present",
+  a_nodata_aaaa_timeout: "inconclusive",
 };
 
 type Baseline = Record<
@@ -116,7 +131,7 @@ describe.each(names)("%s", (name) => {
     }
   });
 
-  it("the sweep verdict (the one intended change)", () => {
+  it("the sweep verdict (intended changes: SWEEP_DELTAS)", () => {
     expect(livenessVerdictOf(state)).toBe(SWEEP_DELTAS[name] ?? was.sweepVerdict);
   });
 });
@@ -130,6 +145,30 @@ describe("NS without an address reads no_host EVERYWHERE", () => {
     expect(submitPrecheckOf(state)).toBe("no_host");
     expect(livenessVerdictOf(state)).toBe("no_host");
     expect(state.hasAddress).toBe(false); // re-emergence: not back
+  });
+});
+
+describe("no_host needs the address ANSWERED, not merely unproven (review L2)", () => {
+  it("A NODATA + AAAA timeout is inconclusive, never no_host", () => {
+    // An IPv6-only phish whose AAAA read flaked: the name exists (gone false)
+    // but the address was never checked (hasAddress null).
+    const state = readDomainDnsState(DNS_FIXTURES.a_nodata_aaaa_timeout!);
+    expect([state.gone, state.hasAddress]).toEqual([false, null]);
+    expect(livenessVerdictOf(state)).toBe("inconclusive");
+  });
+  it("every presence maps to exactly the verdicts its doc comment lists", () => {
+    const seen = new Set<string>();
+    for (const dns of Object.values(DNS_FIXTURES)) {
+      const s = readDomainDnsState(dns);
+      seen.add(`${s.presence}->${livenessVerdictOf(s)}`);
+    }
+    expect([...seen].sort()).toEqual([
+      "gone->gone",
+      "no_host->inconclusive", // A+AAAA NXDOMAIN, NS failed
+      "no_host->no_host",
+      "resolves->present",
+      "unverified->inconclusive",
+    ]);
   });
 });
 

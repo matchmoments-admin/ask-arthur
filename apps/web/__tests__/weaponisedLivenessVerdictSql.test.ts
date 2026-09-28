@@ -28,6 +28,8 @@ import { isRegistryHold } from "@/lib/clone-watch/liveness";
  *     string falls back…" fails.
  *   - `r.hold_in` dropped from the on_hold COALESCE → "the TS hold wins over
  *     the stored-RDAP regex" fails (registrar_hold).
+ *   - an 'inconclusive' outcome clearing offline_since (review round #1284)
+ *     → "a TS inconclusive (gone:false, address unchecked) only stamps" fails.
  *   - 'no_host' removed from the CHECK → "stays dormant" and "stores no_host"
  *     fail with 23514.
  */
@@ -219,6 +221,35 @@ describe("v341 applies the TS verdict (new caller)", () => {
       )
     ).rows[0]!.n;
     expect(n).toBe(0);
+  });
+
+  it("a TS inconclusive (gone:false, address unchecked) only stamps — exactly v329's gone:null", async () => {
+    // Review L2: A NODATA + AAAA timeout. The TS sends gone:false (the name
+    // exists) with verdict inconclusive; v341 must treat it as v329 treated a
+    // null read — stamp, keep offline_since and state, never count it present.
+    const since = ago(60);
+    const seedRows: Seed[] = [
+      { id: 1, offlineSince: since },
+      { id: 2, lifecycle: "dormant" },
+    ];
+    await seed(v341, seedRows);
+    await seed(v329, seedRows);
+    const after = await record(v341, [
+      { id: 1, gone: false, verdict: "inconclusive", hold: false },
+      { id: 2, gone: false, verdict: "inconclusive", hold: false },
+    ]);
+    const before = await record(v329, [
+      { id: 1, gone: null },
+      { id: 2, gone: null },
+    ]);
+    const { no_host, ...rest } = after;
+    expect(rest).toEqual(before);
+    expect(no_host).toBe(0);
+    expect(await rows(v341)).toEqual(await rows(v329));
+    expect((await rows(v341)).map((r) => [r.offline, r.liveness_last_verdict])).toEqual([
+      [true, "inconclusive"],
+      [true, "inconclusive"],
+    ]);
   });
 
   it("the TS hold wins over the stored-RDAP regex, which stays the fallback", async () => {

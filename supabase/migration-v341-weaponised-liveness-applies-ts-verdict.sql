@@ -16,7 +16,7 @@
 -- WHAT. The TS sweep now reads ONE DomainDnsState per name
 -- (apps/web/lib/clone-watch/liveness.ts) and sends, per read:
 --   verdict — 'present' (resolves to an address) | 'no_host' (the name answers
---             but no address was proven) | 'gone' (NXDOMAIN) | 'inconclusive'
+--             and A/AAAA answered empty) | 'gone' (NXDOMAIN) | 'inconclusive'
 --   gone    — unchanged (the v329 body's only input)
 --   hold    — the one TS registry-hold rule (isRegistryHold) over the stored
 --             RDAP statuses, which list_weaponised_for_liveness now returns
@@ -59,7 +59,7 @@ ALTER TABLE public.shopfront_clone_alerts
          OR liveness_last_verdict IN ('present', 'no_host', 'gone', 'inconclusive'));
 
 COMMENT ON COLUMN public.shopfront_clone_alerts.liveness_last_verdict IS
-  'v329, v341. The latest DNS liveness read of this alert by the reconcile sweep, as the TS Domain DNS State reads it (liveness.ts livenessVerdictOf): present (resolves to an A/AAAA address) / no_host (the name exists but no address was proven, e.g. NS without A/AAAA — read present before v341) / gone (NXDOMAIN) / inconclusive (the resolver proved nothing). NULL = never read.';
+  'v329, v341. The latest DNS liveness read of this alert by the reconcile sweep, as the TS Domain DNS State reads it (liveness.ts livenessVerdictOf): present (resolves to an A/AAAA address) / no_host (the name exists and A/AAAA answered empty, e.g. NS-only — read present before v341; an address lookup that FAILED is inconclusive) / gone (NXDOMAIN) / inconclusive (the resolver proved nothing). NULL = never read.';
 
 -- ── 2. The worklist returns the stored RDAP statuses ──────────────────────
 -- Live body + one trailing column. whois_statuses is always a jsonb array

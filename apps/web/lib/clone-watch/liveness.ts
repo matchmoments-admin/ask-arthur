@@ -403,25 +403,35 @@ export function readDomainDnsState(
  *                  that brings a dormant clone back, and the only one
  *                  `stranded_live` counts — the same bar as the re-emergence
  *                  monitor, month-end stock and the v326 dead-dormancy exit.
- *   no_host      — the name EXISTS (gone false) but no address was proven:
- *                  NS-only zones, a pulled A record. Before v341 this was
- *                  `present`. Not gone, so the NXDOMAIN clock resets.
+ *   no_host      — the name EXISTS (gone false) AND both address lookups
+ *                  ANSWERED with no address (hasAddress false): NS-only
+ *                  zones, a pulled A record. Before v341 this was `present`.
+ *                  Not gone, so the NXDOMAIN clock resets.
  *   gone         — NXDOMAIN on A and NS (gone true). Starts / confirms the
  *                  dormancy clock.
- *   inconclusive — gone null and no address proven: the resolver proved
- *                  nothing. Only stamps.
+ *   inconclusive — everything else: the resolver did not prove the answer.
+ *                  Only stamps (v341 applies it exactly as v329 did).
  *
- * The dormancy ENTRY clock is therefore exactly v329's (it keys on `gone`);
- * only the address bar changed. It differs from `presence` on one edge: A and
- * AAAA NXDOMAIN with an NS failure is presence `no_host` (month-end stock's
- * reading, unchanged) but verdict `inconclusive` (v329's, unchanged).
+ * The dormancy ENTRY clock is v329's (it keys on `gone`). Where the verdict
+ * differs from `presence`, and from what v329 stored (pinned in
+ * domainDnsState.test.ts SWEEP_DELTAS / the presence cases):
+ *   - A and AAAA NXDOMAIN, NS failed: presence `no_host` (month-end stock's
+ *     reading), verdict `inconclusive` (gone null — v329's, unchanged).
+ *   - A NODATA, AAAA timed out: presence `unverified`, verdict `inconclusive`
+ *     (v329 stored `present`). The address was never checked, so an IPv6-only
+ *     phish with a flaky AAAA read must not read "no address" and drop out of
+ *     `stranded_live`; it keeps its last offline_since and is re-read.
+ *   - A failed, AAAA has a record: presence `resolves`, verdict `present`
+ *     (v329 stored `inconclusive`). An address exists.
+ *   - A NODATA/empty, AAAA answered empty, NS present: `no_host` (v329
+ *     `present`) — the defect this Module fixes.
  */
 export type LivenessRecordVerdict = "present" | "no_host" | "gone" | "inconclusive";
 
 export function livenessVerdictOf(state: DomainDnsState): LivenessRecordVerdict {
   if (state.gone === true) return "gone";
   if (state.hasAddress === true) return "present";
-  if (state.gone === false) return "no_host";
+  if (state.gone === false && state.hasAddress === false) return "no_host";
   return "inconclusive";
 }
 
@@ -616,6 +626,12 @@ export const DNS_SWEEP_CONCURRENCY = 16;
  * in order and none is picked after expiry, so the non-null entries are a
  * prefix of the picked set — month-end relies on that to carry its tail. A
  * probe that throws reads as `unverified`, never as gone or unchanged.
+ *
+ * HOLD IS NOT SWEPT. The sweep reads DNS only and passes no stored RDAP
+ * statuses, so every state it returns carries `hold: false`. A caller that
+ * needs the hold computes it from its own stored statuses (`isRegistryHold` —
+ * the weaponised sweep does, per target; `stockStatus` re-reads the state
+ * with the row's attribution).
  *
  * Accumulators live inside the call: run it inside ONE step.run so a replay
  * re-runs it whole and never resumes a half-counted tally.

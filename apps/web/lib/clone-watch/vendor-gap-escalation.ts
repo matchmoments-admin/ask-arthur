@@ -50,7 +50,7 @@ export function defang(domain: string): string {
 /** What our DNS actually saw — never implied. */
 export function dnsLastLabel(v: string | null | undefined): string {
   if (v === "present") return "DNS: resolves";
-  // v341: the name exists but no address was proven — not a live site.
+  // v341: the name exists and answered with no A/AAAA — not a live site.
   if (v === "no_host") return "DNS: no address";
   if (v === "inconclusive") return "DNS: inconclusive";
   if (v === "gone") return "DNS: NXDOMAIN (unconfirmed)";

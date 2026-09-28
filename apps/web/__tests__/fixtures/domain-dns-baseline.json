@@ -263,6 +263,28 @@
       "parking_ns_stored|weaponised|parked_for_sale": "unverified"
     }
   },
+  "a_fail_aaaa_record": {
+    "gone": null,
+    "hasAddress": true,
+    "precheck": "host",
+    "sweepVerdict": "inconclusive",
+    "fingerprint": null,
+    "opaque": false,
+    "stock": {
+      "none|monitoring|null": "live",
+      "none|monitoring|parked_for_sale": "parked",
+      "none|weaponised|null": "live_phishing",
+      "none|weaponised|parked_for_sale": "live_phishing",
+      "hold|monitoring|null": "live",
+      "hold|monitoring|parked_for_sale": "parked",
+      "hold|weaponised|null": "live_phishing",
+      "hold|weaponised|parked_for_sale": "live_phishing",
+      "parking_ns_stored|monitoring|null": "live",
+      "parking_ns_stored|monitoring|parked_for_sale": "parked",
+      "parking_ns_stored|weaponised|null": "live_phishing",
+      "parking_ns_stored|weaponised|parked_for_sale": "live_phishing"
+    }
+  },
   "ns_failed_resolves": {
     "gone": false,
     "hasAddress": true,

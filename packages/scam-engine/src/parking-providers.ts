@@ -8,7 +8,7 @@
  * Nobody could see the disagreement because no two lists sat side by side.
  *
  * Each entry says WHICH reading counts it, so every reader's set is exactly
- * what it was (pinned by parkingProviders.test.ts against the old literals).
+ * what it was (pinned by apps/web/__tests__/domainDnsState.test.ts against the old literals).
  * The divergence is now visible in one place instead of fixed in it:
  *
  *   - `cloneWatchNs`  — a clone-watch parking NAMESERVER (was PARKING_NS_ROOTS,

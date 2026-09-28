@@ -28,7 +28,8 @@ import {
  *
  * WHAT IT STORES (v341, 2026-09-28). Each read carries the state's verdict
  * (`livenessVerdictOf`): `present` = RESOLVES TO AN ADDRESS, `no_host` = the
- * name exists but no address was proven, `gone`, `inconclusive`. Before v341 the
+ * name exists and A/AAAA ANSWERED empty, `gone`, `inconclusive` (anything
+ * unproven — incl. an address lookup that failed). Before v341 the
  * RPC re-derived `present` from `gone === false`, so a name with NS but no
  * A/AAAA was "present": a dormant clone with its A pulled re-entered
  * `weaponised`, and it counted in the reconcile lane's `stranded_live`. The

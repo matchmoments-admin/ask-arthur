@@ -335,7 +335,7 @@ export interface LaneOutcome {
     /** Resolves to an address (A/AAAA). Before v341: "the name exists", which
      *  also counted a name with NS but no address. */
     liveness_present?: number;
-    /** v341: the name exists but no address was proven (NS-only). Not gone (the
+    /** v341: the name exists and A/AAAA answered empty (NS-only). Not gone (the
      *  dormancy clock does not start), not present (never a re-emergence, never
      *  `stranded_live`). Absent before v341. */
     liveness_no_host?: number;

@@ -22,7 +22,9 @@ export const DNS_FIXTURES: Record<string, DnsAnswers | null> = {
   aaaa_only: { a: err("ENODATA"), aaaa: rec("2606:4700:0:0:0:0:0:1"), ns: rec("ns1.host.example") },
   a_gone_ns_servfail: { a: err("ENOTFOUND"), aaaa: err("ENOTFOUND"), ns: err("ESERVFAIL") },
   a_nodata_aaaa_timeout: { a: err("ENODATA"), aaaa: err("ETIMEOUT"), ns: rec("ns1.host.example") },
-  ns_failed_resolves: { a: rec("198.51.100.7"), aaaa: null, ns: err("ETIMEOUT") },
+  // A's query failed (not an answer) but AAAA has a record: an address exists.
+  a_fail_aaaa_record: { a: err("ETIMEOUT"), aaaa: rec("2001:db8:1::5"), ns: rec("ns1.host.example") },
+  ns_failed_resolves:{ a: rec("198.51.100.7"), aaaa: null, ns: err("ETIMEOUT") },
   probe_failed: null,
 };
 
