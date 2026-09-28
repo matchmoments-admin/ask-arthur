@@ -262,15 +262,22 @@ export async function lookupWhois(
     // an Inngest run is finish-cancelled (ADR-0019), and the guard then
     // undercounts. One insert of latency; logCost never throws.
     if (quotaCache && quotaCache.month === monthKey(now)) quotaCache.count += 1;
-    await logCost({
+    // The insert runs concurrently with the body parse, and `finally` awaits
+    // it on BOTH paths — so the row is written before the lookup returns even
+    // when the body fails to parse (the lookup was served; it counts).
+    const logged = logCost({
       feature: "whois",
       provider: "whoisjson",
       operation: "domain-lookup",
       units: 1,
       estimatedCostUsd: 0,
     });
-
-    const data = await res.json();
+    let data: Awaited<ReturnType<Response["json"]>>;
+    try {
+      data = await res.json();
+    } finally {
+      await logged;
+    }
 
     // whoisjson.com returns `registrar` as an OBJECT ({ name, email, phone, … }),
     // not a string — the previous `data.registrar || …` short-circuited to the
@@ -364,6 +371,22 @@ function parseDate(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * True when the lookup was HELD by the batch guard because the monthly count
+ * was unreadable (`quota_unknown`, PR-F) — no request was made, and asking
+ * again once the count reads may answer. A worklist writer must leave such a
+ * row IN its worklist (not `completed`): scam_urls and scam_entities have no
+ * WHOIS re-offer path, so a row stamped completed here would lose WHOIS for
+ * good. Before PR-F an unreadable count failed open, so this never arose.
+ * Other deferrals keep their #1253 behaviour (the row completes without
+ * whois_* columns).
+ */
+export function whoisHeldForRetry(
+  w: Pick<WhoisResult, "deferral"> | null | undefined,
+): boolean {
+  return w?.deferral?.reason === "quota_unknown";
 }
 
 /**

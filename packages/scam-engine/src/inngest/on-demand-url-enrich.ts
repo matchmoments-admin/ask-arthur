@@ -21,7 +21,11 @@ import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { lookupWhois, whoisScamUrlColumns } from "../whois";
+import {
+  lookupWhois,
+  whoisHeldForRetry,
+  whoisScamUrlColumns,
+} from "../whois";
 import { checkSSL } from "../ssl";
 import { extractDomain } from "../url-normalize";
 import { ANALYZE_COMPLETED_EVENT, parseAnalyzeCompletedData } from "./events";
@@ -113,8 +117,14 @@ export const onDemandUrlEnrich = inngest.createFunction(
             checkSSL(domain),
           ]);
 
+          // PR-F: WHOIS held by the batch guard (quota_unknown) → leave the
+          // status as it was (pending → the cron re-selects it; failed → the
+          // next check of this domain does), never `completed`.
+          const held = whoisHeldForRetry(whois);
+
           // Mirrors the write shape in enrichment.ts (the cron fan-out). Kept
-          // in sync deliberately; both mark enrichment_status='completed'.
+          // in sync deliberately; both mark enrichment_status='completed'
+          // unless WHOIS was held.
           const { error: upErr } = await supabase
             .from("scam_urls")
             .update({
@@ -123,7 +133,7 @@ export const onDemandUrlEnrich = inngest.createFunction(
               ssl_valid: ssl.valid,
               ssl_issuer: ssl.issuer,
               ssl_days_remaining: ssl.daysRemaining,
-              enrichment_status: "completed",
+              ...(held ? {} : { enrichment_status: "completed" }),
               enrichment_attempted_at: new Date().toISOString(),
             })
             .in("id", urlIds);
@@ -134,7 +144,8 @@ export const onDemandUrlEnrich = inngest.createFunction(
             });
             return { rows: 0 };
           }
-          return { rows: urlIds.length };
+          // Held rows are not enriched (still in the worklist) — not counted.
+          return { rows: held ? 0 : urlIds.length };
         });
         if (result.rows > 0) {
           enrichedDomains++;

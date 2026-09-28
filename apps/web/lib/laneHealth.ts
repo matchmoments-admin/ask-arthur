@@ -122,7 +122,9 @@ interface Shape<L extends LaneId> {
    * burns no Inngest runs. Un-parking is deleting this one field — `crons`
    * keeps the schedule to restore (one declaration, as ever). This is the ONE
    * parking mechanism for roster Lanes: a Lane is never parked by leaving
-   * `...laneCrons()` out of its trigger array (laneParking.test.ts).
+   * `...laneCrons()` out of its trigger array (__tests__/laneHealth.test.ts,
+   * "parked lanes — one mechanism": every Lane with `crons` reads its
+   * schedule via `...laneCrons(id)` and registers no literal cron).
    *
    * `while` says which state the park assumes, so the digest can tell a
    * forgotten un-park from a deliberate one:

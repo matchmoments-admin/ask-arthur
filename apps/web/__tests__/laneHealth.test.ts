@@ -800,6 +800,10 @@ describe("classifyLaneHealth — flag gate", () => {
  *     `parked_enabled`.
  *   - re-type `{ cron: "0 10 * * 0" }` into weekly-digest's trigger → the
  *     source-scan case fails.
+ *   - (widened scan) replace `...laneCrons("shopfront-clone-urlscan-submit")`
+ *     with its literal `{ cron: "0 9 * * *" }` → the scan fails naming it;
+ *     change the NRD ingest literal to "30 9 * * *" → it fails on the parity
+ *     check.
  */
 describe("parked lanes — one mechanism (PR-F)", () => {
   const DARK_PARKED = [
@@ -841,23 +845,69 @@ describe("parked lanes — one mechanism (PR-F)", () => {
     }
   });
 
-  it("the three converted functions register no cron while parked and read their schedule only via laneCrons", async () => {
-    const { readFileSync } = await import("node:fs");
+  // Widened (PR-F review): EVERY Lane that declares `crons` — not only the
+  // three converted ones — must read its schedule through the one
+  // declaration, so no Lane can be parked (or un-parked) behind LANE_SHAPES'
+  // back by a literal cron or an omitted `...laneCrons()`.
+  it("every Lane with `crons` reads its schedule via ...laneCrons(id) and registers no literal cron", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const dir = join(process.cwd(), "app/api/inngest/functions");
-    for (const [file, lane] of [
-      ["clone-watch-reemergence-monitor.ts", "shopfront-clone-reemergence-monitor"],
-      ["clone-watch-weekly-digest.ts", "shopfront-clone-weekly-digest"],
-      ["clone-watch-enforcement-execute.ts", "shopfront-clone-enforcement-execute"],
-    ] as const) {
-      const src = readFileSync(join(dir, file), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^[ \t]*\/\/.*$/gm, "");
-      // The trigger reads the ONE declaration — un-parking is a LANE_SHAPES edit.
-      expect(src, file).toContain(`...laneCrons("${lane}")`);
-      // No literal schedule re-typed beside it.
-      expect(src.match(/\bcron:\s*["']/g) ?? [], file).toEqual([]);
+    const dirs = [
+      join(process.cwd(), "app/api/inngest/functions"),
+      join(process.cwd(), "../../packages/scam-engine/src/inngest"),
+    ];
+    const strip = (src: string) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    const segments: Array<{ file: string; seg: string }> = [];
+    for (const dir of dirs) {
+      for (const f of readdirSync(dir).filter((x) => x.endsWith(".ts") && !x.endsWith(".test.ts"))) {
+        for (const seg of strip(readFileSync(join(dir, f), "utf8")).split("createFunction(").slice(1)) {
+          segments.push({ file: f, seg });
+        }
+      }
     }
+    // A Lane whose function lives in packages/scam-engine cannot import
+    // apps/web's laneCrons (dependency direction), so its cron stays literal —
+    // pinned here to EQUAL the declaration (parked → none), so the two copies
+    // cannot drift. Adding a Lane here needs that reason, not convenience.
+    const LITERAL_CRON_EXEMPT: Record<string, string> = {
+      "shopfront-nrd-daily-ingest": "scam-engine function; cannot import apps/web/lib/laneHealth",
+    };
+    const fnIdOf = (lane: string) => lane.split("/")[0]!;
+    const lanes = (Object.keys(LANE_SHAPES) as LaneId[]).filter((l) => LANE_SHAPES[l].crons?.length);
+    expect(lanes.length).toBeGreaterThan(10); // the roster did not empty out
+    const problems: string[] = [];
+    for (const lane of lanes) {
+      const fnId = fnIdOf(lane);
+      const found = segments.filter(({ seg }) => new RegExp(`id:\\s*["']${fnId}["']`).test(seg));
+      if (found.length !== 1) {
+        problems.push(`${lane}: ${found.length} createFunction segments with id "${fnId}"`);
+        continue;
+      }
+      const { file, seg } = found[0]!;
+      const literal = [...seg.matchAll(/\bcron:\s*["']([^"']+)["']/g)].map((m) => m[1]);
+      if (fnId in LITERAL_CRON_EXEMPT) {
+        const want = LANE_SHAPES[lane].parked ? [] : [...LANE_SHAPES[lane].crons!];
+        if (JSON.stringify(literal) !== JSON.stringify(want)) {
+          problems.push(`${lane} (${file}): literal crons ${JSON.stringify(literal)} ≠ LANE_SHAPES ${JSON.stringify(want)}`);
+        }
+        continue;
+      }
+      if (literal.length > 0) problems.push(`${lane} (${file}): literal cron ${JSON.stringify(literal)}`);
+      // Sub-lanes of one function (netcraft-auto/auto + /resubmit) share a
+      // trigger: any sibling's laneCrons counts, provided the schedules match.
+      const read = lanes.filter(
+        (l) => fnIdOf(l) === fnId && seg.includes(`...laneCrons("${l}")`),
+      );
+      if (read.length === 0) {
+        problems.push(`${lane} (${file}): trigger does not read ...laneCrons("${lane}")`);
+      } else if (
+        read.some((l) => JSON.stringify(LANE_SHAPES[l].crons) !== JSON.stringify(LANE_SHAPES[lane].crons) || !!LANE_SHAPES[l].parked !== !!LANE_SHAPES[lane].parked)
+      ) {
+        problems.push(`${lane} (${file}): shares a trigger with a sibling Lane whose schedule or park differs`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });
 

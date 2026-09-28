@@ -674,7 +674,12 @@ month, `interactive` at 950. Since PR-F:
   share (a type error now);
 - an **unreadable count** fails CLOSED for `batch` (deferral reason
   `quota_unknown`, no request, `retryAfter` now + 24h, never a strike in
-  `whois-reoffer.ts`) and OPEN for `interactive`;
+  `whois-reoffer.ts`) and OPEN for `interactive`. The other batch writers
+  that have no re-offer path keep a held row in their worklist instead of
+  completing it (`whoisHeldForRetry`, `whois.ts`): `pipeline-enrichment-fanout`
+  and `on-demand-url-enrich` leave `scam_urls.enrichment_status` unwritten
+  (pending stays pending), `pipeline-entity-enrichment` marks the entity
+  `failed` (`enrichment_error` `whois_held: …`), which its next run re-selects;
 - still soft: the count is cached per instance for 10 minutes, and a rejected
   insert is swallowed by `logCost` — both make it a lower bound, absorbed by
   the margins below 1,000.

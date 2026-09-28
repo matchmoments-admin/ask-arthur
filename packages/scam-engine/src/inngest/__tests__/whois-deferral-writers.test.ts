@@ -13,6 +13,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *     fails (whois_lookup_at present).
  *   - on-demand-url-enrich.ts: same replacement → "on-demand: a deferred
  *     lookup writes no whois_*" fails.
+ *
+ * PR-F — a lookup HELD by the batch guard (`quota_unknown`: the monthly count
+ * was unreadable, so whois.ts failed closed) must leave the row in its
+ * worklist. scam_urls has no WHOIS re-offer, so `completed` loses WHOIS for
+ * good. Go-red (2026-09-28, each reverted → failed → restored):
+ *   - enrichment.ts: write `enrichment_status: "completed"` unconditionally
+ *     again → "a HELD lookup leaves the row pending" fails.
+ *   - on-demand-url-enrich.ts: same → "on-demand: a HELD lookup …" fails.
  */
 
 const m = vi.hoisted(() => ({
@@ -77,6 +85,13 @@ const DEFERRED = {
   },
 };
 const SERVED = { ...DEFERRED, registrar: "R", deferral: undefined };
+const HELD = {
+  ...DEFERRED,
+  deferral: {
+    reason: "quota_unknown" as const,
+    retryAfter: "2026-09-29T09:00:00.000Z",
+  },
+};
 
 const whoisKeys = (u: Record<string, unknown>) =>
   Object.keys(u).filter((k) => k.startsWith("whois_"));
@@ -96,6 +111,16 @@ describe("enrichment.ts enrichDomain", () => {
       ssl_valid: true,
       enrichment_status: "completed",
     });
+  });
+
+  it("a HELD lookup (quota_unknown) leaves the row pending — no status written, not counted", async () => {
+    m.lookupWhois.mockResolvedValue(HELD);
+    const out = await enrichDomain({ domain: "x.example", urlIds: [1] });
+    expect(m.updates).toHaveLength(1);
+    expect(m.updates[0]).not.toHaveProperty("enrichment_status");
+    expect(whoisKeys(m.updates[0]!)).toEqual([]);
+    expect(m.updates[0]).toMatchObject({ ssl_valid: true });
+    expect(out).toMatchObject({ updated: 0, whoisHeld: true });
   });
 
   it("a served lookup writes the whois_* columns", async () => {
@@ -119,6 +144,14 @@ describe("on-demand-url-enrich", () => {
     expect(m.updates).toHaveLength(1);
     expect(whoisKeys(m.updates[0]!)).toEqual([]);
     expect(m.updates[0]).toMatchObject({ enrichment_status: "completed" });
+  });
+
+  it("on-demand: a HELD lookup (quota_unknown) leaves the status as it was", async () => {
+    m.lookupWhois.mockResolvedValue(HELD);
+    await run();
+    expect(m.updates).toHaveLength(1);
+    expect(m.updates[0]).not.toHaveProperty("enrichment_status");
+    expect(whoisKeys(m.updates[0]!)).toEqual([]);
   });
 
   it("on-demand: a served lookup writes the whois_* columns", async () => {

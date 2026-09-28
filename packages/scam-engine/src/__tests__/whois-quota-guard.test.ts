@@ -233,9 +233,10 @@ describe("whoisScamUrlColumns", () => {
  * count, and priority cannot be forgotten.
  *
  * Go-red (2026-09-28, each reverted → failed → restored):
- *   - "the counted row is written before the lookup returns": put `void` back
- *     on the `logCost` call in whois.ts → the lookup settles while the insert
- *     is still pending, and `settled` reads true.
+ *   - "the counted row is written before the lookup returns": `void` instead
+ *     of `await` on the insert (first the direct call, then — after the
+ *     review's concurrency nit — the `finally { await logged }`) → the lookup
+ *     settles while the insert is still pending, and `settled` reads true.
  *   - "batch fails CLOSED on an unreadable count": delete the
  *     `used === null && priority === "batch"` branch → fetch is called and
  *     `deferral` is undefined.
