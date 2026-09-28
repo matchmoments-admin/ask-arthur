@@ -109,48 +109,55 @@ WHERE NOT (sca.submitted_to ? 'netcraft')
 
 ---
 
-### Escalation is gated by BATCH SIZE, not just the evidence gate (v289, 2026-08-24)
+### Escalation is gated by BATCH SIZE — for the AUTO lane (v289, 2026-08-24; corrected #1265, 2026-09-28)
 
-Netcraft permits **one issue report per submission uuid**, and the auto lane
-stamps every alert in a batch with the same uuid. So a batch of N alerts yields
-N−1 alerts that can never be escalated — they drain in the issue lane as
-`skipped: "submission_has_issue"`.
+Netcraft permits **one issue report per submission uuid**. The issue lane files
+one report per uuid covering every URL of that uuid that is eligible _in the
+filing run_ (`buildIssuePayload`, `lib/clone-watch/netcraft-issue-report.ts`).
+A URL of the same uuid that becomes eligible _later_ is stamped
+`netcraft_issue.skipped = "submission_has_issue"` — it can never be escalated
+on that uuid.
 
-Measured batch sizes either side of v284:
+**Auto lane (`via = auto_bulk`) — batch size is the invariant.** Pre-v284 the
+auto lane crammed 25–37 URLs into one uuid (08-18 … 08-22), stranding 25 live
+weaponised clones; v284's evidence gate cut batches to ~1–2. **The protection is
+the evidence gate, not `DAILY_CAP`** — loosen that predicate and the batches
+re-fatten silently.
 
-| Submitted         | URLs per uuid |
-| ----------------- | ------------- |
-| 08-18 … 08-22     | 25 – 37       |
-| 08-23 (post-v284) | **1**         |
+**Resubmit lane (`via = weaponised_resubmit`) — batches are expected.** The
+v250 lane files up to `NETCRAFT_RESUBMIT_DAILY_CAP` weaponised URLs under one
+uuid by design. It self-heals: a URL stranded by a collision bypasses the
+resubmit age gate (v289) and is re-filed under a fresh uuid, up to 3 times. So
+"URLs per uuid" is only meaningful per lane.
 
-The pre-v284 fat batches stranded **25 live weaponised clones**. Worse, they
-were also too young for the v250 resubmit lane (`RESUBMIT_MIN_AGE_DAYS` 30), so
-21 of them had no route out at all for up to 24 more days — the "escalation
-dead zone". **v289** fixes that: an alert stamped `submission_has_issue`
-bypasses the min-age wait, because no amount of waiting makes its current uuid
-escalatable.
-
-**The protection against a recurrence is the v284 evidence gate, not
-`DAILY_CAP`.** The cap (50) is a ceiling that was never the binding constraint;
-what shrank the batches is that far fewer candidates qualify. Loosen that
-predicate and the batches re-fatten and this bug returns silently. Watch it:
+**The invariant that matters is LIVE stranded** — a weaponised clone that is
+still up, stamped `submission_has_issue`, with no route yet. It should be 0,
+and the reconcile lane reports it as `stranded_live` on every Outcome Row; the
+health digest pages when it is > 0 (`LANE_SHAPES`). Stranded rows that are dead
+or inconclusive are handled elsewhere (the resubmit probe defers them; the
+v329 liveness sweep moves them to `dormant`).
 
 ```sql
--- URLs per submission uuid, recent. Should be ~1-2. A jump back to 25+ means
--- the evidence gate has been loosened and escalation is being strangled again.
-SELECT date_trunc('day', (submitted_to->'netcraft'->>'submitted_at')::timestamptz)::date AS day,
+-- URLs per uuid, by lane. auto_bulk should be ~1-2; resubmit batches ≤ cap.
+SELECT submitted_to->'netcraft'->>'via' AS via,
+       date_trunc('day', (submitted_to->'netcraft'->>'submitted_at')::timestamptz)::date AS day,
        count(DISTINCT submitted_to->'netcraft'->>'uuid') AS uuids,
-       count(*) AS urls,
-       round(count(*)::numeric / NULLIF(count(DISTINCT submitted_to->'netcraft'->>'uuid'),0), 1) AS urls_per_uuid
+       count(*) AS urls
 FROM shopfront_clone_alerts
 WHERE (submitted_to->'netcraft'->>'submitted_at')::timestamptz > now() - interval '14 days'
-GROUP BY 1 ORDER BY 1 DESC;
+GROUP BY 1, 2 ORDER BY 2 DESC, 1;
 
--- Currently stranded by uuid collision. Should trend to zero as v289 drains it.
+-- LIVE stranded (should be 0) — the same predicate as the Outcome Row field.
 SELECT count(*) FROM shopfront_clone_alerts
-WHERE lifecycle_state='weaponised'
-  AND submitted_to->'netcraft_issue'->>'skipped'='submission_has_issue';
+WHERE lifecycle_state = 'weaponised'
+  AND submitted_to->'netcraft_issue'->>'skipped' = 'submission_has_issue'
+  AND offline_since IS NULL
+  AND liveness_last_verdict = 'present';
 ```
+
+Measured 2026-09-28 (#1265): resubmit batches of 9–10 URLs on 09-23 … 09-25
+caused 0 collisions; the 5 stranded rows were all pre-v284 auto batches and
+none was live (dead at probe 4–5×, liveness gone/inconclusive).
 
 ## 1. Feature flag
 
