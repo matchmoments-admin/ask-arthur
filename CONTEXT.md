@@ -226,11 +226,13 @@ The ONE conjunction every Clone Watch brand send passes before Resend: flags,
 the #371 legal sign-off (encoded only as `FF_BRAND_STEWARDSHIP_SEND`), the
 readiness gate, the `shopfront_clone_outreach` brake, unsubscribe / STOP,
 verified contact and the brand-contact-directory cross-check. A send path names
-a **send profile** (`stewardship-real`, `batch`, `auto-send`, `outreach`) — the
+a **send profile** (`stewardship-real`, `batch`, `auto-send`, `outreach`, and
+`requester` for the clone-list lead magnet) — the
 list of checks that apply to it — so a difference between paths is a line in
 `BRAND_SEND_PROFILES`, not a missing block in a route. Returns
 `{ allowed, reasons[] }`; any read error refuses. Shadow sends (to our own
-inbox) never reach it. Every automated real brand contact (stewardship, batch,
+inbox) never reach it — and a shadow address that is not an exact
+`@askarthur.au` address sends nothing. Every automated real brand contact (stewardship, batch,
 auto-send) needs the #371 sign-off; every real send, outreach included, honours
 the **brand opt-out store** (`brand_report_unsubscribes`, written by every brand
 email's unsubscribe link) plus STOP replies. The one override is

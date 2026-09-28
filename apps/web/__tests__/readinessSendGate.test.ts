@@ -258,6 +258,16 @@ describe("Brand Send Gate — gaps closed on the real routes", () => {
     }
   });
 
+  // PR-C review 2 go-red: the `isShadow && !isInternalRecipient(shadow)` guard
+  // deleted → this FAILED (Resend called with the brand address).
+  it("a shadow recipient outside @askarthur.au is refused — nothing sent", async () => {
+    shadowRecipient = "security@auspost.com.au";
+    const { status, body } = await stewardshipSend();
+    expect(status).toBe(403);
+    expect(body.error).toBe("shadow_recipient_not_internal");
+    expect(resendSend).not.toHaveBeenCalled();
+  });
+
   it("stewardship shadow send still ignores the brake", async () => {
     shadowRecipient = "shadow@askarthur.au";
     const { status, body } = await stewardshipSend();

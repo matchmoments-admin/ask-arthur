@@ -11,7 +11,12 @@ import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { html, joinHtml } from "@askarthur/utils/html";
-import { checkBrandSend, refusalStatus } from "@/lib/clone-watch/brand-send-gate";
+import {
+  checkBrandSend,
+  isInternalRecipient,
+  refusalStatus,
+  SHADOW_NOT_INTERNAL,
+} from "@/lib/clone-watch/brand-send-gate";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -87,6 +92,15 @@ export async function POST(
   const shadow = readStringEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT");
   const isShadow = Boolean(shadow);
   const recipient = isShadow ? shadow! : row.recipient_email;
+
+  // A shadow send is only ungated because it reaches our own inbox — so the
+  // shadow address must be internal, or nothing is sent.
+  if (isShadow && !isInternalRecipient(shadow)) {
+    return NextResponse.json(
+      { error: SHADOW_NOT_INTERNAL.code, detail: SHADOW_NOT_INTERNAL.detail },
+      { status: refusalStatus(SHADOW_NOT_INTERNAL) },
+    );
+  }
 
   if (!isShadow) {
     // The Brand Send Gate (lib/clone-watch/brand-send-gate.ts, profile

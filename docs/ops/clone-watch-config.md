@@ -2047,15 +2047,19 @@ the gate returns `{ allowed, reasons[] }`. Every read error refuses.
 | `verified_contact` | `known_brands.last_verified_at` for brand_key + recipient                                                                           | `contact_unverified` (403), `contact_unreadable` (503)                                  |
 | `directory`        | `brand_contact_directory` by `brand`: same recipient, channel `security_txt`/`fraud_inbox`                                          | `directory_row_missing` / `recipient_mismatch` (409), `directory_lookup_failed` (500)   |
 
-| Profile            | Path                                                            | Checks                                                                                          |
-| ------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `stewardship-real` | `api/admin/brand-stewardship/[id]/send` (real recipient only)   | legal_signoff, readiness, brake, unsubscribe, verified_contact                                  |
-| `batch`            | `api/admin/clone-watch/batches/[batchId]/send`                  | flags (outreach + notify-brand), legal_signoff, readiness, brake, directory, unsubscribe        |
-| `auto-send`        | `clone-watch-notify-brand-prepare`, step `check-auto-send-gate` | batch's checks + the auto-send flag                                                             |
-| `outreach`         | `api/admin/brand-outreach/send` (real sends only)               | readiness (overridable by `BRAND_OUTREACH_READINESS_OVERRIDE`), unsubscribe (never overridable) |
+| Profile            | Path                                                            | Checks                                                                                                                                                          |
+| ------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stewardship-real` | `api/admin/brand-stewardship/[id]/send` (real recipient only)   | legal_signoff, readiness, brake, unsubscribe, verified_contact                                                                                                  |
+| `batch`            | `api/admin/clone-watch/batches/[batchId]/send`                  | flags (outreach + notify-brand), legal_signoff, readiness, brake, directory, unsubscribe                                                                        |
+| `auto-send`        | `clone-watch-notify-brand-prepare`, step `check-auto-send-gate` | batch's checks + the auto-send flag                                                                                                                             |
+| `outreach`         | `api/admin/brand-outreach/send` (real sends only)               | readiness (overridable by `BRAND_OUTREACH_READINESS_OVERRIDE`), unsubscribe (never overridable)                                                                 |
+| `requester`        | `api/clone-list-request` (lead magnet; public)                  | flags (`FF_CLONE_LIST_REQUEST`), brake, unsubscribe — no readiness / #371: the recipient asked. Recipient-level refusals answer a generic 409 `not_deliverable` |
 
 - **Shadow sends are never gated** (stewardship `BRAND_STEWARDSHIP_SHADOW_RECIPIENT`,
-  outreach `testMode` / `BRAND_OUTREACH_SHADOW_RECIPIENT`) — unchanged.
+  outreach `testMode` / `BRAND_OUTREACH_SHADOW_RECIPIENT` / `ADMIN_TEST_EMAIL`) — but
+  only because they reach our own inbox, so the resolved shadow address must be an
+  exact `@askarthur.au` address (`isInternalRecipient`). Otherwise the route sends
+  nothing and returns 403 `shadow_recipient_not_internal`.
 - **Stewardship**: an unsubscribed or STOP-suppressed recipient still marks the
   row `skipped` (status_reason = the code) and returns 200, as before.
 - **Batch** runs `gate.preflight()` (flags, readiness, brake) before loading the
@@ -2067,18 +2071,26 @@ false`). The run result carries `auto_send_refused` (code → count). The step
   boundaries / 37m).
 - **Outreach override** (founder decision 2026-09-28): `BRAND_OUTREACH_READINESS_OVERRIDE=true`
   (read with `readBoolEnv`) lets a not-ready REAL outreach send through. Every
-  use emits an always-ship `logger.warn("brand_send_gate_override", …)` and
-  inserts a `cost_telemetry` row (`feature='brand_outreach'`,
+  use inserts a `cost_telemetry` row (the durable record) (`feature='brand_outreach'`,
   `provider='internal'`, `operation='readiness_override'`, $0, metadata: profile,
   refusal detail, recipient **hash**, brand_key, brand). If that insert fails
-  the override is **not** honoured (503 `override_unrecorded`). Find uses:
+  the override is **not** honoured (503 `override_unrecorded`). It also sends an
+  Axiom warn `brand_send_gate_override` via `getLogger` and flushes it; that ships
+  only when `FF_AXIOM_ENABLED` and the Axiom token/dataset are set, and a failed
+  flush does not refuse the send. (The console logger has no Axiom transport.) Find uses:
   `SELECT created_at, metadata FROM cost_telemetry WHERE feature='brand_outreach' AND operation='readiness_override' ORDER BY created_at DESC;`
 - **Fitness test**: `apps/web/__tests__/brandSendGateScan.test.ts` fails any file
   under `app/`/`lib/` that imports Resend (SDK or `@/lib/resend`) and Clone Watch
   brand data (`getBrandCloneSample`, brand-stewardship / notify-brand email
-  modules, `brand_stewardship_reports`, the notify-brand batch RPCs) without
-  calling `createBrandSendGate(`/`checkBrandSend(`. One exemption:
-  `api/clone-watch/sample-report` (fictional sample to the requester).
+  modules, `brand_stewardship_reports`, the notify-brand batch RPCs,
+  `shopfront_clone_alerts`, the `clone-watch/resolve-brand` import) without calling
+  `createBrandSendGate(`/`checkBrandSend(` outside a comment. Exemptions, each with
+  its reason in the test: `api/clone-watch/sample-report` (fictional sample),
+  `clone-watch-internal-digest` (internal recipient only) and
+  `lib/onward/url-blocklist-report` (blocklist / abuse intakes, never a brand).
+  Blind spots, listed in the test header: wrapper senders (e.g. `sendOnward`),
+  `packages/` (not walked), dynamic `import("resend")`, brand data reached through
+  an unlisted helper, and a gate call inside a string literal.
 - **#371 sign-off on every real brand contact** (PR-C review, 2026-09-28):
   `legal_signoff` is in `stewardship-real`, `batch` and `auto-send` — real brand
   contact of any kind needs the sign-off (the founder's no-contact rule). Not in

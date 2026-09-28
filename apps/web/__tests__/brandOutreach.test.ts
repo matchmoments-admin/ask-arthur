@@ -44,6 +44,12 @@ const loggerMock = {
   debug: vi.fn(),
 };
 vi.mock("@askarthur/utils/logger", () => ({ logger: loggerMock }));
+// The gate's override warn goes to Axiom via getLogger, not the console logger.
+const axiomWarn = vi.fn();
+const axiomFlush = vi.fn(async () => {});
+vi.mock("@askarthur/utils/axiom-logger", () => ({
+  getLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: axiomWarn, error: vi.fn(), flush: axiomFlush }),
+}));
 
 const logCostMock = vi.fn();
 vi.mock("@/lib/cost-telemetry", async () => {
@@ -422,17 +428,20 @@ describe("POST /api/admin/brand-outreach/send — Brand Send Gate", () => {
     expect(resendSendMock).toHaveBeenCalledTimes(1);
   });
 
-  it("the override lets it through, warns always-ship and writes a cost_telemetry record", async () => {
+  it("the override lets it through, sends a flushed Axiom warn and writes a cost_telemetry record", async () => {
     readinessRes = { data: null, error: { message: "down" } };
     readinessOverride = true;
+    axiomWarn.mockClear();
+    axiomFlush.mockClear();
     const { POST } = await loadRoute();
     const res = await POST(makeRequest({ ...validPayload, brandKey: "pnbank.com.au" }));
     expect(res.status).toBe(200);
     expect(resendSendMock).toHaveBeenCalledTimes(1);
-    expect(loggerMock.warn).toHaveBeenCalledWith(
+    expect(axiomWarn).toHaveBeenCalledWith(
       "brand_send_gate_override",
       expect.objectContaining({ profile: "outreach", brand: "P&N Bank", brand_key: "pnbank.com.au" }),
     );
+    expect(axiomFlush).toHaveBeenCalled();
     expect(costInsertMock).toHaveBeenCalledWith(
       expect.objectContaining({
         feature: "brand_outreach",
@@ -473,6 +482,30 @@ describe("POST /api/admin/brand-outreach/send — Brand Send Gate", () => {
     expect((await res.json()).error).toBe("recipient_unsubscribed");
     expect(resendSendMock).not.toHaveBeenCalled();
     expect(costInsertMock).not.toHaveBeenCalled();
+  });
+
+  // PR-C review 2 go-red: the `isShadow && !isInternalRecipient(recipient)`
+  // guard deleted → both tests below FAILED (Resend called with the outside
+  // address).
+  it("a shadow recipient outside @askarthur.au is refused — nothing sent", async () => {
+    process.env.BRAND_OUTREACH_SHADOW_RECIPIENT = "security@pnbank.com.au";
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("shadow_recipient_not_internal");
+    expect(resendSendMock).not.toHaveBeenCalled();
+  });
+
+  it("a testMode send to an outside ADMIN_TEST_EMAIL is refused", async () => {
+    const { POST } = await loadRoute();
+    process.env.ADMIN_TEST_EMAIL = "someone@example.com";
+    try {
+      const res = await POST(makeRequest({ ...validPayload, testMode: true }));
+      expect(res.status).toBe(403);
+      expect(resendSendMock).not.toHaveBeenCalled();
+    } finally {
+      process.env.ADMIN_TEST_EMAIL = "brendan@askarthur.au";
+    }
   });
 
   it("the unsubscribe link targets the brand opt-out store the gate reads", async () => {

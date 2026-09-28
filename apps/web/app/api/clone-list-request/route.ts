@@ -7,6 +7,7 @@ import { logger } from "@askarthur/utils/logger";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { logEvent } from "@/lib/analytics-events";
 import { resolveWatchlistBrand } from "@/lib/clone-watch/resolve-brand";
+import { checkBrandSend, refusalStatus } from "@/lib/clone-watch/brand-send-gate";
 
 // Human next step for every lead (booking-call-only funnel). A hosted booking
 // page (Outlook "Bookings with me" / Google Calendar appointment schedule);
@@ -160,6 +161,20 @@ export async function POST(req: NextRequest) {
     logger.error("clone-list-request: RESEND_API_KEY unset — cannot deliver");
     return NextResponse.json({ error: "delivery_unavailable" }, { status: 503 });
   }
+  // Brand Send Gate, profile "requester": the flag, the shopfront_clone_outreach
+  // brake and opt-outs (brand_report_unsubscribes + STOP replies). Covers both
+  // emails below. Recipient-level refusals answer one generic code so this
+  // public route never reveals whether an address has opted out.
+  const decision = await checkBrandSend("requester", supabase, { recipient: d.email });
+  if (!decision.allowed) {
+    const first = decision.reasons[0];
+    logger.warn("clone-list-request: refused by brand send gate", { code: first.code });
+    const recipientLevel = first.check === "unsubscribe" || first.check === "recipient";
+    return recipientLevel
+      ? NextResponse.json({ error: "not_deliverable" }, { status: 409 })
+      : NextResponse.json({ error: first.code }, { status: refusalStatus(first) });
+  }
+
   const resend = new Resend(process.env.RESEND_API_KEY);
 
   // Unmonitored brand → honest acknowledgement + booking CTA, no CSV.

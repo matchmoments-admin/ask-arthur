@@ -14,7 +14,12 @@ import { outreachIdempotencyKey } from "@/lib/email/brand-outreach";
 import { getBrandCloneSample } from "@/lib/email/brand-outreach-pilot";
 import BrandOutreachPilot from "@/emails/BrandOutreachPilot";
 import { html, joinHtml } from "@askarthur/utils/html";
-import { checkBrandSend, refusalStatus } from "@/lib/clone-watch/brand-send-gate";
+import {
+  checkBrandSend,
+  isInternalRecipient,
+  refusalStatus,
+  SHADOW_NOT_INTERNAL,
+} from "@/lib/clone-watch/brand-send-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -139,9 +144,18 @@ export async function POST(req: NextRequest) {
   // Brand Send Gate, profile "outreach" (founder decision 2026-09-28): a REAL
   // send embeds real Clone Watch detections (getBrandCloneSample below), so it
   // waits on the readiness scorecard like every other brand send. The escape
-  // hatch is BRAND_OUTREACH_READINESS_OVERRIDE — the gate logs it always-ship
-  // and writes a cost_telemetry row, and refuses if it cannot record it.
+  // hatch is BRAND_OUTREACH_READINESS_OVERRIDE — the gate writes a cost_telemetry
+  // row (and refuses if it cannot) plus an Axiom warn when Axiom is enabled.
   // Shadow / test sends go to our own inbox and are not gated (unchanged).
+  // A shadow / test send is only ungated because it reaches our own inbox —
+  // so the resolved shadow address (BRAND_OUTREACH_SHADOW_RECIPIENT or
+  // ADMIN_TEST_EMAIL) must be internal, or nothing is sent.
+  if (isShadow && !isInternalRecipient(recipient)) {
+    return NextResponse.json(
+      { error: SHADOW_NOT_INTERNAL.code, detail: SHADOW_NOT_INTERNAL.detail },
+      { status: refusalStatus(SHADOW_NOT_INTERNAL) },
+    );
+  }
   const sb = createServiceClient();
   if (!isShadow) {
     const decision = await checkBrandSend("outreach", sb, {

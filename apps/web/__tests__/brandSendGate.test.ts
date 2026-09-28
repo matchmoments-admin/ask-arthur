@@ -44,12 +44,14 @@ const m = vi.hoisted(() => ({
     shopfrontCloneOutreach: true,
     shopfrontCloneNotifyBrand: true,
     shopfrontCloneNotifyBrandAutoSend: true,
+    cloneListRequest: true,
   } as Record<string, boolean>,
   readiness: { ready: true, months: ["2026-09-01", "2026-08-01"] } as Record<string, unknown>,
   braked: false as boolean | "throw",
   override: false,
   brakeReads: 0,
   warn: vi.fn(),
+  flush: vi.fn(async () => {}),
 }));
 
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: m.flags }));
@@ -57,8 +59,13 @@ vi.mock("@askarthur/utils/env", () => ({
   readBoolEnv: (n: string) => (n === "BRAND_OUTREACH_READINESS_OVERRIDE" ? m.override : false),
   readStringEnv: () => null,
 }));
+// The override warn goes to Axiom via getLogger (the console logger has no
+// Axiom transport); m.warn records it and m.flush its flush.
+vi.mock("@askarthur/utils/axiom-logger", () => ({
+  getLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: m.warn, error: vi.fn(), flush: m.flush }),
+}));
 vi.mock("@askarthur/utils/logger", () => ({
-  logger: { info: vi.fn(), warn: m.warn, error: vi.fn(), debug: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock("@askarthur/scam-engine/cost-log", () => ({
   isFeatureBrakedOrUnknown: async () => {
@@ -75,6 +82,7 @@ import {
   BRAND_SEND_PROFILES,
   checkBrandSend,
   createBrandSendGate,
+  isInternalRecipient,
   refusalStatus,
   type BrandSendProfile,
 } from "@/lib/clone-watch/brand-send-gate";
@@ -111,6 +119,7 @@ beforeEach(() => {
   m.braked = false;
   m.override = false;
   m.warn.mockClear();
+  m.flush.mockReset().mockResolvedValue(undefined);
   inserts.length = 0;
   costInsert = { data: null, error: null };
   suppressed = { data: false, error: null };
@@ -127,7 +136,9 @@ beforeEach(() => {
 // ── One failure per check, and its expected code ──
 const FAILURES: Record<string, Array<{ name: string; arrange: () => void; code: string }>> = {
   flags: [
-    { name: "outreach flag OFF", arrange: () => (m.flags.shopfrontCloneOutreach = false), code: "clone_outreach_disabled" },
+    // Every flag OFF; the assertion accepts any `flags` refusal (each profile
+    // names its own flags and codes).
+    { name: "flags OFF", arrange: () => { for (const k of Object.keys(m.flags)) if (k !== "brandStewardshipSend") m.flags[k] = false; }, code: "flags" },
   ],
   legal_signoff: [
     { name: "FF_BRAND_STEWARDSHIP_SEND OFF", arrange: () => (m.flags.brandStewardshipSend = false), code: "send_disabled" },
@@ -176,7 +187,8 @@ describe("each profile refuses with the right code for each failing check", () =
           f.arrange();
           const d = await checkBrandSend(p, sb, TARGET);
           expect(d.allowed).toBe(false);
-          expect(d.reasons.map((r) => r.code)).toContain(f.code);
+          if (check === "flags") expect(d.reasons.some((r) => r.check === "flags")).toBe(true);
+          else expect(d.reasons.map((r) => r.code)).toContain(f.code);
           expect(refusalStatus(d.reasons[0])).toBeGreaterThanOrEqual(400);
         });
       }
@@ -263,7 +275,7 @@ describe("outreach readiness override", () => {
     expect(inserts).toHaveLength(0);
   });
 
-  it("with the override it is allowed, warned always-ship and recorded", async () => {
+  it("with the override it is allowed, recorded, and an Axiom warn is sent and flushed", async () => {
     m.override = true;
     const d = await checkBrandSend("outreach", sb, { ...TARGET, context: { brand: "Australia Post" } });
     expect(d.allowed).toBe(true);
@@ -272,6 +284,7 @@ describe("outreach readiness override", () => {
       "brand_send_gate_override",
       expect.objectContaining({ profile: "outreach", brand: "Australia Post" }),
     );
+    expect(m.flush).toHaveBeenCalledTimes(1);
     expect(inserts).toEqual([
       expect.objectContaining({
         table: "cost_telemetry",
@@ -285,6 +298,14 @@ describe("outreach readiness override", () => {
     ]);
     // No address in the record — a hash only.
     expect(JSON.stringify(inserts[0].row)).not.toContain(RECIPIENT);
+  });
+
+  it("a failed Axiom flush does not refuse — the cost row is the record", async () => {
+    m.override = true;
+    m.flush.mockRejectedValue(new Error("axiom down"));
+    const d = await checkBrandSend("outreach", sb, TARGET);
+    expect(d.allowed).toBe(true);
+    expect(inserts).toHaveLength(1);
   });
 
   it("override is NOT honoured when its record cannot be written", async () => {
@@ -316,5 +337,46 @@ describe("outreach readiness override", () => {
     const d = await checkBrandSend("batch", sb, TARGET);
     expect(d.allowed).toBe(false);
     expect(d.reasons[0].code).toBe("not_ready");
+  });
+});
+
+// PR-C review 2: shadow recipients must be internal, and the lead-magnet
+// requester profile. Go-red (2026-09-28): isInternalRecipient returning true
+// for any address → "only an exact @askarthur.au address is internal" + the
+// three route-level shadow tests FAILED (4); "unsubscribe" removed from the
+// requester profile → "requester honours opt-outs" + two cloneListRequestGate
+// tests FAILED (3); `await log.flush()` removed from recordOverride → the
+// flush assertions here and in brandOutreach FAILED (2).
+describe("shadow recipients", () => {
+  it("only an exact @askarthur.au address is internal", () => {
+    expect(isInternalRecipient("brendan@askarthur.au")).toBe(true);
+    expect(isInternalRecipient(" Ops@AskArthur.au ")).toBe(true);
+    for (const bad of [
+      "security@auspost.com.au",
+      "x@askarthur.au.evil.com",
+      "x@mail.askarthur.au",
+      "x@evil.com@askarthur.au",
+      "askarthur.au",
+      "",
+      null,
+    ]) {
+      expect(isInternalRecipient(bad)).toBe(false);
+    }
+  });
+});
+
+describe("requester profile (clone-list-request)", () => {
+  it("does not need readiness or #371 (the recipient asked)", async () => {
+    m.readiness = { ready: false, months: [], reason: "x" };
+    m.flags.brandStewardshipSend = false;
+    expect((await checkBrandSend("requester", sb, TARGET)).allowed).toBe(true);
+  });
+  it("requester honours opt-outs", async () => {
+    tables.brand_report_unsubscribes = { data: { email: RECIPIENT }, error: null };
+    expect((await checkBrandSend("requester", sb, TARGET)).reasons[0].code).toBe("recipient_unsubscribed");
+  });
+  it("is off without FF_CLONE_LIST_REQUEST", async () => {
+    m.flags.cloneListRequest = false;
+    expect((await checkBrandSend("requester", sb, TARGET)).reasons[0].code).toBe("not_enabled");
   });
 });

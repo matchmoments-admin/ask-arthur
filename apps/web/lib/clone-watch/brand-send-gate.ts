@@ -26,6 +26,7 @@ import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
 
@@ -69,13 +70,15 @@ const SEND_SCOPED: ReadonlySet<BrandSendCheck> = new Set([
 type FlagName =
   | "shopfrontCloneOutreach"
   | "shopfrontCloneNotifyBrand"
-  | "shopfrontCloneNotifyBrandAutoSend";
+  | "shopfrontCloneNotifyBrandAutoSend"
+  | "cloneListRequest";
 
 /** Refusal code per flag — the codes the routes already returned. */
 const FLAG_CODES: Record<FlagName, string> = {
   shopfrontCloneOutreach: "clone_outreach_disabled",
   shopfrontCloneNotifyBrand: "clone_notify_brand_disabled",
   shopfrontCloneNotifyBrandAutoSend: "auto_send_disabled",
+  cloneListRequest: "not_enabled",
 };
 
 const BRAKE_FEATURE = "shopfront_clone_outreach";
@@ -86,9 +89,9 @@ export interface BrandSendProfileSpec {
   /** Flags for the `flags` check (all must be ON). */
   flags?: readonly FlagName[];
   /** Per-check env override (read with readBoolEnv). When set and the check
-   *  refuses, the send is let through, logged always-ship and recorded in
-   *  cost_telemetry; if the record cannot be written the override is NOT
-   *  honoured. */
+   *  refuses, the send is let through and recorded in cost_telemetry (if that
+   *  row cannot be written the override is NOT honoured), plus an Axiom warn
+   *  when Axiom is enabled — see recordOverride. */
   overrides?: Partial<Record<BrandSendCheck, string>>;
   /** cost_telemetry feature for the override record. */
   auditFeature?: string;
@@ -140,6 +143,15 @@ export const BRAND_SEND_PROFILES = {
     overrides: { readiness: "BRAND_OUTREACH_READINESS_OVERRIDE" },
     auditFeature: "brand_outreach",
   },
+  /** Clone Watch lead magnet (api/clone-list-request): a requester asks, with
+   *  a work email, for a brand's lookalike list (shopfront_clone_alerts). The
+   *  recipient ASKED for it, so no readiness / #371 / verified-contact /
+   *  directory — but it is still Clone Watch data mailed to a brand-side
+   *  address, so it honours the flag, the outreach brake and opt-outs. */
+  requester: {
+    checks: ["flags", "brake", "unsubscribe"],
+    flags: ["cloneListRequest"],
+  },
 } as const satisfies Record<string, BrandSendProfileSpec>;
 
 export type BrandSendProfile = keyof typeof BRAND_SEND_PROFILES;
@@ -178,6 +190,7 @@ export const REFUSAL_STATUS: Record<string, number> = {
   clone_outreach_disabled: 503,
   clone_notify_brand_disabled: 503,
   auto_send_disabled: 503,
+  not_enabled: 503,
   not_ready: 403,
   cost_brake_engaged: 503,
   no_recipient: 422,
@@ -190,12 +203,37 @@ export const REFUSAL_STATUS: Record<string, number> = {
   directory_row_missing: 409,
   recipient_mismatch: 409,
   override_unrecorded: 503,
+  shadow_recipient_not_internal: 403,
   gate_error: 503,
 };
 
 export function refusalStatus(r: BrandSendRefusal): number {
   return REFUSAL_STATUS[r.code] ?? 503;
 }
+
+// ── Shadow recipients ───────────────────────────────────────────────────────
+
+/** The only domain a shadow send may go to. */
+export const INTERNAL_EMAIL_DOMAIN = "askarthur.au";
+
+/**
+ * A shadow send skips this gate because it goes to our own inbox. That only
+ * holds if the shadow address really is ours: a shadow env var set to an
+ * outside address would be a real, ungated send. Callers refuse the send
+ * (`shadow_recipient_not_internal`) when this is false. Exact domain match —
+ * no subdomains, no display-name forms.
+ */
+export function isInternalRecipient(email: string | null | undefined): boolean {
+  const e = (email ?? "").trim().toLowerCase();
+  const at = e.lastIndexOf("@");
+  return at > 0 && e.indexOf("@") === at && e.slice(at + 1) === INTERNAL_EMAIL_DOMAIN;
+}
+
+export const SHADOW_NOT_INTERNAL: BrandSendRefusal = {
+  check: "recipient",
+  code: "shadow_recipient_not_internal",
+  detail: `A shadow send must go to an @${INTERNAL_EMAIL_DOMAIN} address; nothing was sent.`,
+};
 
 // ── The gate ────────────────────────────────────────────────────────────────
 
@@ -456,10 +494,16 @@ async function settle(
 }
 
 /**
- * The override's audit trail: an always-ship warn (Axiom) AND a durable
- * cost_telemetry row ($0, `operation = '<check>_override'`). Written directly
- * and awaited — logCostAsync swallows a failed insert, and an override nobody
- * can see afterwards is exactly what this record exists to prevent.
+ * The override's audit trail, in two parts:
+ *  - the DURABLE record: a cost_telemetry row ($0, `operation =
+ *    '<check>_override'`), written directly and awaited — logCostAsync
+ *    swallows a failed insert. If it cannot be written the override is NOT
+ *    honoured: an override nobody can see afterwards is what this prevents.
+ *  - an Axiom warn via getLogger (@askarthur/utils/axiom-logger), flushed
+ *    before returning. warn is never sampled, but it ships only when
+ *    FF_AXIOM_ENABLED and the Axiom token/dataset are set (else a no-op), and
+ *    a failed flush does not refuse the send — the cost row is the record.
+ *    (The console logger, @askarthur/utils/logger, has no Axiom transport.)
  */
 async function recordOverride(
   profile: BrandSendProfile,
@@ -476,25 +520,34 @@ async function recordOverride(
     brand_key: target.brandKey ?? null,
     ...(target.context ?? {}),
   };
-  logger.warn("brand_send_gate_override", metadata);
-  if (!sb) return false;
-  try {
-    const { error } = await sb.from("cost_telemetry").insert({
-      feature: spec.auditFeature ?? "brand_send_gate",
-      provider: "internal",
-      operation: `${overridden[0].check}_override`,
-      units: 1,
-      unit_cost_usd: 0,
-      estimated_cost_usd: 0,
-      metadata,
-    });
-    if (error) {
-      logger.warn("brand_send_gate_override_unrecorded", { profile, error: error.message });
-      return false;
+  const log = getLogger({ source: "brand-send-gate", feature: "brand_send_gate", profile });
+  log.warn(BRAND_SEND_OVERRIDE_WARN, metadata);
+  let recorded = false;
+  if (sb) {
+    try {
+      const { error } = await sb.from("cost_telemetry").insert({
+        feature: spec.auditFeature ?? "brand_send_gate",
+        provider: "internal",
+        operation: `${overridden[0].check}_override`,
+        units: 1,
+        unit_cost_usd: 0,
+        estimated_cost_usd: 0,
+        metadata,
+      });
+      recorded = !error;
+      if (error) log.warn(`${BRAND_SEND_OVERRIDE_WARN}_unrecorded`, { error: error.message });
+    } catch (err) {
+      log.warn(`${BRAND_SEND_OVERRIDE_WARN}_unrecorded`, { error: String(err) });
     }
-    return true;
-  } catch (err) {
-    logger.warn("brand_send_gate_override_unrecorded", { profile, error: String(err) });
-    return false;
   }
+  try {
+    await log.flush();
+  } catch (err) {
+    // The cost row is the durable record; a failed flush does not refuse.
+    logger.warn("brand_send_gate_override: axiom flush failed", { error: String(err) });
+  }
+  return recorded;
 }
+
+/** The warn text an operator searches Axiom for. */
+export const BRAND_SEND_OVERRIDE_WARN = "brand_send_gate_override";
