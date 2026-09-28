@@ -28,10 +28,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 //                  → "caps operator scans by units, not rows" FAILED
 //   - admin route: 503 branch removed (unreadable fell through to the 429 path)
 //                  → "fails closed (503) when the ledger is unreadable" FAILED
+//   - checkUnlistedHeadroom: reservation insert removed (review of #1283)
+//                  → "an admitted manual recheck reserves its batch: a manual
+//                    submit a minute later is refused" FAILED
+//   - checkUnlistedHeadroom: insert error ignored
+//                  → "refuses when the reservation cannot be written" FAILED
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   ledger: { data: [] as unknown, error: null as unknown },
+  /** Rows inserted into cost_telemetry (reservations); the ledger returns them. */
+  inserted: [] as Array<Record<string, unknown>>,
+  insertError: null as unknown,
   alert: { data: null as unknown, error: null as unknown },
   send: vi.fn(),
   log: vi.fn(),
@@ -55,11 +63,24 @@ function chain(result: () => unknown) {
     c[m] = () => c;
   return c;
 }
+function ledgerChain() {
+  const c = chain(() =>
+    Array.isArray(mocks.ledger.data)
+      ? { data: [...(mocks.ledger.data as unknown[]), ...mocks.inserted], error: mocks.ledger.error }
+      : mocks.ledger,
+  );
+  c.insert = async (row: Record<string, unknown>) => {
+    if (mocks.insertError) return { error: mocks.insertError };
+    mocks.inserted.push({ ...row, created_at: new Date().toISOString() });
+    return { error: null };
+  };
+  return c;
+}
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: () => ({
     rpc: mocks.rpc,
     from: (table: string) =>
-      table === "cost_telemetry" ? chain(() => mocks.ledger) : chain(() => mocks.alert),
+      table === "cost_telemetry" ? ledgerChain() : chain(() => mocks.alert),
   }),
 }));
 vi.mock("@askarthur/scam-engine/cost-log", () => ({
@@ -92,7 +113,12 @@ const ledgerRow = (operation: string, createdAt: Date, units: number) => ({
 
 const invoke = (handler: unknown, name: string) =>
   (handler as (ctx: unknown) => Promise<Record<string, unknown>>)({
-    event: { name, ts: Date.now(), data: {} },
+    // A scheduled tick carries its cron expression (Inngest's real payload).
+    event: {
+      name,
+      ts: Date.now(),
+      data: name === CRON ? { cron: "30 */6 * * *" } : {},
+    },
     step: { run: (_n: string, fn: () => unknown) => fn() },
     runId: "r1",
   });
@@ -107,6 +133,8 @@ beforeEach(() => {
   vi.stubEnv("URLSCAN_API_KEY", "test");
   mocks.rpc.mockResolvedValue({ data: [], error: null });
   mocks.ledger = { data: [], error: null };
+  mocks.inserted = [];
+  mocks.insertError = null;
   mocks.alert = { data: null, error: null };
 });
 afterEach(() => {
@@ -142,6 +170,38 @@ describe("lifecycle-recheck manual fire", () => {
     vi.setSystemTime(at("10:40"));
     await invoke(cloneWatchLifecycleRecheck, RECHECK_MANUAL);
     expect(rpcNames()).toContain("list_clone_alerts_for_recheck");
+  });
+
+  it("an admitted manual recheck reserves its batch: a manual submit a minute later is refused", async () => {
+    // Neither lane writes its real ledger row until the END of its run, so
+    // without the reservation both read an empty hour and pass (165/h).
+    vi.setSystemTime(at("10:30"));
+    await invoke(cloneWatchLifecycleRecheck, RECHECK_MANUAL);
+    expect(rpcNames()).toContain("list_clone_alerts_for_recheck");
+    expect(mocks.inserted).toEqual([
+      expect.objectContaining({
+        operation: "manual_reservation",
+        units: 90,
+        metadata: expect.objectContaining({ spender: "recheck" }),
+      }),
+    ]);
+    mocks.rpc.mockClear();
+    vi.setSystemTime(at("10:31"));
+    const out = await invoke(cloneWatchUrlscanSubmit, SUBMIT_MANUAL);
+    expect(out).toMatchObject({
+      skipped: true,
+      reason: "urlscan_budget_hourly_headroom",
+      budget: expect.objectContaining({ usedHour: 90 }),
+    });
+    expect(rpcNames()).not.toContain("list_clone_alerts_pending_urlscan_submit");
+  });
+
+  it("refuses when the reservation cannot be written", async () => {
+    vi.setSystemTime(at("10:40"));
+    mocks.insertError = { message: "insert failed" };
+    const out = await invoke(cloneWatchLifecycleRecheck, RECHECK_MANUAL);
+    expect(out).toMatchObject({ skipped: true, reason: "urlscan_budget_reservation_failed" });
+    expect(rpcNames()).not.toContain("list_clone_alerts_for_recheck");
   });
 
   it("does not guard the scheduled tick", async () => {

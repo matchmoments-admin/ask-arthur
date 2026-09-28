@@ -31,8 +31,11 @@
  *     submit) or an admin "Scan now" asks `decideUnlistedSpend`. That call
  *     counts ALL unlisted spend in the trailing hour and day, in UNITS, plus
  *     the worst case of any scheduled run still in flight or due within the
- *     hour. It refuses when the request does not fit, and when the ledger
- *     cannot be read (fail closed).
+ *     hour. The daily side also counts scheduled runs still due in the next
+ *     24h. It refuses when the request does not fit, and when the ledger
+ *     cannot be read (fail closed). An admitted Inngest manual run writes a
+ *     `manual_reservation` row before it spends, so a second manual fire
+ *     sees it (MANUAL_RESERVATION).
  *
  * Inngest `throttle` is NOT a submission cap. It counts RUNS and queues the
  * excess (docs/inngest-brakes.md §glossary). A lane's submit ceiling is
@@ -194,7 +197,32 @@ const SPENDER_LIST = Object.entries(URLSCAN_SPENDERS) as Array<
   [SpenderId, UrlscanSpender]
 >;
 
+/**
+ * The ledger row an ADMITTED manual run writes before it spends (review of
+ * #1283). submit and recheck log their real row only at the END of a run
+ * (~3–5 min in), so without this two manual fires a minute apart both read an
+ * empty hour and both pass: a manual recheck at 10:30 (90) and a manual submit
+ * at 10:31 (75) = 165. Counted as that spender's units; it is NOT netted
+ * against a scheduled fire's reserve, and for the hour it ran in it is
+ * counted alongside the real row that follows (double, conservative).
+ */
+export const MANUAL_RESERVATION = {
+  feature: "shopfront_clone_urlscan",
+  provider: "urlscan",
+  operation: "manual_reservation",
+} as const;
+
+const isSpenderId = (v: unknown): v is SpenderId =>
+  typeof v === "string" && v in URLSCAN_SPENDERS;
+
 function spenderOf(row: LedgerRow): SpenderId | null {
+  if (
+    row.feature === MANUAL_RESERVATION.feature &&
+    row.operation === MANUAL_RESERVATION.operation
+  ) {
+    const id = row.metadata?.spender;
+    return isSpenderId(id) ? id : null;
+  }
   for (const [id, s] of SPENDER_LIST) {
     if (s.ledger.feature === row.feature && s.ledger.operation === row.operation) {
       return id;
@@ -216,6 +244,7 @@ export type UnlistedDecision =
       usedHour: number;
       reservedHour: number;
       usedDay: number;
+      projectedDay: number;
     }
   | {
       ok: false;
@@ -224,11 +253,13 @@ export type UnlistedDecision =
         | "hourly_headroom"
         | "daily_headroom"
         | "own_hourly_cap"
-        | "own_daily_cap";
+        | "own_daily_cap"
+        | "reservation_failed";
       request: number;
       usedHour: number | null;
       reservedHour: number | null;
       usedDay: number | null;
+      projectedDay: number | null;
     };
 
 /**
@@ -242,8 +273,12 @@ export type UnlistedDecision =
  *                   the END of a run (in flight = the whole perRun reserved),
  *                   while enrichment writes a row per submit (a partial run
  *                   keeps the rest reserved).
+ *   projected_day = the worst rolling 24h that contains now: for every window
+ *                   start in the last 24h, the units logged since it plus
+ *                   the perRun of every active scheduled fire before it
+ *                   ends, plus the unlogged part of past fires (in flight)
  *   refuse when used_hour + reserved_hour + request > 100
- *            or used_day (trailing 24h) + request > 1,000
+ *            or projected_day + request > 1,000
  *            or the spender's own caps (scanOne) would be exceeded
  *            or `rows` is null — an unreadable ledger is never zero spend.
  *
@@ -265,6 +300,7 @@ export function decideUnlistedSpend(
       usedHour: null,
       reservedHour: null,
       usedDay: null,
+      projectedDay: null,
     };
   }
   let usedHour = 0;
@@ -272,23 +308,33 @@ export function decideUnlistedSpend(
   let ownHour = 0;
   let ownDay = 0;
   /** Ledger entries per spender, to net a past fire's reserve. */
-  const seen: Array<{ id: SpenderId; at: number; units: number }> = [];
+  const seen: Array<{
+    id: SpenderId;
+    at: number;
+    units: number;
+    reservation: boolean;
+  }> = [];
   for (const row of rows) {
     const id = spenderOf(row);
     if (!id) continue;
     const at = Date.parse(row.created_at);
     if (!Number.isFinite(at) || at > nowMs || at <= nowMs - DAY_MS) continue;
-    const units = URLSCAN_SPENDERS[id].ledger.spend(row);
+    const reservation = row.operation === MANUAL_RESERVATION.operation;
+    const units = reservation
+      ? num(row.units)
+      : URLSCAN_SPENDERS[id].ledger.spend(row);
     usedDay += units;
     if (id === spender) ownDay += units;
     if (at > nowMs - HOUR_MS) {
       usedHour += units;
       if (id === spender) ownHour += units;
     }
-    seen.push({ id, at, units });
+    seen.push({ id, at, units, reservation });
   }
 
   let reservedHour = 0;
+  /** Unlogged worst case of scheduled fires in the past hour (in flight). */
+  let inFlight = 0;
   const nowMinuteMs = Math.floor(nowMs / MIN_MS) * MIN_MS;
   const nowMow = minuteOfWeek(nowMs);
   for (const [id, s] of SPENDER_LIST) {
@@ -305,14 +351,39 @@ export function decideUnlistedSpend(
       const logged =
         k <= 0
           ? seen
-              .filter((e) => e.id === id && e.at >= fireMs)
+              .filter((e) => e.id === id && !e.reservation && e.at >= fireMs)
               .reduce((a, e) => a + e.units, 0)
           : 0;
-      reservedHour += Math.max(0, s.perRun - logged);
+      const part = Math.max(0, s.perRun - logged);
+      reservedHour += part;
+      if (k <= 0) inFlight += part;
     }
   }
 
-  const base = { request, usedHour, reservedHour, usedDay };
+  // Daily side (review of #1283): scheduled spend still DUE counts too. The
+  // worst rolling 24h containing now, over window starts now-j (j = 0..1440
+  // min): logged since the start + scheduled fires before the window ends.
+  const futureFires: Array<{ at: number; n: number }> = [];
+  for (const [, s] of SPENDER_LIST) {
+    if (s.crons.length === 0 || !s.active()) continue;
+    const fires = new Set(cronFiringsOfWeek(s.crons));
+    for (let k = 1; k <= 1440; k++) {
+      const mow = (((nowMow + k) % WEEK_MINUTES) + WEEK_MINUTES) % WEEK_MINUTES;
+      if (fires.has(mow)) futureFires.push({ at: nowMinuteMs + k * MIN_MS, n: s.perRun });
+    }
+  }
+  let worstDay = 0;
+  for (let j = 0; j <= 1440; j++) {
+    const start = nowMs - j * MIN_MS;
+    const end = start + DAY_MS;
+    let sum = 0;
+    for (const e of seen) if (e.at > start) sum += e.units;
+    for (const f of futureFires) if (f.at < end) sum += f.n;
+    if (sum > worstDay) worstDay = sum;
+  }
+  const projectedDay = worstDay + inFlight;
+
+  const base = { request, usedHour, reservedHour, usedDay, projectedDay };
   const own = URLSCAN_SPENDERS[spender].ownCap;
   if (own && ownHour + request > own.perHour) {
     return { ok: false, reason: "own_hourly_cap", ...base };
@@ -323,7 +394,7 @@ export function decideUnlistedSpend(
   if (usedHour + reservedHour + request > URLSCAN_UNLISTED.perHour) {
     return { ok: false, reason: "hourly_headroom", ...base };
   }
-  if (usedDay + request > URLSCAN_UNLISTED.perDay) {
+  if (projectedDay + request > URLSCAN_UNLISTED.perDay) {
     return { ok: false, reason: "daily_headroom", ...base };
   }
   return { ok: true, ...base };
@@ -347,7 +418,10 @@ export async function readUnlistedLedger(
 ): Promise<LedgerRow[] | null> {
   const features = [...new Set(SPENDER_LIST.map(([, s]) => s.ledger.feature))];
   const operations = [
-    ...new Set(SPENDER_LIST.map(([, s]) => s.ledger.operation)),
+    ...new Set([
+      ...SPENDER_LIST.map(([, s]) => s.ledger.operation),
+      MANUAL_RESERVATION.operation,
+    ]),
   ];
   try {
     const { data, error } = await sb
@@ -366,18 +440,43 @@ export async function readUnlistedLedger(
   }
 }
 
-/** Read the ledger and decide `spender`'s full per-run request. For
- *  manual-trigger runs; call it inside a step.run so a replay reuses it. */
+/**
+ * Read the ledger, decide `spender`'s full per-run request, and when it is
+ * admitted write a MANUAL_RESERVATION row for it BEFORE returning (awaited),
+ * so a second manual fire a minute later already sees this one. A reservation
+ * that does not land refuses the run (fail closed). For manual-trigger runs;
+ * call it inside a step.run so a replay reuses the decision and does not
+ * reserve twice.
+ */
 export async function checkUnlistedHeadroom(
   sb: Sb,
   spender: SpenderId,
   nowMs: number = Date.now(),
 ): Promise<UnlistedDecision> {
   const rows = await readUnlistedLedger(sb, nowMs);
-  return decideUnlistedSpend(
+  const decision = decideUnlistedSpend(
     spender,
     URLSCAN_SPENDERS[spender].perRun,
     rows,
     nowMs,
   );
+  if (!decision.ok) return decision;
+  let error: unknown = null;
+  try {
+    ({ error } = await sb.from("cost_telemetry").insert({
+      ...MANUAL_RESERVATION,
+      units: decision.request,
+      unit_cost_usd: 0,
+      estimated_cost_usd: 0,
+      metadata: {
+        spender,
+        fn_id: URLSCAN_SPENDERS[spender].fnId,
+        note: "urlscan budget reservation for an admitted manual run, not spend",
+      },
+    }));
+  } catch (err) {
+    error = err;
+  }
+  if (error) return { ...decision, ok: false, reason: "reservation_failed" };
+  return decision;
 }

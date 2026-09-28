@@ -34,6 +34,12 @@ import { describe, expect, it, vi } from "vitest";
 //                  → "fails closed on an unreadable ledger" FAILED
 //   - readUnlistedLedger: returned [] on error
 //                  → "returns null, never [], when the read fails" FAILED
+//   - decideUnlistedSpend: daily side back to `usedDay + request` (no
+//     scheduled-due projection)
+//                  → "counts scheduled spend still due in the next 24h on the
+//                    daily side" FAILED
+//   - spenderOf: manual_reservation rows not mapped to a spender
+//                  → "a manual reservation counts as its spender's units" FAILED
 //   - submit lane: SUBMIT_BATCH_LIMIT back to a literal 75
 //                  → "lanes read their caps from the roster" FAILED
 
@@ -329,6 +335,31 @@ describe("decideUnlistedSpend (manual-trigger guard)", () => {
     );
     const d = decideUnlistedSpend("recheck", 90, rows, at("10:30"));
     expect(d).toMatchObject({ ok: false, reason: "daily_headroom", usedDay: 920 });
+  });
+
+  it("counts scheduled spend still due in the next 24h on the daily side", () => {
+    // 600 logged 2–7h ago. Trailing day alone: 600 + 90 = 690, fits. But the
+    // rolling 24h that starts 7h ago also holds the 12:30, 18:30 and 00:30
+    // rechecks (270) and the 15:00, 21:00 and 03:00 enrichments (60): 930 + 90.
+    const rows = Array.from({ length: 6 }, (_, i) =>
+      row("recheck_submit", at("10:30") - (2 + i) * 60 * MIN, 100),
+    );
+    const d = decideUnlistedSpend("recheck", 90, rows, at("10:30"));
+    expect(d).toMatchObject({ ok: false, reason: "daily_headroom", usedDay: 600, projectedDay: 930 });
+  });
+
+  it("a manual reservation counts as its spender's units", () => {
+    const rows: LedgerRow[] = [
+      {
+        feature: "shopfront_clone_urlscan",
+        operation: "manual_reservation",
+        created_at: new Date(at("10:30")).toISOString(),
+        units: 90,
+        metadata: { spender: "recheck" },
+      },
+    ];
+    const d = decideUnlistedSpend("submit", 75, rows, at("10:31"));
+    expect(d).toMatchObject({ ok: false, reason: "hourly_headroom", usedHour: 90 });
   });
 
   it("a disabled scheduled lane reserves nothing", () => {

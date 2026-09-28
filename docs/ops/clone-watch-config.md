@@ -1366,7 +1366,10 @@ gate.
 > hour and day from `cost_telemetry`, and reserves scheduled batches that are
 > in flight or due within the hour. It refuses with
 > `skipped: urlscan_budget_<reason>` (Inngest) or a 429/503 (admin route). An
-> unreadable ledger refuses.
+> unreadable ledger refuses. The daily side counts scheduled runs still due
+> in the next 24h. An admitted manual run writes a `manual_reservation` row
+> (`cost_telemetry`, $0, units = its batch) before it spends, so a second
+> manual fire minutes later is refused instead of stacking.
 >
 > A manual recheck (request 90) therefore only fits in the gaps between the
 > scheduled batches: roughly 01:35–02:00, 04:00–05:30, 07:35–08:00,
