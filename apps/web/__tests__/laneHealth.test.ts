@@ -467,6 +467,23 @@ describe("classifyLaneHealth", () => {
     expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].crons).toEqual(["30 9 * * 0"]);
   });
 
+  it("pages the reconcile lane when a LIVE clone is stranded by a uuid collision (#1265)", () => {
+    const kinds = (stranded: number | null) =>
+      classifyLaneHealth(
+        healthyRows().map((r) =>
+          r.operation === LANES["shopfront-clone-netcraft-reconcile"].operation
+            ? { ...r, metadata: { ...r.metadata, stranded_live: stranded } }
+            : r,
+        ),
+        { now: NOW },
+      )
+        .filter((p) => p.lane === "shopfront-clone-netcraft-reconcile")
+        .map((p) => p.kind);
+    expect(kinds(1)).toEqual(["silent_zero"]);
+    expect(kinds(0)).toEqual([]);
+    expect(kinds(null)).toEqual([]); // a failed count is not a stranded clone
+  });
+
   it("reports a lane whose last row is older than its cadence", () => {
     const rows = healthyRows().map((r) =>
       r.operation === "submit_batch" ? { ...r, created_at: ago(30) } : r,

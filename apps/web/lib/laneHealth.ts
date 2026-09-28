@@ -315,11 +315,15 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     // broken RPC read as a healthy lane forever. An empty Netcraft worklist is
     // still quiet; these are not.
     shape:
-      "liveness_error or vendor_gap_error present, or liveness_due > 0 with liveness_checked = 0",
+      "liveness_error or vendor_gap_error present, or liveness_due > 0 with liveness_checked = 0, or a live clone stranded by a uuid collision",
     silentZero: (o) =>
       typeof o.liveness_error === "string" ||
       typeof o.vendor_gap_error === "string" ||
-      (n(o, "liveness_due") > 0 && o.liveness_checked === 0),
+      (n(o, "liveness_due") > 0 && o.liveness_checked === 0) ||
+      // #1265: a LIVE weaponised clone with no escalation route — the real
+      // form of the batch-size bug. Pages on the first run: the state is not
+      // transient (only a resubmit or a death clears it).
+      n(o, "stranded_live") > 0,
   },
   "shopfront-nrd-daily-ingest": {
     crons: ["30 8 * * *"],

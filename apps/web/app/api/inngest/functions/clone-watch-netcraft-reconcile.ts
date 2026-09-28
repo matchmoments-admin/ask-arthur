@@ -151,6 +151,24 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
       // count plus the message in the Outcome Row, which the digest's
       // silent-zero shape for this lane reads (laneHealth.ts). The Netcraft
       // half is already applied by then and must still write its row.
+      // #1265: the escalation invariant that matters — a LIVE weaponised
+      // clone whose Netcraft issue slot was spent on another alert of its
+      // submission uuid, with no other route yet. Dead or inconclusive rows are
+      // excluded: the resubmit lane defers them and the liveness sweep moves
+      // them to dormant. Expected 0 (the resubmit lane's batches self-heal via
+      // v289). A failed head count reads null, never 0
+      // (head-count-failures-carry-no-error).
+      const countStrandedLive = async (): Promise<number | null> => {
+        const { count } = await sb
+          .from("shopfront_clone_alerts")
+          .select("id", { count: "exact", head: true })
+          .eq("lifecycle_state", "weaponised")
+          .eq("submitted_to->netcraft_issue->>skipped", "submission_has_issue")
+          .is("offline_since", null)
+          .eq("liveness_last_verdict", "present");
+        return typeof count === "number" ? count : null;
+      };
+
       const observeWeaponisedOutcomes = async () => {
         const liveness = await budgetedStep(
           step,
@@ -291,13 +309,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         // reconcile against ~10 resubmits/day is a broken worklist RPC, not a
         // quiet day, so the quiet row is deliberately allowed to count.
         const outcome = await observeWeaponisedOutcomes();
-        await step.run("log-cost-quiet", () =>
+        await step.run("log-cost-quiet", async () =>
           recordLaneOutcome("shopfront-clone-netcraft-reconcile", 0, {
             reason: "nothing_pending",
             uuids: 0,
             taken_down: 0,
             declined: 0,
             ...outcome,
+            stranded_live: await countStrandedLive(),
           }),
         );
         return { ok: true, uuids: 0, taken_down: 0, declined: 0, ...outcome };
@@ -424,13 +443,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
 
       const outcome = await observeWeaponisedOutcomes();
 
-      await step.run("log-cost", () =>
+      await step.run("log-cost", async () =>
         recordLaneOutcome("shopfront-clone-netcraft-reconcile", groups.length, {
           uuids: groups.length,
           ...counts,
           cap: UUID_LIMIT,
           cap_reached: groups.length >= UUID_LIMIT,
           ...outcome,
+          stranded_live: await countStrandedLive(),
         }),
       );
 

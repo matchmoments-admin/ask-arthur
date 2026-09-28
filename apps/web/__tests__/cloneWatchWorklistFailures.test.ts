@@ -16,6 +16,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   rpc: vi.fn(),
+  // Head-count result for `from(...)` reads (#1265 stranded_live).
+  headCount: { count: 0 as number | null },
+  filters: [] as Array<[string, string, unknown]>,
   laneError: vi.fn(async () => {}),
   laneOutcome: vi.fn(async () => {}),
   resolvesToHost: vi.fn(),
@@ -29,7 +32,19 @@ vi.mock("@askarthur/scam-engine/inngest/with-axiom-logging", () => ({
   withAxiomLogging: (_c: unknown, h: unknown) => h,
 }));
 vi.mock("@askarthur/supabase/server", () => ({
-  createServiceClient: () => ({ rpc: m.rpc }),
+  createServiceClient: () => ({
+    rpc: m.rpc,
+    from: (table: string) => {
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: (c: string, v: unknown) => (m.filters.push([table, c, v]), chain),
+        is: (c: string, v: unknown) => (m.filters.push([table, c, v]), chain),
+        then: (resolve: (r: unknown) => unknown) =>
+          Promise.resolve({ count: m.headCount.count, error: null }).then(resolve),
+      };
+      return chain;
+    },
+  }),
 }));
 vi.mock("@askarthur/scam-engine/lane-outcome", async (importOriginal) => ({
   // The real roster: Lanes read their brake key from it (LANE_SHAPES/LANES).
@@ -45,7 +60,8 @@ vi.mock("@askarthur/scam-engine/cost-log", () => ({
 vi.mock("@askarthur/utils/feature-flags", () => ({
   featureFlags: new Proxy({}, { get: (_t, k: string) => m.flags[k] ?? false }),
 }));
-vi.mock("@/lib/clone-watch/liveness", () => ({
+vi.mock("@/lib/clone-watch/liveness", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/clone-watch/liveness")>()),
   resolvesToHost: m.resolvesToHost,
   probeLivenessDetailed: async () => new Map(),
 }));
@@ -77,6 +93,8 @@ const failing = (rpcName: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  m.headCount.count = 0;
+  m.filters.length = 0;
   for (const k of Object.keys(m.flags)) delete m.flags[k];
 });
 
@@ -176,5 +194,54 @@ describe("re-emergence needs a host (A/AAAA), not just a delegated zone", () => 
     m.resolvesToHost.mockResolvedValue(null);
     await invoke(cloneWatchReemergenceMonitor);
     expect(m.rpc).not.toHaveBeenCalledWith("mark_takedown_reemergence_checked", expect.anything());
+  });
+});
+
+/**
+ * #1265 — the escalation invariant that matters is a LIVE weaponised clone
+ * stranded by a spent issue slot on its submission uuid; the reconcile lane
+ * reports it on every Outcome Row (quiet runs included).
+ *
+ * Go-red: drop `stranded_live` from the quiet log-cost step → the first test
+ * fails; turn `typeof count === "number" ? count : null` into `count ?? 0` →
+ * the null test fails; drop the `liveness_last_verdict` filter → the predicate
+ * test fails.
+ */
+describe("netcraft-reconcile reports stranded_live (#1265)", () => {
+  const quietRun = () => {
+    Object.assign(m.flags, { shopfrontCloneOutreach: true, cloneLifecycleReconcile: true });
+    m.rpc.mockResolvedValue({ data: [], error: null });
+  };
+  const outcomeRow = () =>
+    (m.laneOutcome.mock.calls as unknown as Array<[string, number, Record<string, unknown>]>).find(
+      (c) => c[0] === "shopfront-clone-netcraft-reconcile",
+    )?.[2];
+
+  it("writes the live-stranded count on a quiet run", async () => {
+    quietRun();
+    m.headCount.count = 2;
+    await invoke(cloneWatchNetcraftReconcile);
+    expect(outcomeRow()).toMatchObject({ reason: "nothing_pending", stranded_live: 2 });
+  });
+
+  it("a failed head count is null, never a confident 0", async () => {
+    quietRun();
+    m.headCount.count = null;
+    await invoke(cloneWatchNetcraftReconcile);
+    expect(outcomeRow()!.stranded_live).toBeNull();
+  });
+
+  it("counts only LIVE weaponised clones stranded by a uuid collision", async () => {
+    quietRun();
+    await invoke(cloneWatchNetcraftReconcile);
+    const f = m.filters.filter(([t]) => t === "shopfront_clone_alerts").map(([, c, v]) => `${c}=${String(v)}`);
+    expect(f).toEqual(
+      expect.arrayContaining([
+        "lifecycle_state=weaponised",
+        "submitted_to->netcraft_issue->>skipped=submission_has_issue",
+        "offline_since=null",
+        "liveness_last_verdict=present",
+      ]),
+    );
   });
 });

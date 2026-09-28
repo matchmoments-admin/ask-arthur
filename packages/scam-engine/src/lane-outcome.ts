@@ -353,6 +353,9 @@ export interface LaneOutcome {
     vendor_gap_unpaged?: number;
     /** Why the escalation did not complete ("list: …" / "page: …" / "mark: …"). */
     vendor_gap_error?: string;
+    /** #1265: LIVE weaponised clones stranded by a spent issue slot on their
+     *  submission uuid (should be 0). null = the count failed. */
+    stranded_live?: number | null;
   };
   "shopfront-nrd-daily-ingest": {
     domains_scanned: number;
