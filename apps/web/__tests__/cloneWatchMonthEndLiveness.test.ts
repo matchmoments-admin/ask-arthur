@@ -41,7 +41,7 @@ vi.mock("@askarthur/scam-engine/inngest/with-axiom-logging", () => ({
 vi.mock("@askarthur/scam-engine/lane-outcome", () => ({ recordLaneOutcome: m.outcome }));
 vi.mock("@/lib/clone-watch/liveness", async (orig) => ({
   ...(await orig<typeof import("@/lib/clone-watch/liveness")>()),
-  probeStockDns: m.probe,
+  probeDomainDns: m.probe,
 }));
 vi.mock("@/lib/clone-watch/month-end-stock", async (orig) => {
   const real = await orig<typeof import("@/lib/clone-watch/month-end-stock")>();

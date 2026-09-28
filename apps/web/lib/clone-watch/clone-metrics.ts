@@ -15,15 +15,15 @@
  * fold those rows INTO.
  */
 import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
-import { PARKED_HOST_PATTERNS } from "@/lib/clone-watch/urlscan-classify";
 import { urlscanEvidenceFromJsonb } from "@/lib/clone-watch/urlscan-evidence";
 import { readAttribution } from "@/lib/clone-watch/attribution";
-// Pure classifiers only — the network probe lives in liveness.ts and is called
-// by the month-end liveness function, never from this Module.
+// Pure readings only — the network probe lives in liveness.ts (the Domain DNS
+// State Module) and is called by the month-end liveness function, never here.
 import {
-  classifyDnsLookups,
-  classifyHostLookups,
-  type DnsLookup,
+  isParkingNameserver,
+  isRegistryHold,
+  readDomainDnsState,
+  type DnsAnswers,
 } from "@/lib/clone-watch/liveness";
 
 // Per-brand detail rows stored in metrics.clones.domains. Sized so the public
@@ -74,28 +74,10 @@ export interface CloneDetail {
  */
 export type SquatStatus = "held" | "parked" | "live" | "unknown";
 
-// Parking / aftermarket NAMESERVER roots, from the prod nameserver census
-// (2026-09-22: afternic 402, dns-parking 192, sedoparking 28, abovedomains 28,
-// aftermarket.pl 24, namebrightdns 26 …). Distinct from PARKED_HOST_PATTERNS,
-// which matches the urlscan landing HOST, not the NS record — both are used.
-const PARKING_NS_ROOTS = [
-  "afternic.com",
-  "dns-parking.com",
-  "sedoparking.com",
-  "parkingcrew.net",
-  "bodis.com",
-  "abovedomains.com",
-  "above.com",
-  "aftermarket.pl",
-  "namebrightdns.com",
-  "dan.com",
-  "undeveloped.com",
-] as const;
-
-function hostMatches(host: string, roots: readonly string[]): boolean {
-  const h = host.trim().toLowerCase().replace(/\.$/, "");
-  return roots.some((r) => h === r || h.endsWith("." + r));
-}
+// Parking nameservers and registry holds are the Domain DNS State Module's
+// readings (liveness.ts `isParkingNameserver` over the ONE parking table in
+// @askarthur/scam-engine/parking-providers, and `isRegistryHold`). squatStatus
+// reads them over STORED attribution; stockStatus over a fresh probe.
 
 /** Pure. Precedence: held > parked > live > unknown. */
 export function squatStatus(row: {
@@ -104,17 +86,10 @@ export function squatStatus(row: {
   urlscan_evidence?: CloneAlertRow["urlscan_evidence"];
 }): SquatStatus {
   const attr = readAttribution(row.attribution);
-  const statuses = attr.statuses.map((s) =>
-    s.toLowerCase().replace(/[^a-z]/g, ""),
-  );
-  if (statuses.some((s) => s === "clienthold" || s === "serverhold")) {
-    return "held";
-  }
-  const ns = attr.nameServers;
+  if (isRegistryHold(attr.statuses)) return "held";
   if (
     row.urlscan_classification === "parked_for_sale" ||
-    ns.some((n) => hostMatches(n, PARKING_NS_ROOTS)) ||
-    ns.some((n) => hostMatches(n, PARKED_HOST_PATTERNS))
+    isParkingNameserver(attr.nameServers)
   ) {
     return "parked";
   }
@@ -170,12 +145,8 @@ export const ACTIVE_STOCK_STATUSES: ReadonlySet<StockStatus> = new Set([
   "parked",
 ]);
 
-/** The fresh month-end DNS answers for one name. `aaaa` is null when A had records. */
-export interface StockDns {
-  a: DnsLookup;
-  aaaa: DnsLookup | null;
-  ns: DnsLookup;
-}
+/** The fresh month-end DNS answers for one name (liveness.ts `DnsAnswers`). */
+export type StockDns = DnsAnswers;
 
 /**
  * Pure. Fresh DNS decides first; stored facts only fill in where DNS did not
@@ -201,40 +172,28 @@ export function stockStatus(input: {
   urlscan_classification?: string | null;
   lifecycle_state?: string | null;
 }): StockStatus {
-  const { dns } = input;
-  if (!dns) return "unverified";
-
-  if (classifyDnsLookups(dns.a, () => dns.ns) === true) return "gone";
-
+  if (!input.dns) return "unverified";
   const attr = readAttribution(input.attribution);
-  const held = attr.statuses
-    .map((s) => s.toLowerCase().replace(/[^a-z]/g, ""))
-    .some((s) => s === "clienthold" || s === "serverhold");
-  const freshNs =
-    "records" in dns.ns && dns.ns.records.length > 0 ? dns.ns.records : null;
-  const parkingNs = (ns: readonly string[]) =>
-    ns.some((n) => hostMatches(n, PARKING_NS_ROOTS)) ||
-    ns.some((n) => hostMatches(n, PARKED_HOST_PATTERNS));
+  const state = readDomainDnsState(input.dns, { statuses: attr.statuses });
 
-  const resolves = classifyHostLookups(
-    dns.a,
-    () => dns.aaaa ?? { errorCode: "UNKNOWN" },
-  );
-  if (resolves === true) {
-    if (input.lifecycle_state === "weaponised") return "live_phishing";
-    if (
-      input.urlscan_classification === "parked_for_sale" ||
-      parkingNs(freshNs ?? attr.nameServers)
-    ) {
-      return "parked";
-    }
-    return "live";
+  switch (state.presence) {
+    case "gone":
+      return "gone";
+    case "resolves":
+      if (input.lifecycle_state === "weaponised") return "live_phishing";
+      if (
+        input.urlscan_classification === "parked_for_sale" ||
+        (state.parkingNs ?? isParkingNameserver(attr.nameServers))
+      ) {
+        return "parked";
+      }
+      return "live";
+    case "no_host":
+      if (state.parkingNs === true) return "parked";
+      return state.hold ? "held" : "no_host";
+    default:
+      return state.hold ? "held" : "unverified";
   }
-  if (resolves === false) {
-    if (freshNs && parkingNs(freshNs)) return "parked";
-    return held ? "held" : "no_host";
-  }
-  return held ? "held" : "unverified";
 }
 
 export interface CloneBrandMetrics {

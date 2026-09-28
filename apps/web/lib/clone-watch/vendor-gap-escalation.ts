@@ -37,7 +37,8 @@ export interface VendorGapRow {
   brand: string | null;
   url_state: string;
   basis: "rejected" | "issue_unanswered" | string;
-  /** What our DNS sweep last saw: present / inconclusive / null = never read. */
+  /** What our DNS sweep last saw: present (an address) / no_host (v341) /
+   *  inconclusive / null = never read. */
   dns_last?: string | null;
 }
 
@@ -49,6 +50,8 @@ export function defang(domain: string): string {
 /** What our DNS actually saw — never implied. */
 export function dnsLastLabel(v: string | null | undefined): string {
   if (v === "present") return "DNS: resolves";
+  // v341: the name exists but no address was proven — not a live site.
+  if (v === "no_host") return "DNS: no address";
   if (v === "inconclusive") return "DNS: inconclusive";
   if (v === "gone") return "DNS: NXDOMAIN (unconfirmed)";
   return "DNS: not yet read";

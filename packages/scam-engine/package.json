@@ -53,6 +53,7 @@
     "./brand-alerts": "./src/brand-alerts.ts",
     "./social-post": "./src/social-post.ts",
     "./local-intel": "./src/local-intel.ts",
+    "./parking-providers": "./src/parking-providers.ts",
     "./abuseipdb": "./src/abuseipdb.ts",
     "./hibp": "./src/hibp.ts",
     "./twilio-lookup": "./src/twilio-lookup.ts",

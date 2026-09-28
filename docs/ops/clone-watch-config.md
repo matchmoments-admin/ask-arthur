@@ -131,10 +131,13 @@ resubmit age gate (v289) and is re-filed under a fresh uuid, up to 3 times. So
 "URLs per uuid" is only meaningful per lane.
 
 **The invariant that matters is LIVE stranded** — a weaponised clone that is
-still up, stamped `submission_has_issue`, with no route yet. It should be 0,
+still up, stamped `submission_has_issue`, with no route yet. "Up" is the sweep's
+stored verdict `present`, which since v341 means **resolves to an address**
+(`livenessVerdictOf`, liveness.ts); a name with NS but no A/AAAA is `no_host`
+and is not counted (before v341 it read `present`). It should be 0,
 and the reconcile lane reports it as `stranded_live` on every Outcome Row; the
-health digest pages when it is > 0 (`LANE_SHAPES`). Stranded rows that are dead
-or inconclusive are handled elsewhere (the resubmit probe defers them; the
+health digest pages when it is > 0 (`LANE_SHAPES`). Stranded rows that are dead,
+address-less or inconclusive are handled elsewhere (the resubmit probe defers them; the
 v329 liveness sweep moves them to `dormant`).
 
 ```sql
@@ -148,6 +151,7 @@ WHERE (submitted_to->'netcraft'->>'submitted_at')::timestamptz > now() - interva
 GROUP BY 1, 2 ORDER BY 2 DESC, 1;
 
 -- LIVE stranded (should be 0) — the same predicate as the Outcome Row field.
+-- 'present' = resolves to an address since v341.
 SELECT count(*) FROM shopfront_clone_alerts
 WHERE lifecycle_state = 'weaponised'
   AND submitted_to->'netcraft_issue'->>'skipped' = 'submission_has_issue'
@@ -848,6 +852,23 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 > `declined` — post-v284 "decline rate" is structurally unmeasurable for the
 > weaponised cohort; the success signal to watch is takedown conversions.
 
+> **v341 (PR-A, 2026-09-28) — Domain DNS State: one probe, one state, one "present".**
+>
+> Eight rules answered "is this lookalike alive?" from four probes, and two disagreed on a name
+> whose NS resolves but which has no A/AAAA: the weaponised sweep stored it `present` (so a dormant
+> clone with its address pulled re-entered `weaponised` and counted in `stranded_live`), while the
+> re-emergence monitor, month-end stock (`no_host`) and the v326 dead-dormancy exit required an
+> address. Now `probeDomainDns` → `readDomainDnsState` (gone / resolves / no_host / unverified +
+> parking NS, registry hold, shared-front opacity) and every verdict — `isDomainGone`,
+> `resolvesToHost`, `submitPrecheckOf`, `livenessVerdictOf`, `stockStatus`, the recheck
+> fingerprint — is a reading of it. The sweep stores `present` only for an address, `no_host` for
+> "exists, no address", and `record_weaponised_liveness` (v341) APPLIES that verdict: only
+> `present` brings a dormant clone back. The dormancy entry clock is unchanged (NXDOMAIN only).
+> Parking providers are one table (`@askarthur/scam-engine/parking-providers`) with each reader's
+> set unchanged; the three DNS sweeps share `sweepDomainDns`. Measured 2026-09-28: of 144 swept
+> names, 5 weaponised `present` rows are NS-only (ids 2761, 3081, 1385, 3907, 3952) and will read
+> `no_host` on their next sweep.
+
 > **v320 + PR B "correctness" (2026-09-23) — DNS, send safety, error visibility.**
 >
 > - **Two DNS verdicts, one Module (`liveness.ts`).** `isDomainGone` is the LIFECYCLE verdict and
@@ -1393,7 +1414,10 @@ gate.
 
 Each run DNS-reads up to **600** due rows before spending any urlscan quota
 (`RECHECK_DNS` in `apps/web/lib/clone-watch/recheck-dns-gate.ts`; lookups are
-`probeStockDns` in `liveness.ts` — A, AAAA only when A has none, always NS).
+`probeDomainDns` in `liveness.ts` — A and NS, AAAA only when A has none —
+read through `sweepDomainDns`, the one sweep it shares with the weaponised
+liveness sweep and month-end stock; the fingerprint and opacity are readings of
+the row's `DomainDnsState`).
 The fingerprint reduces addresses to their **/24 (IPv4) and /48 (IPv6)** and
 two reads MATCH when NS is identical and the address sets overlap. That rule
 is measured, not guessed: on 400 due pool names read twice 11 minutes apart
