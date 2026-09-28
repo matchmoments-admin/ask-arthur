@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildTrendDisclosure } from "@/lib/clone-watch/targeting-copy";
 import {
   describeTotalMove,
+  methodChangeSentence,
+  moverCopy,
   shortTotalMove,
   threeMonthLine,
   totalMove,
@@ -85,17 +89,70 @@ describe("trend-copy", () => {
 });
 
 
-describe("buildTrendDisclosure — a matcher change is said even with nothing to claim", () => {
-  it("says the months are not comparable instead of going silent", () => {
-    const d = buildTrendDisclosure({
-      claimable: 0,
-      unchanged: 0,
-      coverageStarted: 0,
-      coverageEnded: 0,
-      belowFloor: 100,
-      unknown: 0,
-      methodChanged: 40,
-    });
-    expect(d).toMatch(/not comparable/);
+/**
+ * The matcher-change disclosure has ONE home: trend-copy methodChangeSentence
+ * (PR-D, map #1224). buildTrendDisclosure used to carry a second wording, so
+ * the caption said it twice; the edition page said it not at all.
+ *
+ * GO-RED: restoring the old claimable=0 sentence in buildTrendDisclosure fails
+ * "the trend disclosure no longer restates it" (and the caption's said-once
+ * test in cloneWatchCaption.test.ts); making methodChangeSentence return null
+ * fails "trend-copy states it".
+ */
+describe("matcher change — said once, by trend-copy", () => {
+  const exclusions = {
+    claimable: 0,
+    unchanged: 0,
+    coverageStarted: 0,
+    coverageEnded: 0,
+    belowFloor: 100,
+    unknown: 0,
+    methodChanged: 40,
+  };
+
+  it("trend-copy states it, and describeTotalMove is that sentence", () => {
+    const m = mom({ methodChanged: true, available: false });
+    expect(methodChangeSentence(m)).toMatch(/not comparable/);
+    expect(describeTotalMove(m)).toBe(methodChangeSentence(m));
+    expect(methodChangeSentence(mom())).toBeNull();
+  });
+
+  it("the trend disclosure no longer restates it", () => {
+    expect(buildTrendDisclosure(exclusions)).toBe("");
+  });
+});
+
+/**
+ * Biggest mover — one wording for the caption and the carousel slide.
+ *
+ * GO-RED: reverting the verb rule to the caption's old `>=` ("more than
+ * double" at exactly 2×) fails "exactly double is 'doubled'"; the slide's old
+ * "more than {jumped}" can no longer be written because the slide prints
+ * `mover.verb` (pinned by the source check below — removing moverCopy from the
+ * slide fails it).
+ */
+describe("moverCopy", () => {
+  it("exactly double is 'doubled', not 'more than doubled'", () => {
+    expect(moverCopy("Kmart", { priorClones: 10, clones: 20 }).verb).toBe("doubled");
+  });
+  it("more than double is 'more than doubled'", () => {
+    expect(moverCopy("Kmart", { priorClones: 10, clones: 21 }).verb).toBe("more than doubled");
+  });
+  it("a rise short of 2× 'jumped' — never 'more than jumped'", () => {
+    const c = moverCopy("Kmart", { priorClones: 30, clones: 45 });
+    expect(c.verb).toBe("jumped");
+    expect(`${c.sentence} ${c.lead}`).not.toMatch(/more than jumped/);
+  });
+  it("no actor attribution, and the scope of 'sharpest' is stated", () => {
+    const c = moverCopy("Kmart", { priorClones: 30, clones: 45 });
+    expect(`${c.sentence} ${c.lead}`).not.toMatch(/one actor|in bulk|campaign/i);
+    expect(c.sentence).toContain("Australian brands we monitored for both months");
+  });
+  it("the caption and the admin slide both word the mover through moverCopy", () => {
+    const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+    expect(read("lib/clone-watch/clone-watch-caption.ts")).toMatch(/moverCopy\(spName, sp\)\.sentence/);
+    const slide = read("app/admin/report-card/page.tsx");
+    expect(slide).toMatch(/moverCopy\(name, sp\)/);
+    expect(slide).not.toMatch(/more than \{/);
   });
 });

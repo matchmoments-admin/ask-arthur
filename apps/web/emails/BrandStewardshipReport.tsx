@@ -14,7 +14,13 @@ import {
 import { CLONE_WATCH_COVERAGE_SENTENCE } from "@/components/clone-watch/CoverageNote";
 import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
-import { hasOutcomes, lifecycleBadge } from "@/lib/clone-watch/outcome-copy";
+import {
+  hasOutcomes,
+  lifecycleBadge,
+  stewardshipOutcomeLines,
+  type CloneOutcomeKpis,
+  type OutcomeLineKind,
+} from "@/lib/clone-watch/outcome-copy";
 import {
   registrarAbuseUrl,
   hostAbuseUrl,
@@ -39,6 +45,15 @@ const PARTNERSHIP_URL = "https://askarthur.au/contact";
 // share page (which stores up to CLONE_DETAIL_CAP=100). Keeps the email well
 // under Gmail's ~102 KB clipping threshold.
 const EMAIL_CLONE_DISPLAY_CAP = 20;
+
+/** Layout only — the words are outcome-copy.ts stewardshipOutcomeLines. */
+const OUTCOME_ICON: Record<OutcomeLineKind, string> = {
+  taken_down: "✅",
+  declined: "⚠️",
+  escalated: "↩️",
+  weaponised: "🔥",
+  weaponised_after_decline: "🔁",
+};
 
 export interface BrandStewardshipReportProps {
   brandName: string;
@@ -117,8 +132,9 @@ export interface CloneDetections {
   escalated?: number;
   /** Currently serving active phishing (lifecycle weaponised). */
   weaponised?: number;
-  /** Weaponised AND previously Netcraft-declined — the only subset for which
-   *  the "graded no-threat, later flipped" claim is provable (see
+  /** Weaponised AFTER Netcraft declined it, from timestamps, whatever its
+   *  state is now — the only rows for which the "graded no-threat, later
+   *  flipped" claim is provable. NOT a subset of `weaponised` since v329 (see
    *  lib/clone-watch/outcome-copy.ts honesty rules). Absent on report rows
    *  persisted before this field existed. */
   weaponisedAfterDecline?: number;
@@ -187,6 +203,15 @@ export default function BrandStewardshipReport({
   // submitted to Netcraft.
   const cloneCount = cloneDetections?.detected ?? 0;
   const netcraftReported = cloneDetections?.netcraftReported ?? 0;
+  // Absent fields read 0: ledger rows persisted before a field existed.
+  const outcomeKpis: CloneOutcomeKpis = {
+    takenDown: cloneDetections?.takenDown ?? 0,
+    declined: cloneDetections?.declined ?? 0,
+    escalated: cloneDetections?.escalated ?? 0,
+    weaponised: cloneDetections?.weaponised ?? 0,
+    weaponisedAfterDecline: cloneDetections?.weaponisedAfterDecline ?? 0,
+    reTakenDown: cloneDetections?.reTakenDown ?? 0,
+  };
   const totalDetected = detected + cloneCount;
   const totalReported = reportsSent + netcraftReported;
   const destinations: Array<[string, number]> = [
@@ -338,20 +363,10 @@ export default function BrandStewardshipReport({
                 </Text>
 
                 {/* Netcraft outcome — the honest lifecycle of what we reported.
-                    Verbs + claim rules come from lib/clone-watch/outcome-copy.ts
-                    (single vocabulary module): "actioned by Netcraft" (not
-                    "removed"), "graded no-threat" for declines, "we escalated"
-                    for our report_issue push-back, and the "flipped after a
-                    no-threat grade" claim ONLY for weaponisedAfterDecline. */}
-                {hasOutcomes({
-                  takenDown: cloneDetections.takenDown ?? 0,
-                  declined: cloneDetections.declined ?? 0,
-                  escalated: cloneDetections.escalated ?? 0,
-                  weaponised: cloneDetections.weaponised ?? 0,
-                  weaponisedAfterDecline:
-                    cloneDetections.weaponisedAfterDecline ?? 0,
-                  reTakenDown: cloneDetections.reTakenDown ?? 0,
-                }) && (
+                    The words are outcome-copy.ts stewardshipOutcomeLines (the
+                    single vocabulary module); this template only lays them
+                    out. */}
+                {hasOutcomes(outcomeKpis) && (
                   <Section
                     style={{
                       margin: "0 0 14px 0",
@@ -364,54 +379,11 @@ export default function BrandStewardshipReport({
                     <Text style={{ ...labelStyle, margin: "0 0 6px 0" }}>
                       What Netcraft did with them
                     </Text>
-                    {(cloneDetections.takenDown ?? 0) > 0 && (
-                      <Text style={outcomeLine}>
-                        ✅ <strong>{cloneDetections.takenDown}</strong> actioned by
-                        Netcraft (added to browser / blocklist protection).
+                    {stewardshipOutcomeLines(outcomeKpis, brandName).map((line) => (
+                      <Text key={line.kind} style={outcomeLine}>
+                        {OUTCOME_ICON[line.kind]} <strong>{line.n}</strong> {line.text}
                       </Text>
-                    )}
-                    {(cloneDetections.declined ?? 0) > 0 && (
-                      <Text style={outcomeLine}>
-                        ⚠️ <strong>{cloneDetections.declined}</strong> graded
-                        &ldquo;no threat&rdquo; and left live — lookalikes of{" "}
-                        {brandName} sitting parked, unactioned, and free to be
-                        weaponised at any time.
-                      </Text>
-                    )}
-                    {(cloneDetections.escalated ?? 0) > 0 && (
-                      <Text style={outcomeLine}>
-                        ↩️ <strong>{cloneDetections.escalated}</strong> of those we
-                        escalated back to Netcraft to force a re-review
-                        {(cloneDetections.reTakenDown ?? 0) > 0 && (
-                          <>
-                            {" "}
-                            — <strong>{cloneDetections.reTakenDown}</strong> were
-                            then actioned
-                          </>
-                        )}
-                        .
-                      </Text>
-                    )}
-                    {(cloneDetections.weaponised ?? 0) > 0 && (
-                      <Text style={outcomeLine}>
-                        🔥 <strong>{cloneDetections.weaponised}</strong>{" "}
-                        observed serving phishing (at the time of this report)
-                        {(cloneDetections.weaponisedAfterDecline ?? 0) > 0 && (
-                          <>
-                            {" "}
-                            — <strong>
-                              {cloneDetections.weaponisedAfterDecline}
-                            </strong>{" "}
-                            {/* v329: from timestamps, not a subset of the
-                                current-state count above. */}
-                            lookalikes served phishing after being graded
-                            &ldquo;no&nbsp;threat&rdquo;, confirming that &ldquo;no&nbsp;threat&rdquo; did not
-                            mean safe
-                          </>
-                        )}
-                        .
-                      </Text>
-                    )}
+                    ))}
                   </Section>
                 )}
 

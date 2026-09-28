@@ -12,6 +12,7 @@ import {
 } from "@/lib/clone-watch/clone-cohort";
 import { monthWindow, priorWindow } from "@/lib/clone-watch/month-window";
 import type { BrandCoverage } from "@/lib/clone-watch/brand-coverage";
+import { readBrandCoverage } from "@/lib/clone-watch/brand-coverage-data";
 import {
   readFrozenMonths,
   readSweptDomains,
@@ -208,44 +209,18 @@ export async function loadCardInputs(month?: string): Promise<CardInputs> {
 
   // NULL means the read FAILED. That is not the same as an empty table, and
   // collapsing the two is how a degraded read quietly becomes "no exclusions".
-  let coverage: BrandCoverage[] | null = null;
-  {
-    const { data, error } = await sb
-      .from("brand_coverage_history")
-      .select("brand, brand_normalized, brand_domain, covered_from, covered_to");
-    if (error) {
-      logger.warn("report-card: brand coverage read failed", {
-        error: error.message,
-      });
-    } else {
-      coverage = (data ?? []).map((r) => {
-        const row = r as {
-          brand_normalized: string;
-          brand_domain: string;
-          covered_from: string;
-          covered_to: string | null;
-        };
-        return {
-          brandDomain: row.brand_domain,
-          brandNormalized: row.brand_normalized,
-          coveredFrom: row.covered_from,
-          coveredTo: row.covered_to,
-        };
-      });
-      if (coverage.length === 0) {
-        // An EMPTY table is not an error, so nothing above logs — yet it
-        // suppresses every trend claim exactly as a failed read does, and
-        // silently: `buildTrendDisclosure` early-returns "" when nothing is
-        // claimable, so the caveat that would explain the absence is the very
-        // thing that goes missing. Say so, or a card built before
-        // backfill-brand-coverage.ts has run reads as a quiet month.
-        logger.warn("report-card: brand_coverage_history is EMPTY", {
-          period: window.periodMonth,
-          consequence:
-            "all trend claims suppressed; run backfill-brand-coverage.ts",
-        });
-      }
-    }
+  const coverage: BrandCoverage[] | null = await readBrandCoverage(sb, "report-card");
+  if (coverage && coverage.length === 0) {
+    // An EMPTY table is not an error, so the reader does not log — yet it
+    // suppresses every trend claim exactly as a failed read does, and
+    // silently: `buildTrendDisclosure` early-returns "" when nothing is
+    // claimable, so the caveat that would explain the absence is the very
+    // thing that goes missing. Say so, or a card built before
+    // backfill-brand-coverage.ts has run reads as a quiet month.
+    logger.warn("report-card: brand_coverage_history is EMPTY", {
+      period: window.periodMonth,
+      consequence: "all trend claims suppressed; run backfill-brand-coverage.ts",
+    });
   }
 
   const takedownEvents = await fetchTakedownEvents(sb);

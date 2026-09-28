@@ -352,3 +352,40 @@ export function summariseTrendExclusions(
     methodChanged: verdicts.filter((v) => v.kind === "method_changed").length,
   };
 }
+
+/**
+ * How many brands the watchlist covered on `dayIso` (YYYY-MM-DD) — the live
+ * "we monitor N brands" figure. A row covers a day when it started on or
+ * before it and was not yet closed. `coveredTo` is a detection date (the
+ * monthly cron stamps its run date for a brand it finds missing), so a brand
+ * stamped closed on that day is already gone.
+ */
+export function brandsMonitoredOn(rows: readonly BrandCoverage[], dayIso: string): number {
+  const day = dayIso.slice(0, 10);
+  const brands = new Set<string>();
+  for (const row of rows) {
+    if (row.coveredFrom <= day && (row.coveredTo === null || row.coveredTo > day)) {
+      brands.add(row.brandNormalized);
+    }
+  }
+  return brands.size;
+}
+
+/**
+ * THE published wording of a monitored-brand count: rounded DOWN to the nearest
+ * ten with a "+" ("293" → "290+"), so it stays true between watchlist edits.
+ * Every surface that states how many brands we watch — the LinkedIn caption,
+ * the carousel's "how we know" slide, the public /clone-watch page and the
+ * monthly blog prompt — prints this and nothing else. The literals it replaced
+ * ("~50" on the page and the slide, "~130" in the blog prompt) were each true
+ * once, and each went stale on its own schedule while the watchlist grew.
+ *
+ * `null` when the count is unknown (the coverage read failed) or zero (an
+ * empty table is a missing measurement, not "we watch nothing"): the caller
+ * then drops the number rather than print a guess.
+ */
+export function monitoredBrandsPhrase(count: number | null | undefined): string | null {
+  if (count == null || !Number.isFinite(count) || count < 1) return null;
+  if (count < 10) return String(Math.floor(count));
+  return `${Math.floor(count / 10) * 10}+`;
+}

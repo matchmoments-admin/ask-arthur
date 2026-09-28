@@ -3,13 +3,15 @@
 import { useMemo, useState } from "react";
 import FeatureCard from "@/components/FeatureCard";
 
-// Interactive "Today's sweep" grid for the clone-watch pillar page. The server
-// component fetches the operator-CONFIRMED alerts (RLS-gated, service-role) and
-// hands us a lean, already-safe array; all the search / filter / group-by-brand
-// interactivity lives here because a server component can't hold client state.
+// Interactive list of confirmed lookalikes for the clone-watch pillar page. The
+// server component fetches the CONFIRMED, reported alerts (RLS-gated,
+// service-role) newest first and hands us a lean, already-safe array; all the
+// search / filter / group-by-brand interactivity lives here because a server
+// component can't hold client state.
 //
-// Safety: `typeKey` is pre-mapped server-side through a fixed whitelist, so no
-// attacker-influenced signal token reaches the badge. Domains render as text
+// Safety: `typeKey` and `badge` are pre-mapped server-side through fixed
+// whitelists (typeKeyFor, outcome-copy.ts publicListBadge), so no
+// attacker-influenced token reaches a pill. Domains render as text
 // (React-escaped). Rows are already tp_confirmed/tp_actioned before they arrive.
 
 export type CloneDomainItem = {
@@ -17,6 +19,8 @@ export type CloneDomainItem = {
   brand: string | null;
   typeKey: "t" | "b" | "l" | "match";
   firstSeenAt: string;
+  /** What happened after we reported it; null = still open (no badge). */
+  badge: { label: string; title: string } | null;
 };
 
 const MONO = "var(--font-plex-mono), ui-monospace, monospace";
@@ -102,10 +106,13 @@ export default function CloneWatchDomainList({
             id="sweep-heading"
             className="text-2xl md:text-[26px] font-extrabold tracking-tight text-deep-navy"
           >
-            Today&apos;s sweep
+            Confirmed lookalikes
           </h2>
+          {/* "newest first" is true because getAlerts orders by first_seen_at
+              DESC and nothing here reorders the flat list (grouping by brand
+              reorders groups, and keeps each group newest first). */}
           <p className="mt-1.5 text-sm text-slate-500">
-            Showing <strong className="font-bold text-gov-slate">{resultCount}</strong> · newest first
+            Showing <strong className="font-bold text-gov-slate">{resultCount}</strong> · last 7 days · newest first
           </p>
         </div>
         <div className="relative">
@@ -172,12 +179,12 @@ export default function CloneWatchDomainList({
         <div className="py-16 text-center">
           <p className="text-lg font-semibold text-deep-navy mb-2">
             {items.length === 0
-              ? "No registrations matched in the last 7 days"
+              ? "No confirmed lookalikes in the last 7 days"
               : "No domains match your search"}
           </p>
           <p className="text-sm text-gov-slate">
             {items.length === 0
-              ? "New entries appear here within hours of each daily sweep (08:30 UTC)."
+              ? "A match from the daily sweep (08:30 UTC) appears here once it is confirmed and reported."
               : "Try a different brand name or clear the filter."}
           </p>
         </div>
@@ -232,6 +239,14 @@ export default function CloneWatchDomainList({
                     }
                     trailing={
                       <div className="flex items-center gap-4">
+                        {d.badge && (
+                          <span
+                            className="whitespace-nowrap rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                            title={d.badge.title}
+                          >
+                            {d.badge.label}
+                          </span>
+                        )}
                         {/* Visually shown only on wider viewports, but kept in
                             the a11y tree at all sizes (sr-only on mobile) so the
                             signal type is never conveyed by the dot's colour

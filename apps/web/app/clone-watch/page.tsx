@@ -1,6 +1,13 @@
-// Layer 0 clone-watch public page. Renders the last 7 days of operator-CONFIRMED
-// NRD hits with factual-signal-only copy per docs/policy/draft-disclaimer-pack-v0.md
-// Surface 5 principles.
+// Layer 0 clone-watch public page. Lists the last 7 days of CONFIRMED NRD
+// lookalikes (triage tp_confirmed / tp_actioned — in prod almost all are the
+// Netcraft auto lane's machine confirmation, classifier + live-site evidence,
+// not a human's), each one reported to Netcraft. Founder decision 2026-09-28:
+// say that plainly (public-impact.ts). Registrant copy follows
+// docs/policy/draft-disclaimer-pack-v0.md Surface 5: no claim about who
+// registered a domain or why.
+//
+// Freshness: ISR, revalidate = 3600 (below) — a change to the data or to v340
+// shows within the hour; a deploy renders fresh.
 //
 // Indexing is gated on NEXT_PUBLIC_FF_CLONE_WATCH_PUBLIC (same flag as
 // /clone-watch/method and /clone-watch/[period]). Copy hardened 2026-08-06
@@ -28,6 +35,20 @@ import {
   parseTakedownStats,
   type TakedownStats,
 } from "@/lib/clone-watch/takedown-stats";
+import {
+  MATCHES_LABEL,
+  parsePublicImpact,
+  REPORTED_LABEL,
+  REPORTING_STATEMENT,
+  type PublicImpactSnapshot,
+} from "@/lib/clone-watch/public-impact";
+import { publicListBadge } from "@/lib/clone-watch/outcome-copy";
+import { lookalikeDomains } from "@/lib/clone-watch/targeting-copy";
+import {
+  brandsMonitoredOn,
+  monitoredBrandsPhrase,
+} from "@/lib/clone-watch/brand-coverage";
+import { readBrandCoverage } from "@/lib/clone-watch/brand-coverage-data";
 import FeatureCard from "@/components/FeatureCard";
 import SampleReportForm from "@/components/SampleReportForm";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
@@ -42,28 +63,23 @@ export const metadata: Metadata = {
   title:
     "Clone-watch — newly-registered AU brand-pattern domains | Ask Arthur",
   description:
-    "A daily list of newly-registered domains matching the lexical pattern of Australian retail brand names. Public-registry observations only.",
+    "Newly-registered domains confirmed as lookalikes of brands Australians use, and reported to Netcraft for browser blocklisting. Updated daily.",
   robots: {
     index: featureFlags.cloneWatchPublic,
     follow: featureFlags.cloneWatchPublic,
   },
 };
 
+/** Only the columns the page renders (the old select also carried id,
+ *  severity_tier, source and the whole signals array). */
 interface CloneAlertRow {
-  id: number;
   candidate_domain: string;
   inferred_target_domain: string | null;
-  signals: unknown;
-  severity_tier: string;
   first_seen_at: string;
-  source: string;
-}
-
-interface SignalEntry {
-  type?: string;
-  signal_type?: string;
-  score?: number;
-  evidence?: Record<string, unknown>;
+  lifecycle_state: string | null;
+  offline_since: string | null;
+  /** signals->0->>signal_type — the first signal's type, the only part read. */
+  signal_type: string | null;
 }
 
 async function getAlerts(): Promise<CloneAlertRow[]> {
@@ -73,33 +89,45 @@ async function getAlerts(): Promise<CloneAlertRow[]> {
   const { data } = await supabase
     .from("shopfront_clone_alerts")
     .select(
-      "id, candidate_domain, inferred_target_domain, signals, severity_tier, first_seen_at, source",
+      "candidate_domain, inferred_target_domain, first_seen_at, lifecycle_state, offline_since, signal_type:signals->0->>signal_type",
     )
     .is("target_shop_id", null)
     .eq("source", "nrd")
-    .eq("alert_state", "open")
-    // Only publish operator-CONFIRMED clones. Without this, the page rendered
+    // Only publish CONFIRMED lookalikes. Without this, the page rendered
     // every open NRD row regardless of triage outcome — verified 2026-05-29 to
     // be leaking 35 `fp` (false-positive, already cleared as NOT clones) and 1
     // `needs_investigation` row out of 47, i.e. publicly naming legitimate
-    // businesses' domains as "possible clones". `noindex` keeps it out of
-    // search but the page is still publicly reachable, so this is a
+    // businesses' domains as "possible clones". This is a
     // defamation/reputational fix, not cosmetic.
     .in("triage_status", ["tp_confirmed", "tp_actioned"])
+    // The page states that every listed domain was reported to Netcraft
+    // (public-impact.ts REPORTING_STATEMENT). This filter is what makes that
+    // true, not the observation that it happened to be (100% of confirmed
+    // rows carried a submission on 2026-09-28).
+    .not("submitted_to->netcraft", "is", null)
+    // Open, blocklisted, or witnessed offline — so the row badge
+    // (publicListBadge) can say what happened after we reported it. Until
+    // 2026-09-28 this was alert_state='open' only, which hid every confirmed
+    // lookalike the moment Netcraft actioned it. A `dormant` row WITHOUT
+    // offline_since (v285's "gave up waiting for a scan") stays out: nothing
+    // honest can be said about it.
+    .or("alert_state.in.(open,taken_down),offline_since.not.is.null")
     .gte("first_seen_at", since)
-    .order("severity", { ascending: false })
+    // Newest first, as the list's label says. It used to sort by severity
+    // first while saying "newest first"; every NRD row is capped at the same
+    // low severity tier, so the order was effectively arbitrary within a day.
     .order("first_seen_at", { ascending: false })
     .limit(100);
   return (data ?? []) as CloneAlertRow[];
 }
 
-interface PublicImpactSnapshot {
-  window_days: number;
-  candidates_total: number;
-  tp_confirmed_total: number;
-  netcraft_submits_total: number;
-  brand_notifications_total: number;
-  brands_protected: number;
+/** Brands on the watchlist today, or null when the coverage read failed. */
+async function getMonitoredBrands(): Promise<number | null> {
+  const supabase = createServiceClient();
+  if (!supabase) return null;
+  const rows = await readBrandCoverage(supabase, "clone-watch-page");
+  if (!rows) return null;
+  return brandsMonitoredOn(rows, new Date().toISOString());
 }
 
 interface PublicVendorGapStats {
@@ -128,8 +156,8 @@ async function getPublicImpact(): Promise<{
     supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
     supabase.rpc("clone_watch_vendor_gap_stats", { p_days: 90 }),
   ]);
-  if (!Array.isArray(impactRes.data) || impactRes.data.length === 0) return null;
-  const impact = impactRes.data[0] as PublicImpactSnapshot;
+  const impact = parsePublicImpact(impactRes.data);
+  if (!impact) return null;
   const takedown = parseTakedownStats(takedownRes.data);
   const vendorGap =
     Array.isArray(vendorGapRes.data) && vendorGapRes.data[0]
@@ -166,19 +194,12 @@ function editionLabel(periodMonth: string): string {
   });
 }
 
-function firstSignal(signals: unknown): SignalEntry | null {
-  if (!Array.isArray(signals) || signals.length === 0) return null;
-  const first = signals[0];
-  if (typeof first !== "object" || first === null) return null;
-  return first as SignalEntry;
-}
-
 // Map the first signal's type to the client grid's typeKey via a fixed
 // whitelist — anything outside the curated vocabulary falls back to the
 // generic "match" badge so attacker-influenced JSONB can't surface raw enum
 // tokens inside the styled pill.
-function typeKeyFor(signals: unknown): CloneDomainItem["typeKey"] {
-  switch (firstSignal(signals)?.signal_type) {
+function typeKeyFor(signalType: string | null): CloneDomainItem["typeKey"] {
+  switch (signalType) {
     case "levenshtein":
       return "t";
     case "substring":
@@ -248,16 +269,18 @@ function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
         Browsing / VirusTotal reputation; their timestamps are quantised by
         our recheck and retrieve cycles. Blocklisting timings count only
         transitions witnessed in the vendor&apos;s own per-URL gradings; a
-        blocklisted site may still be online. Aggregate-only — no specific domains are published.
+        blocklisted site may still be online. Only confirmed lookalikes are
+        counted.
       </p>
     </div>
   );
 }
 
-// Dark "impact instrument" panel — aggregate-only, never names a specific
-// candidate domain. Renders only when FF_SHOPFRONT_CLONE_OUTREACH=true AND
-// there's at least one candidate in the window (a "0 candidates" panel reads
-// as broken, not as quiet).
+// Dark "impact instrument" panel — aggregate numbers (the confirmed lookalikes
+// are named in the list further down). Renders only when
+// FF_SHOPFRONT_CLONE_OUTREACH=true AND there's at least one match in the
+// window (a "0 matches" panel reads as broken, not as quiet). Labels and the
+// reporting sentence come from public-impact.ts, shared with /hub.
 function PublicImpactPanel({
   impact,
   takedown,
@@ -288,8 +311,8 @@ function PublicImpactPanel({
   const tiles: Array<{ value: string; label: string; sub: string }> = [
     {
       value: impact.candidates_total.toLocaleString(),
-      label: "Candidates surfaced",
-      sub: `≈ ${perDay.toLocaleString()} new matches / day`,
+      label: MATCHES_LABEL,
+      sub: `≈ ${perDay.toLocaleString()} a day · false positives removed`,
     },
     {
       value: impact.brands_protected.toLocaleString(),
@@ -298,7 +321,7 @@ function PublicImpactPanel({
     },
     {
       value: impact.netcraft_submits_total.toLocaleString(),
-      label: "Reported to Netcraft",
+      label: REPORTED_LABEL,
       sub: "forwarded to blocklists",
     },
     blocklist ?? {
@@ -349,8 +372,8 @@ function PublicImpactPanel({
         <div className="flex items-baseline justify-between gap-4 mb-3">
           <span className="text-sm text-slate-300">
             {impact.netcraft_submits_total.toLocaleString()} of{" "}
-            {impact.candidates_total.toLocaleString()} candidates forwarded to
-            community blocklists
+            {impact.candidates_total.toLocaleString()} brand-name matches
+            reported to Netcraft
           </span>
           <span className="text-sm font-bold">{pct}%</span>
         </div>
@@ -364,10 +387,7 @@ function PublicImpactPanel({
           />
         </div>
         <p className="mt-5 text-xs leading-relaxed text-slate-400">
-          Numbers are aggregate-only. We never publish which specific domains
-          we&apos;ve reported. Reports go to community blocklist aggregators (so
-          suspect domains get browser-blocked globally) and to the affected
-          brand&apos;s security team.
+          {REPORTING_STATEMENT}
         </p>
         {blocklist && (
           <p className="mt-2 text-xs leading-relaxed text-slate-400">{blocklist.note}</p>
@@ -380,23 +400,28 @@ function PublicImpactPanel({
 }
 
 export default async function CloneWatchPage() {
-  const [alerts, impactBundle, editions] = await Promise.all([
+  const [alerts, impactBundle, editions, monitoredBrands] = await Promise.all([
     getAlerts(),
     featureFlags.shopfrontCloneOutreach
       ? getPublicImpact()
       : Promise.resolve(null),
     getEditions(),
+    getMonitoredBrands(),
   ]);
   const impact = impactBundle?.impact ?? null;
   const takedown = impactBundle?.takedown ?? null;
   const vendorGap = impactBundle?.vendorGap ?? null;
   const latest = editions[0] ?? null;
+  // monitoredBrandsPhrase is the one wording of the count ("290+"); null (a
+  // failed coverage read) drops the number rather than print a stale literal.
+  const brandsPhrase = monitoredBrandsPhrase(monitoredBrands);
 
   const items: CloneDomainItem[] = alerts.map((a) => ({
     domain: a.candidate_domain,
     brand: a.inferred_target_domain,
-    typeKey: typeKeyFor(a.signals),
+    typeKey: typeKeyFor(a.signal_type),
     firstSeenAt: a.first_seen_at,
+    badge: publicListBadge(a.lifecycle_state, a.offline_since),
   }));
 
   return (
@@ -416,10 +441,12 @@ export default async function CloneWatchPage() {
         </h1>
         <CoverageNote className="mx-auto mt-4 max-w-[60ch]" />
         <p className="mx-auto mt-7 max-w-[60ch] text-lg text-gov-slate leading-relaxed">
-          Each entry below is a domain registered in the last 7 days whose
-          characters match the lexical pattern of an Australian brand on our
-          reference list. These are factual observations from a public-registry
-          sweep — <strong className="font-semibold text-deep-navy">not characterisations of the registrant or their intent.</strong>
+          Each entry below is a domain registered in the last 7 days that
+          imitates a brand on our watchlist and that we have{" "}
+          <strong className="font-semibold text-deep-navy">confirmed as a lookalike</strong>{" "}
+          and reported to Netcraft, whose verdicts feed browser blocklists. We
+          don&apos;t know who registered these domains or why, and we make no
+          claim about the people behind them.
         </p>
       </section>
 
@@ -444,8 +471,8 @@ export default async function CloneWatchPage() {
                 <strong className="font-bold text-deep-navy">
                   {editionLabel(latest.period_month)}
                 </strong>
-                : {latest.total_domains.toLocaleString()} lookalike domains
-                across {latest.brand_count.toLocaleString()} brands.
+                : {lookalikeDomains(latest.total_domains)} across{" "}
+                {latest.brand_count.toLocaleString()} brands.
               </p>
             )}
             <div className="flex flex-wrap items-center gap-5">
@@ -490,12 +517,14 @@ export default async function CloneWatchPage() {
           titleAs="h3"
           description={
             <>
-              A daily lexical match against newly-registered domains. We claim
-              only that the domain string is{" "}
-              <strong className="font-semibold text-deep-navy">characteristically similar</strong> to an
-              Australian brand name by a deterministic measurement — we do{" "}
-              <strong className="font-semibold text-deep-navy">not</strong> claim any listed domain is
-              operated by a scammer or is hosting fraudulent content.
+              Every day we match newly-registered domains against the brand
+              names on our watchlist. A match is listed here only once it is{" "}
+              <strong className="font-semibold text-deep-navy">confirmed as a lookalike</strong>: our
+              clone classifier judged the name a copy of the brand and a scan of
+              the live site or a threat-reputation service flagged it as
+              phishing, or one of our team confirmed it. We report every listed domain to Netcraft. Matches
+              that are not confirmed are counted in the numbers above but{" "}
+              <strong className="font-semibold text-deep-navy">never listed</strong>.
             </>
           }
         />
@@ -513,12 +542,13 @@ export default async function CloneWatchPage() {
         </FeatureCard>
         <FeatureCard icon={Mail} title="If you registered one of these domains" titleAs="h3">
           <p className="text-sm text-gov-slate mt-1 leading-relaxed">
-            Inclusion here is a factual record of name similarity — it is{" "}
-            <strong className="font-semibold text-deep-navy">not an allegation</strong>{" "}
-            that you have done anything wrong. If you believe your domain is
-            listed in error, or you want to explain its purpose, contact us and
-            we will review the entry — corrections and removals are actioned on
-            every substantiated request.
+            Inclusion here means we confirmed the domain as a lookalike of a
+            brand and reported it to Netcraft. It is{" "}
+            <strong className="font-semibold text-deep-navy">not a finding about you</strong>{" "}
+            — we don&apos;t know who registered it or why. If you believe your
+            domain is listed in error, or you want to explain its purpose,
+            contact us and we will review the entry — corrections and removals
+            are actioned on every substantiated request.
           </p>
           <Link
             href="/contact"
@@ -559,8 +589,9 @@ export default async function CloneWatchPage() {
           </div>
           <p className="text-[13.5px] leading-relaxed text-slate-500">
             Newly-registered domain (NRD) lists from whoisds.com (free public
-            tier), filtered against a reference list of approximately 50
-            Australian retail, bank, telco, and logistics brand names.
+            tier), matched against a watchlist of{" "}
+            {brandsPhrase ? `${brandsPhrase} ` : ""}brands Australians use —
+            retail, banks, telcos, logistics and more.
           </p>
         </div>
         <div>
@@ -568,9 +599,9 @@ export default async function CloneWatchPage() {
             What we have not done
           </div>
           <p className="text-[13.5px] leading-relaxed text-slate-500">
-            Entries are machine-classified (name-similarity match plus an
-            automated clone classifier); operators review exceptions. That
-            process does not determine who registered
+            Entries are machine-classified (name-similarity match, an automated
+            clone classifier, and a live-site scan or reputation check);
+            operators review exceptions. That process does not determine who registered
             the domain or why: we have not contacted registrants, and we make no
             legal characterisation of any domain or its registrant.
           </p>
@@ -580,7 +611,8 @@ export default async function CloneWatchPage() {
             Updates
           </div>
           <p className="text-[13.5px] leading-relaxed text-slate-500">
-            The list refreshes once per day. Entries fall off after 7 days. See{" "}
+            The page refreshes at most hourly and the sweep runs once a day.
+            Entries fall off 7 days after the domain was first seen. See{" "}
             <a href="/privacy" className="underline underline-offset-2">
               our privacy policy
             </a>{" "}

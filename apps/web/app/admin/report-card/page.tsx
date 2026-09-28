@@ -13,7 +13,13 @@ import {
 } from "@/lib/clone-watch/duration-kpis";
 import { logger } from "@askarthur/utils/logger";
 import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
-import { buildClassifierCaveat, tacticLabel } from "@/lib/clone-watch/targeting-copy";
+import { moverCopy } from "@/lib/clone-watch/trend-copy";
+import { monitoredBrandsPhrase } from "@/lib/clone-watch/brand-coverage";
+import {
+  buildClassifierCaveat,
+  LOOKALIKE_DOMAINS_UNIT,
+  tacticLabel,
+} from "@/lib/clone-watch/targeting-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
 import { getPinnedCard } from "@/lib/clone-watch/report-summary";
@@ -487,7 +493,7 @@ function SlideAuBrands({ data, page }: SlideProps) {
         ))}
       </div>
       <div className="foot rule2 bot">
-        <div className="reg">Ranked by lookalike domains detected in {data.periodLabel}. Suspected impersonation — detection does not confirm intent.</div>
+        <div className="reg">Ranked by {LOOKALIKE_DOMAINS_UNIT} detected in {data.periodLabel}. Suspected impersonation — detection does not confirm intent.</div>
         <Pg n={page} />
       </div>
     </section>
@@ -520,24 +526,25 @@ function SlideSuperFund({ data, page }: SlideProps) {
     sp.kind === "mover" ? `MOVER · ${period}`
     : sp.kind === "new_entrant" ? `NEW ENTRANT · ${period}`
     : `SUPER FUND · ${period}`;
+  // The mover's verb and lead come from trend-copy.ts moverCopy, the one home
+  // shared with the caption. This slide used to build its own: "more than
+  // {doubled|jumped}" printed "more than jumped" for any rise short of 2×.
+  const mover = sp.kind === "mover" ? moverCopy(name, sp) : null;
   const heading =
-    sp.kind === "mover" ? (
-      <>{name} lookalikes<br />more than {sp.priorClones && sp.clones >= sp.priorClones * 2 ? "doubled" : "jumped"}.</>
+    mover ? (
+      <>{name} lookalikes<br />{mover.verb}.</>
     ) : sp.kind === "new_entrant" ? (
       <>{name} appeared for<br />the first time.</>
     ) : (
       <>A super fund was {auRankPhrase(sp.auRank)}<br />Australian brand.</>
     );
   const lead =
-    sp.kind === "mover" ? (
-      // NO ACTOR ATTRIBUTION (targeting-copy.ts rule 3). This line used to end
-      // "A spike like this usually means one actor registering in bulk." The
-      // caption's identical sentence was removed and pinned by a test, but the
-      // slide's twin was missed — so the carousel would have asserted exactly
-      // what the caption beneath it denies. Nothing we hold can identify an
-      // actor: campaign_key hashes registrar + nameservers + ASN + cert issuer,
-      // all of which a shared hosting stack gives you for free.
-      <>Up from <b>{sp.priorClones} last month</b> to {sp.clones} — the sharpest single-brand rise we recorded across the brands we monitored for both months.</>
+    mover ? (
+      // NO ACTOR ATTRIBUTION (targeting-copy.ts rule 3) — held by moverCopy,
+      // so the slide and the caption beneath it cannot disagree again (the
+      // slide's twin once kept "one actor registering in bulk" after the
+      // caption dropped it).
+      <>{mover.lead}</>
     ) : sp.kind === "new_entrant" ? (
       <>Not on last month&rsquo;s map at all. A brand&rsquo;s first appearance is the moment its customers are least primed to expect a fake.</>
     ) : (
@@ -552,12 +559,12 @@ function SlideSuperFund({ data, page }: SlideProps) {
       <h2 className={`h2b${isFund ? " sf" : ""}`}>{heading}</h2>
       <div className="spotstat">
         <span className="spotnum">{sp.clones}</span>
-        <span className="spotname">{name}<span>lookalike domains · {data.periodLabel}</span></span>
+        <span className="spotname">{name}<span>{LOOKALIKE_DOMAINS_UNIT} · {data.periodLabel}</span></span>
       </div>
       <p className="spotlead">{lead}</p>
       <div className="note">Lookalike domains impersonating {name}; {name} is the targeted party, not the source. Detected, not all confirmed malicious.</div>
       <div className="foot rule2 bot">
-        <div className="reg">Ranked among Australian (.au) brands by lookalike domains detected in {data.periodLabel}.</div>
+        <div className="reg">Ranked among Australian (.au) brands by {LOOKALIKE_DOMAINS_UNIT} detected in {data.periodLabel}.</div>
         <Pg n={page} />
       </div>
     </section>
@@ -725,9 +732,9 @@ function SlideActed({ data, page }: SlideProps) {
             is the same one-surface-not-the-seam shape as the actor-attribution
             sentence. `watchlistSize` is the count monitored for the WHOLE of
             the reported month, so a re-export of a past edition states what was
-            true THEN. Rounded down to the nearest ten so it stays true between
-            watchlist edits. */}
-        <div className="txt">We sweep newly-registered domains against {Math.floor(data.watchlistSize / 10) * 10}+ major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
+            true THEN. Worded by monitoredBrandsPhrase (brand-coverage.ts), the
+            one home shared with the caption, the public page and the blog. */}
+        <div className="txt">We sweep newly-registered domains against {monitoredBrandsPhrase(data.watchlistSize) ?? "a watchlist of"} major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
       </div>
       <div className="note">
         {outcomes ? (

@@ -4,8 +4,9 @@
  * Sibling of outcome-copy.ts, and separate from it on purpose: that module is
  * the VENDOR-outcome vocabulary (reported / declined / taken down), this one is
  * name-shape and infrastructure. Different axis, different honesty rules, same
- * discipline — zero imports, so it can be read from a server component, the
- * caption CLI and an email template alike.
+ * discipline — no data-layer imports (only the pure trend-copy wording, which
+ * owns the matcher-change fact), so it can be read from a server component,
+ * the caption CLI and an email template alike.
  *
  * HONESTY RULES (pinned by apps/web/__tests__/cloneWatchTargetingCopy.test.ts):
  *
@@ -33,6 +34,31 @@
  *     count of what was withheld, and why, is published beside it. The numbers
  *     come from the gate that made the decision, never from a hand count.
  */
+import { methodChangedBrandsClause } from "@/lib/clone-watch/trend-copy";
+
+/**
+ * THE unit a published clone count is printed in. Until matcher v5 every count
+ * we publish — a month's total, a brand's count, the spotlight — is DISTINCT
+ * LOOKALIKE DOMAINS, and the phrase (with its hand-rolled plural) had been
+ * retyped on eight surfaces. Print a count through `lookalikeDomains(n)`, a bare
+ * unit through `LOOKALIKE_DOMAINS_UNIT`.
+ *
+ * FOR #1262 (matcher v5, unmerged at the time of writing): its
+ * `perBrandUnitLabel(unit)` prints "lookalikes (bulk registrations counted
+ * once)" for a targeting-events month. It should absorb this function — take
+ * the card's unit here — rather than add a second label home beside it.
+ */
+export const LOOKALIKE_DOMAINS_UNIT = "lookalike domains";
+
+/** The unit alone, agreeing with `n` — for a layout that styles the number apart. */
+export function lookalikeDomainsNoun(n: number): string {
+  return n === 1 ? "lookalike domain" : LOOKALIKE_DOMAINS_UNIT;
+}
+
+/** "1 lookalike domain" / "1,032 lookalike domains". */
+export function lookalikeDomains(n: number): string {
+  return `${n.toLocaleString("en-AU")} ${lookalikeDomainsNoun(n)}`;
+}
 
 /** Small numbers read as words in prose; `top` is capped at three here. */
 function numberWord(n: number): string {
@@ -76,13 +102,13 @@ export interface TrendExclusions {
  * that publishes no trend also publishes no dangling caveat.
  */
 export function buildTrendDisclosure(x: TrendExclusions): string {
-  if (x.claimable === 0) {
-    // Nothing to claim — but a matcher change must still be said, or its
-    // silence reads as a quiet month.
-    return (x.methodChanged ?? 0) > 0
-      ? "Month-on-month change is withheld this month: we changed how lookalikes are matched, so the two months are not comparable."
-      : "";
-  }
+  // Nothing to claim → nothing to disclose. A matcher change is NOT said here:
+  // it is a month-level fact (report-card.ts passes one `methodChanged` to
+  // every brand) and trend-copy.ts methodChangeSentence is its one wording,
+  // which the caption already prints through describeTotalMove. This branch
+  // used to add a second sentence for the same fact, so the caption said it
+  // twice in two different ways.
+  if (x.claimable === 0) return "";
   const methodChanged = x.methodChanged ?? 0;
   const withheld =
     x.coverageStarted + x.coverageEnded + x.belowFloor + x.unknown + methodChanged;
@@ -109,7 +135,7 @@ export function buildTrendDisclosure(x: TrendExclusions): string {
     reasons.push(`${x.unknown} we cannot confirm we monitored for the whole period`);
   }
   if (methodChanged > 0) {
-    reasons.push(`${methodChanged} where we changed how lookalikes are matched between the months`);
+    reasons.push(methodChangedBrandsClause(methodChanged));
   }
   return (
     `Month-on-month change is shown only for the ${x.claimable} brands we monitored ` +

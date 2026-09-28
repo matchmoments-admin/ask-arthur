@@ -6,6 +6,8 @@
 // ready-to-send composer body. Keeping these pure makes them unit-testable and
 // shareable between the API route and the client panel.
 
+import { lookalikeDomains } from "@/lib/clone-watch/targeting-copy";
+
 export interface WorklistRow {
   brand_key: string;
   brand_name: string;
@@ -80,7 +82,7 @@ export function buildHookLine(row: WorklistRow): string {
     return `We've picked up ${n} live phishing site${n === 1 ? "" : "s"} impersonating ${brand} in our clone-watch feed — I can send the evidence (screenshots, registration dates, hosting) straight over.`;
   }
   const total = row.total_clones;
-  return `We're currently tracking ${total} lookalike domain${total === 1 ? "" : "s"} registered against ${brand}, and I wanted to flag them before any go live.`;
+  return `We're currently tracking ${lookalikeDomains(total)} registered against ${brand}, and I wanted to flag them before any go live.`;
 }
 
 /**
