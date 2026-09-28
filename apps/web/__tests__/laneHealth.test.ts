@@ -2,8 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 // Every lane's gate reads a flag; the shape tests below judge lanes as if
 // they are ON (production), and the enabled() test flips flags explicitly.
+// EXCEPT the lane-specific flags of the three `flags_dark` parked lanes, which
+// are OFF as in prod — with them ON those lanes report `parked_enabled`
+// (PR-F), which is its own describe block below.
 vi.mock("@askarthur/utils/feature-flags", () => ({
-  featureFlags: new Proxy({} as Record<string, boolean>, {
+  featureFlags: new Proxy({
+    cloneReemergenceMonitor: false,
+    shopfrontCloneWeeklyDigest: false,
+    cloneEnforceAutoBlocklist: false,
+  } as Record<string, boolean>, {
     get: (t, k: string) => (k in t ? t[k] : true),
     set: (t, k: string, v: boolean) => ((t[k] = v), true),
   }),
@@ -453,7 +460,7 @@ describe("classifyLaneHealth", () => {
   });
 
   it("a PARKED lane has no schedule and never pages absent (#1230)", () => {
-    expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].parked).toBeTruthy();
+    expect(LANE_SHAPES["shopfront-clone-fp-cluster-digest"].parked?.why).toBeTruthy();
     expect(laneCrons("shopfront-clone-fp-cluster-digest")).toEqual([]);
     expect(laneExpectEvery("shopfront-clone-fp-cluster-digest")).toBe(Number.POSITIVE_INFINITY);
     const problems = classifyLaneHealth(
@@ -758,22 +765,149 @@ describe("classifyLaneHealth — flag gate", () => {
   it("skips a disabled lane, flags it absent once enabled", async () => {
     const { featureFlags } = await import("@askarthur/utils/feature-flags");
     const flags = featureFlags as unknown as Record<string, boolean>;
-    const saved = { e: flags.cloneEnforcement, r: flags.cloneReemergenceMonitor };
+    const saved = flags.cloneNetcraftIssue;
     try {
-      flags.cloneEnforcement = false;
-      flags.cloneReemergenceMonitor = false;
+      flags.cloneNetcraftIssue = false;
       expect(
-        classifyLaneHealth([]).some((p) => p.lane === "shopfront-clone-reemergence-monitor"),
+        classifyLaneHealth([]).some((p) => p.lane === "shopfront-clone-netcraft-issue"),
       ).toBe(false);
-      flags.cloneEnforcement = true;
-      flags.cloneReemergenceMonitor = true;
+      flags.cloneNetcraftIssue = true;
       expect(
-        classifyLaneHealth([]).find((p) => p.lane === "shopfront-clone-reemergence-monitor")?.kind,
+        classifyLaneHealth([]).find((p) => p.lane === "shopfront-clone-netcraft-issue")?.kind,
       ).toBe("absent");
     } finally {
-      flags.cloneEnforcement = saved.e;
-      flags.cloneReemergenceMonitor = saved.r;
+      flags.cloneNetcraftIssue = saved;
     }
+  });
+});
+
+/**
+ * PR-F — ONE parking mechanism. reemergence-monitor, weekly-digest and
+ * enforcement-execute used to be parked only by a comment (their trigger
+ * omitted `...laneCrons()`), while `LANE_SHAPES.parked` was the other
+ * mechanism. A `parked`-field lane is invisible to `absent` (∞ window), so a
+ * flag flipped ON without un-parking it would never run on schedule and
+ * nothing would say so. It now reports `parked_enabled`.
+ *
+ * Go-red (2026-09-28, each reverted → failed → restored):
+ *   - delete the `shape.parked?.while === "flags_dark"` block in
+ *     classifyLaneHealth → "reports parked_enabled" fails (no problem at all:
+ *     the ∞ window swallows it — the exact silent trap).
+ *   - flip reemergence-monitor's `while` to "gate_open" → its "is
+ *     field-parked" and "reports parked_enabled" cases fail.
+ *   - drop `parked` from weekly-digest → its "is field-parked" case fails
+ *     (laneCrons returns its Sunday schedule) and it pages `absent`, not
+ *     `parked_enabled`.
+ *   - re-type `{ cron: "0 10 * * 0" }` into weekly-digest's trigger → the
+ *     source-scan case fails.
+ *   - (widened scan) replace `...laneCrons("shopfront-clone-urlscan-submit")`
+ *     with its literal `{ cron: "0 9 * * *" }` → the scan fails naming it;
+ *     change the NRD ingest literal to "30 9 * * *" → it fails on the parity
+ *     check.
+ */
+describe("parked lanes — one mechanism (PR-F)", () => {
+  const DARK_PARKED = [
+    ["shopfront-clone-reemergence-monitor", "cloneReemergenceMonitor"],
+    ["shopfront-clone-weekly-digest", "shopfrontCloneWeeklyDigest"],
+    ["shopfront-clone-enforcement-execute", "cloneEnforceAutoBlocklist"],
+  ] as const;
+
+  it.each(DARK_PARKED)("%s is field-parked (flags_dark): no cron, ∞ window, restore schedule kept", (lane) => {
+    expect(LANE_SHAPES[lane].parked?.while).toBe("flags_dark");
+    expect(laneCrons(lane)).toEqual([]);
+    expect(laneExpectEvery(lane)).toBe(Number.POSITIVE_INFINITY);
+    expect(LANE_SHAPES[lane].crons?.length).toBeGreaterThan(0);
+  });
+
+  it.each(DARK_PARKED)("%s reports parked_enabled when its gate opens while parked", async (lane, flag) => {
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
+    const flags = featureFlags as unknown as Record<string, boolean>;
+    const saved = flags[flag];
+    try {
+      // Dark (prod): nothing reported, whatever the rows say.
+      expect(classifyLaneHealth([], { now: NOW }).filter((p) => p.lane === lane)).toEqual([]);
+      flags[flag] = true;
+      const mine = classifyLaneHealth([], { now: NOW }).filter((p) => p.lane === lane);
+      expect(mine.map((p) => p.kind)).toEqual(["parked_enabled"]);
+      expect(mine[0]!.detail).toContain("un-park");
+    } finally {
+      flags[flag] = saved;
+    }
+  });
+
+  it("a gate_open park is deliberate — its open gate reports nothing", () => {
+    for (const lane of [
+      "shopfront-clone-notify-brand-prepare",
+      "shopfront-clone-fp-cluster-digest",
+    ] as const) {
+      expect(LANE_SHAPES[lane].parked?.while).toBe("gate_open");
+      expect(classifyLaneHealth([], { now: NOW }).filter((p) => p.lane === lane)).toEqual([]);
+    }
+  });
+
+  // Widened (PR-F review): EVERY Lane that declares `crons` — not only the
+  // three converted ones — must read its schedule through the one
+  // declaration, so no Lane can be parked (or un-parked) behind LANE_SHAPES'
+  // back by a literal cron or an omitted `...laneCrons()`.
+  it("every Lane with `crons` reads its schedule via ...laneCrons(id) and registers no literal cron", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dirs = [
+      join(process.cwd(), "app/api/inngest/functions"),
+      join(process.cwd(), "../../packages/scam-engine/src/inngest"),
+    ];
+    const strip = (src: string) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    const segments: Array<{ file: string; seg: string }> = [];
+    for (const dir of dirs) {
+      for (const f of readdirSync(dir).filter((x) => x.endsWith(".ts") && !x.endsWith(".test.ts"))) {
+        for (const seg of strip(readFileSync(join(dir, f), "utf8")).split("createFunction(").slice(1)) {
+          segments.push({ file: f, seg });
+        }
+      }
+    }
+    // A Lane whose function lives in packages/scam-engine cannot import
+    // apps/web's laneCrons (dependency direction), so its cron stays literal —
+    // pinned here to EQUAL the declaration (parked → none), so the two copies
+    // cannot drift. Adding a Lane here needs that reason, not convenience.
+    const LITERAL_CRON_EXEMPT: Record<string, string> = {
+      "shopfront-nrd-daily-ingest": "scam-engine function; cannot import apps/web/lib/laneHealth",
+    };
+    const fnIdOf = (lane: string) => lane.split("/")[0]!;
+    const lanes = (Object.keys(LANE_SHAPES) as LaneId[]).filter((l) => LANE_SHAPES[l].crons?.length);
+    expect(lanes.length).toBeGreaterThan(10); // the roster did not empty out
+    const problems: string[] = [];
+    for (const lane of lanes) {
+      const fnId = fnIdOf(lane);
+      const found = segments.filter(({ seg }) => new RegExp(`id:\\s*["']${fnId}["']`).test(seg));
+      if (found.length !== 1) {
+        problems.push(`${lane}: ${found.length} createFunction segments with id "${fnId}"`);
+        continue;
+      }
+      const { file, seg } = found[0]!;
+      const literal = [...seg.matchAll(/\bcron:\s*["']([^"']+)["']/g)].map((m) => m[1]);
+      if (fnId in LITERAL_CRON_EXEMPT) {
+        const want = LANE_SHAPES[lane].parked ? [] : [...LANE_SHAPES[lane].crons!];
+        if (JSON.stringify(literal) !== JSON.stringify(want)) {
+          problems.push(`${lane} (${file}): literal crons ${JSON.stringify(literal)} ≠ LANE_SHAPES ${JSON.stringify(want)}`);
+        }
+        continue;
+      }
+      if (literal.length > 0) problems.push(`${lane} (${file}): literal cron ${JSON.stringify(literal)}`);
+      // Sub-lanes of one function (netcraft-auto/auto + /resubmit) share a
+      // trigger: any sibling's laneCrons counts, provided the schedules match.
+      const read = lanes.filter(
+        (l) => fnIdOf(l) === fnId && seg.includes(`...laneCrons("${l}")`),
+      );
+      if (read.length === 0) {
+        problems.push(`${lane} (${file}): trigger does not read ...laneCrons("${lane}")`);
+      } else if (
+        read.some((l) => JSON.stringify(LANE_SHAPES[l].crons) !== JSON.stringify(LANE_SHAPES[lane].crons) || !!LANE_SHAPES[l].parked !== !!LANE_SHAPES[lane].parked)
+      ) {
+        problems.push(`${lane} (${file}): shares a trigger with a sibling Lane whose schedule or park differs`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });
 

@@ -111,9 +111,14 @@ function fromRdap(rdap: RdapResult): DomainRegistration {
   };
 }
 
+/**
+ * `priority` is REQUIRED (PR-F): it used to be optional and was passed to
+ * lookupWhois as `undefined`, which defaulted to `interactive` — a batch
+ * caller that forgot it got the 950 share, not 700.
+ */
 export async function lookupDomainRegistration(
   domain: string,
-  opts: { priority?: WhoisPriority } = {},
+  opts: { priority: WhoisPriority },
 ): Promise<DomainRegistration> {
   if (featureFlags.rdapLookup) {
     const { result: rdap, outcome } = await lookupRdapOutcome(domain).catch(

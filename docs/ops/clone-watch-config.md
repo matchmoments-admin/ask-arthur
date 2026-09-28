@@ -609,33 +609,80 @@ public page shows defamation-risk language):
 3. To blank the page, `DELETE FROM shopfront_clone_alerts WHERE
 source='nrd'` after the flag is OFF.
 
-### Flipping a PARKED lane ON — the cron is part of the flip
+### Flipping a PARKED lane ON — un-parking is part of the flip
 
-Three dark clone-watch lanes are **event-only** (cron removed 2026-09-24 so a dark flag stops
-burning Inngest runs): `shopfront-clone-enforcement-execute` (restore `15 */3 * * *`;
+Three dark clone-watch lanes are **parked while dark** (`parked: { why, while: "flags_dark" }`
+in `LANE_SHAPES`, since PR-F; cron removed 2026-09-24 so a dark flag stops burning Inngest
+runs): `shopfront-clone-enforcement-execute` (restore `15 */3 * * *`;
 `FF_CLONE_ENFORCEMENT` + `FF_CLONE_ENFORCE_AUTO_BLOCKLIST`), `shopfront-clone-reemergence-monitor`
 (restore `45 6 * * *`; `FF_CLONE_ENFORCEMENT` + `FF_CLONE_REEMERGENCE_MONITOR`) and
 `shopfront-clone-weekly-digest` (restore `0 10 * * 0`; `FF_SHOPFRONT_CLONE_WEEKLY_DIGEST`).
-Flipping the flag alone does **nothing on a schedule**, and the health digest will then page
-the lane as `absent` (its `LANE_SHAPES` `flags` turn on, but no Outcome Row arrives).
-The flip is: (1) a PR re-adding `...laneCrons("<lane id>")` to the function's trigger array (the
-schedule itself stays declared once, in `LANE_SHAPES.crons` — do not re-type it), with `[build]`
-in the commit; (2) after deploy, `curl -X PUT https://askarthur.au/api/inngest` and read the
-body; (3) then the env flag.
+Flipping the flag alone does **nothing on a schedule**. The health digest then reports the lane
+as **`parked_enabled`** ("flags ON but still parked") — not `absent`: a parked lane's window is
+infinite, so without that line nothing would page at all.
+The flip is: (1) a PR deleting the lane's `parked` field in `LANE_SHAPES` — the function's trigger
+already reads `...laneCrons("<lane id>")`, so no function file changes and the schedule stays
+declared once, in `LANE_SHAPES.crons` — with `[build]` in the commit; (2) after deploy,
+`curl -X PUT https://askarthur.au/api/inngest` and check the body says `modified:true`; (3) then
+the env flag.
 
-### Parked Lanes — `LANE_SHAPES[lane].parked` (#1230, 2026-09-26)
+### Parked Lanes — `LANE_SHAPES[lane].parked` (#1230, 2026-09-26; one mechanism since PR-F)
 
-A Lane whose schedule does nothing today is **parked**: `parked: "<why>"` in
+A Lane whose schedule does nothing today is **parked**: `parked: { why, while }` in
 `LANE_SHAPES`. `laneCrons()` then returns no schedule (the function keeps its
 manual-trigger event), and the digest expects no row, so a parked Lane burns
 no runs and never pages `absent`. `crons` keeps the schedule to restore:
 **un-parking is deleting the `parked` field** (plus `PUT /api/inngest` after
-deploy). Parked 2026-09-26: `shopfront-clone-notify-brand-prepare` (no brand
-contact until the #1237 readiness gate; 100% `no_unbatched_rows`),
-`shopfront-clone-fp-cluster-digest` (no input since 2026-09-04). Also parked,
-outside the roster: `known-brands-discover` (100% `all_probed`; its cron line
-is commented in the function). `clone-watch-auto-triage` is **retired**, not
-parked — see the next section.
+deploy). This is the only way a roster Lane is parked — no function omits
+`...laneCrons()` from its trigger any more (guarded in
+`apps/web/__tests__/laneHealth.test.ts`, "parked lanes — one mechanism").
+
+`while` says which state the park assumes:
+
+| `while`        | Meaning                           | Gate open while parked                                             |
+| -------------- | --------------------------------- | ------------------------------------------------------------------ |
+| `"flags_dark"` | parked because its flags are off  | digest reports `parked_enabled` — un-park it or turn the flags off |
+| `"gate_open"`  | parked deliberately while enabled | expected; nothing reported                                         |
+
+The report fires when the lane's WHOLE flag gate is open (`laneGate` ok), not
+when any one flag is: the gates share flags that are ON in prod
+(`shopfrontCloneOutreach`, `shopfrontCloneWatch`), so "any flag" would page
+every parked lane daily; a lane whose gate is only partly open would not run
+on schedule even un-parked.
+
+Parked `gate_open` 2026-09-26: `shopfront-clone-notify-brand-prepare` (no brand
+contact until the #1237 readiness gate; 100% `no_unbatched_rows`; wrote rows to
+2026-09-25), `shopfront-clone-fp-cluster-digest` (no input since 2026-09-04).
+Parked `flags_dark` (converted from comment-parking in PR-F):
+enforcement-execute, reemergence-monitor, weekly-digest — see the previous
+section. Also parked, outside the roster: `known-brands-discover` (100%
+`all_probed`; its cron line is commented in the function).
+`clone-watch-auto-triage` is **retired**, not parked — see the next section.
+
+### whoisjson monthly guard — what the enricher's `batch` share means (PR-F)
+
+`clone-watch-enrich-attribution` (and its WHOIS re-offer) call
+`lookupDomainRegistration(domain, { priority: "batch" })`, which falls back to
+whoisjson (free tier 1,000/month) under the guard in
+`packages/scam-engine/src/whois.ts`: `batch` stops at 700 served lookups this
+month, `interactive` at 950. Since PR-F:
+
+- the count is this month's `cost_telemetry` `whois`/`whoisjson` rows, and the
+  row is **awaited** before the lookup returns (it was fire-and-forget, and a
+  finish-cancelled run lost it — ADR-0019);
+- `priority` is **required** — omitting it no longer silently selects the 950
+  share (a type error now);
+- an **unreadable count** fails CLOSED for `batch` (deferral reason
+  `quota_unknown`, no request, `retryAfter` now + 24h, never a strike in
+  `whois-reoffer.ts`) and OPEN for `interactive`. The other batch writers
+  that have no re-offer path keep a held row in their worklist instead of
+  completing it (`whoisHeldForRetry`, `whois.ts`): `pipeline-enrichment-fanout`
+  and `on-demand-url-enrich` leave `scam_urls.enrichment_status` unwritten
+  (pending stays pending), `pipeline-entity-enrichment` marks the entity
+  `failed` (`enrichment_error` `whois_held: …`), which its next run re-selects;
+- still soft: the count is cached per instance for 10 minutes, and a rejected
+  insert is swallowed by `logCost` — both make it a lower bound, absorbed by
+  the margins below 1,000.
 
 ### Auto-park lives in the pre-classifier (#1230, 2026-09-26)
 

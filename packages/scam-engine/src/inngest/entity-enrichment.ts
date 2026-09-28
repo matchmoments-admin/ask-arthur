@@ -9,7 +9,7 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { lookupWhois } from "../whois";
+import { lookupWhois, whoisHeldForRetry } from "../whois";
 import { checkSSL } from "../ssl";
 import { checkURLReputation } from "../safebrowsing";
 import { geolocateIP } from "../geolocate";
@@ -28,6 +28,23 @@ import { checkIPQS } from "../ipqualityscore";
 import { withAxiomLogging } from "./with-axiom-logging";
 
 const MAX_ENTITIES_PER_RUN = 30;
+
+/**
+ * PR-F: WHOIS was HELD by the batch guard (unreadable monthly count,
+ * `quota_unknown`) — no lookup was made. Thrown so the per-entity catch marks
+ * the entity `failed`, which the next run's `pending/failed` select re-picks;
+ * `completed` would drop WHOIS for good (no re-offer path here). The hold is
+ * global to a run (one shared count read), so held entities cannot starve
+ * the head: every WHOIS-bearing entity is held equally, and the next run with
+ * a readable count serves them. Prod queue 2026-09-28: 15 entities at
+ * report_count >= 2, all completed.
+ */
+export class WhoisHeldError extends Error {
+  constructor() {
+    super("whois_held: quota_unknown (monthly count unreadable) — retry next run");
+    this.name = "WhoisHeldError";
+  }
+}
 
 interface EnrichmentResult {
   entityId: number;
@@ -104,6 +121,7 @@ async function enrichDomain(value: string): Promise<Record<string, unknown>> {
   const localIntel =
     localIntelResult.status === "fulfilled" ? localIntelResult.value : null;
   const whois = whoisResult.status === "fulfilled" ? whoisResult.value : null;
+  if (whoisHeldForRetry(whois)) throw new WhoisHeldError();
   const ssl = sslResult.status === "fulfilled" ? sslResult.value : null;
 
   const data: Record<string, unknown> = {
@@ -209,6 +227,7 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
         lookupWhois(domain, { priority: "batch" }),
         checkSSL(domain),
       ]);
+      if (whoisHeldForRetry(whois)) throw new WhoisHeldError();
       return {
         whois: {
           registrar: whois.registrar,
@@ -234,6 +253,13 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
   }
 
   const results = await Promise.allSettled(checks);
+  // A held WHOIS must fail the entity, not vanish into `{}` below.
+  if (
+    results[1].status === "rejected" &&
+    results[1].reason instanceof WhoisHeldError
+  ) {
+    throw results[1].reason;
+  }
   const localIntel =
     results[0].status === "fulfilled" ? results[0].value : null;
   const domainEnrichment =

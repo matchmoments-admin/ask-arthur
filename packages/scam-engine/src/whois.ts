@@ -33,6 +33,11 @@ export type WhoisDeferralReason =
   /** The monthly guard for this priority is spent (no request made), or
    *  whoisjson answered 429 — quota exhaustion, never a failure strike. */
   | "quota_deferred"
+  /** A `batch` lookup whose monthly count could not be read (PR-F): the guard
+   *  fails CLOSED for batch, so no request was made. Not quota exhaustion and
+   *  not a failure — never a strike; retried in 24h (a telemetry blip should
+   *  not park a row until the 1st). Interactive callers never see it. */
+  | "quota_unknown"
   /** whoisjson answered another non-200, or the request threw / timed out. */
   | "http_error"
   /** WHOIS_API_KEY is not set — no request was made. */
@@ -42,7 +47,7 @@ export interface WhoisDeferral {
   reason: WhoisDeferralReason;
   /** ISO timestamp: the 1st of next month (UTC) for quota_deferred and
    *  not_configured — when the guard's count resets, and a missing key is not
-   *  fixed by asking daily — else (http_error) now + 24h. */
+   *  fixed by asking daily — else (http_error, quota_unknown) now + 24h. */
   retryAfter: string;
   /** HTTP status, when whoisjson answered (429 or another non-200). */
   status?: number;
@@ -59,7 +64,8 @@ const EMPTY_RESULT: WhoisResult = {
   raw: null,
 };
 
-/** Retry delay after a failed request (http_error). */
+/** Retry delay after a failed request (http_error), and after a batch lookup
+ *  held because the monthly count was unreadable (quota_unknown). */
 export const WHOIS_HTTP_RETRY_MS = 24 * 60 * 60 * 1000;
 
 /** The first instant of the next calendar month, UTC — when the guard's
@@ -74,7 +80,7 @@ function deferred(
   status?: number,
 ): WhoisResult {
   const retryAfter =
-    reason === "http_error"
+    reason === "http_error" || reason === "quota_unknown"
       ? new Date(now.getTime() + WHOIS_HTTP_RETRY_MS)
       : startOfNextMonthUtc(now);
   return {
@@ -97,10 +103,32 @@ function deferred(
  *     checks): may use up to 950 this month.
  *   - `batch` (clone-watch attribution, entity/URL enrichment crons): stops at 700.
  *
+ * `priority` is REQUIRED on `lookupWhois` and `lookupDomainRegistration`
+ * (PR-F): it used to default to `interactive`, and `lookupDomainRegistration`
+ * passed `undefined` through, so a batch caller that forgot the argument
+ * silently got the 950 share instead of 700.
+ *
  * The count is this month's SERVED lookups — the `whois`/`whoisjson` rows this
  * module writes on a 200. Non-200 responses aren't counted, so the provider's
  * own quota may be consumed faster than this counter shows; the margins below
- * 1,000 absorb that.
+ * 1,000 absorb that. The row is AWAITED before the lookup returns (PR-F): it
+ * was fire-and-forget, and ADR-0019 records that a finish-cancelled Inngest
+ * run kills un-awaited promises — so the batch lanes, the heaviest callers,
+ * were the ones most likely to lose the row that counts them. A rejected
+ * insert is still swallowed by `logCost` (logged, not thrown), so the count
+ * remains a lower bound; the margins below 1,000 absorb that too.
+ *
+ * Two known softnesses, both deliberate:
+ *   - The count is cached PER INSTANCE for 10 minutes (`QUOTA_CACHE_MS`) and
+ *     advanced locally on each served lookup. Lookups served by OTHER
+ *     instances in that window are invisible to this one, so the guard can
+ *     overshoot by whatever the rest of the fleet serves in 10 minutes —
+ *     small against the 300 (batch) / 50 (interactive) margins.
+ *   - When the count cannot be read at all, `batch` fails CLOSED
+ *     (`quota_unknown`, no request — a cron can wait a day, and an unmetered
+ *     batch run is exactly how the fleet reached ~1,300/month) and
+ *     `interactive` fails OPEN (a user is waiting, and a telemetry blip must
+ *     not blank their check).
  */
 export type WhoisPriority = "interactive" | "batch";
 export const WHOISJSON_MONTHLY_GUARD: Record<WhoisPriority, number> = {
@@ -123,7 +151,8 @@ function monthKey(now: Date): string {
 }
 
 /** This month's served whoisjson lookups, or null when the count can't be
- *  read (the guard then fails OPEN — a telemetry blip must not stop lookups). */
+ *  read (the guard then fails CLOSED for batch, OPEN for interactive — see
+ *  WhoisPriority). */
 async function whoisjsonUsedThisMonth(now: Date): Promise<number | null> {
   const month = monthKey(now);
   if (
@@ -145,7 +174,7 @@ async function whoisjsonUsedThisMonth(now: Date): Promise<number | null> {
   // A failed head-count returns count=null with NO error (204, no body) — the
   // null is the signal, not `error` (memory: head-count failures carry no error).
   if (error || count === null) {
-    logger.warn("whoisjson quota count unavailable — guard open", {
+    logger.warn("whoisjson quota count unavailable — batch held, interactive open", {
       error: error?.message ?? "count null",
     });
     return null;
@@ -163,9 +192,9 @@ async function whoisjsonUsedThisMonth(now: Date): Promise<number | null> {
  */
 export async function lookupWhois(
   domain: string,
-  opts: { priority?: WhoisPriority } = {},
+  opts: { priority: WhoisPriority },
 ): Promise<WhoisResult> {
-  const priority: WhoisPriority = opts.priority ?? "interactive";
+  const priority: WhoisPriority = opts.priority;
   const apiKey = process.env.WHOIS_API_KEY;
   const now = new Date();
   if (!apiKey) {
@@ -174,6 +203,10 @@ export async function lookupWhois(
   }
 
   const used = await whoisjsonUsedThisMonth(now);
+  // Unreadable count: batch fails CLOSED, interactive OPEN (see WhoisPriority).
+  if (used === null && priority === "batch") {
+    return deferred("quota_unknown", now);
+  }
   const guard = WHOISJSON_MONTHLY_GUARD[priority];
   if (used !== null && used >= guard) {
     const warnKey = `${monthKey(now)}:${priority}`;
@@ -224,17 +257,27 @@ export async function lookupWhois(
     // so /admin/costs + the weekly digest surface WHOIS volume as the D2/D3
     // chain, entity-enrichment, and persona-check all drive it. This is the
     // fleet-review "no cost signal → invisible" lesson applied to a free API.
-    // Fire-and-forget (void) — telemetry never adds latency to or breaks the lookup.
+    // AWAITED (PR-F): this row IS the quota guard's count, so it must be
+    // written before the lookup returns — a fire-and-forget write is lost when
+    // an Inngest run is finish-cancelled (ADR-0019), and the guard then
+    // undercounts. One insert of latency; logCost never throws.
     if (quotaCache && quotaCache.month === monthKey(now)) quotaCache.count += 1;
-    void logCost({
+    // The insert runs concurrently with the body parse, and `finally` awaits
+    // it on BOTH paths — so the row is written before the lookup returns even
+    // when the body fails to parse (the lookup was served; it counts).
+    const logged = logCost({
       feature: "whois",
       provider: "whoisjson",
       operation: "domain-lookup",
       units: 1,
       estimatedCostUsd: 0,
     });
-
-    const data = await res.json();
+    let data: Awaited<ReturnType<Response["json"]>>;
+    try {
+      data = await res.json();
+    } finally {
+      await logged;
+    }
 
     // whoisjson.com returns `registrar` as an OBJECT ({ name, email, phone, … }),
     // not a string — the previous `data.registrar || …` short-circuited to the
@@ -328,6 +371,22 @@ function parseDate(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * True when the lookup was HELD by the batch guard because the monthly count
+ * was unreadable (`quota_unknown`, PR-F) — no request was made, and asking
+ * again once the count reads may answer. A worklist writer must leave such a
+ * row IN its worklist (not `completed`): scam_urls and scam_entities have no
+ * WHOIS re-offer path, so a row stamped completed here would lose WHOIS for
+ * good. Before PR-F an unreadable count failed open, so this never arose.
+ * Other deferrals keep their #1253 behaviour (the row completes without
+ * whois_* columns).
+ */
+export function whoisHeldForRetry(
+  w: Pick<WhoisResult, "deferral"> | null | undefined,
+): boolean {
+  return w?.deferral?.reason === "quota_unknown";
 }
 
 /**

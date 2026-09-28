@@ -29,7 +29,11 @@ import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { lookupWhois, whoisScamUrlColumns } from "../whois";
+import {
+  lookupWhois,
+  whoisHeldForRetry,
+  whoisScamUrlColumns,
+} from "../whois";
 import { checkSSL } from "../ssl";
 import { budgetedStep } from "./step-budget";
 
@@ -45,6 +49,8 @@ interface EnrichOutcome {
   updated: number;
   error?: string;
   skipped?: "budget_expired";
+  /** WHOIS held (quota_unknown): rows left `pending` for the next run. */
+  whoisHeld?: true;
 }
 
 /** Exported for tests only (#1253 deferral skip). */
@@ -61,22 +67,31 @@ export async function enrichDomain(entry: {
       checkSSL(entry.domain),
     ]);
 
+    // PR-F: WHOIS held by the batch guard (unreadable monthly count) → the
+    // status is NOT written, so the row stays `pending` and this cron
+    // re-selects it; completing it would lose WHOIS for good (no scam_urls
+    // re-offer). No head-of-line starvation: the hold is global to the run
+    // (one shared count read), so the next run with a readable count serves
+    // these rows first — they are still the newest.
+    const held = whoisHeldForRetry(whois);
+
     // Update all URLs for this domain
     const { error } = await supabase
       .from("scam_urls")
       .update({
         // #1253: an unanswered lookup maps to NO whois_* columns (see
-        // whoisScamUrlColumns). The row is still marked completed — there is
-        // no re-offer for scam_urls yet (PR #1259 follow-up).
+        // whoisScamUrlColumns). Other deferrals still mark the row completed
+        // — there is no re-offer for scam_urls yet (PR #1259 follow-up).
         ...whoisScamUrlColumns(whois, attemptedAt),
         ssl_valid: ssl.valid,
         ssl_issuer: ssl.issuer,
         ssl_days_remaining: ssl.daysRemaining,
-        enrichment_status: "completed",
+        ...(held ? {} : { enrichment_status: "completed" }),
         enrichment_attempted_at: attemptedAt,
       })
       .in("id", entry.urlIds);
     if (error) throw new Error(error.message);
+    if (held) return { domain: entry.domain, updated: 0, whoisHeld: true };
     return { domain: entry.domain, updated: entry.urlIds.length };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -225,14 +240,17 @@ export const enrichmentFanOut = inngest.createFunction(
     );
 
     const totalUpdated = results.reduce((sum, r) => sum + (r.updated || 0), 0);
+    const whoisHeld = results.filter((r) => r.whoisHeld).length;
     logger.info("Enrichment complete", {
       domains: pendingDomains.length,
       urlsUpdated: totalUpdated,
+      whoisHeld,
     });
 
     return {
       domains: pendingDomains.length,
       urlsUpdated: totalUpdated,
+      whoisHeld,
       results,
     };
   }),

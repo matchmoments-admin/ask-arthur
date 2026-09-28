@@ -5,7 +5,7 @@ import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
-import { laneGate } from "@/lib/laneHealth";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 import {
   formatDurationMinutes,
@@ -47,15 +47,16 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     timeouts: { finish: "6m" },
     concurrency: { limit: 1 },
   },
-  // Manual-trigger only (no cron). FF_SHOPFRONT_CLONE_WEEKLY_DIGEST is dark
-  // in prod, so the weekly tick just burned an execution to early-return
-  // (fleet audit 2026-09-16). Invoke on demand via the
-  // `shopfront/clone.weekly-digest.manual-trigger.v1` event. **At launch,
-  // restore by re-adding `...laneCrons("shopfront-clone-weekly-digest")`**
-  // alongside this event trigger — Sun 10:00 UTC (declared in LANE_SHAPES),
-  // deconflicted from the daily feedback-digest cron (0 9 * * *) per
-  // ultrareview M3.
-  { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
+  [
+    // PARKED via LANE_SHAPES.parked (FF_SHOPFRONT_CLONE_WEEKLY_DIGEST dark in
+    // prod; fleet audit 2026-09-16): laneCrons() is empty while parked, so the
+    // event below is the only trigger. Un-parked it runs Sun 10:00 UTC
+    // (declared in LANE_SHAPES), deconflicted from the daily feedback-digest
+    // cron (0 9 * * *) per ultrareview M3. Un-park = delete `parked` in
+    // LANE_SHAPES, deploy, PUT /api/inngest.
+    ...laneCrons("shopfront-clone-weekly-digest"),
+    { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
+  ],
   withAxiomLogging(
     { fnId: "shopfront-clone-weekly-digest" },
     async ({ step }) => {

@@ -67,7 +67,7 @@ A Lane's run conditions declared once in `LANE_SHAPES` (`apps/web/lib/laneHealth
 _Avoid_: "config", "schedule" alone (the declaration is the schedule AND the gate).
 
 **Parked lane** (clone-watch):
-A Lane whose cron trigger is removed while its flags are dark, keeping only its manual-trigger event, so a dark flag stops costing scheduled runs. Its restore schedule stays in its Lane declaration; un-parking = re-adding `...laneCrons(lane)` to the trigger, then flipping the flags (a flag flipped without it pages `absent`).
+A Lane that runs only on its manual-trigger event because its Lane declaration carries `parked: { why, while }` (`LANE_SHAPES`, `apps/web/lib/laneHealth.ts`) — the ONE parking mechanism. `laneCrons(lane)` then returns no schedule (the function's trigger always reads `...laneCrons(lane)`), and the digest expects no row. `while` names the state the park assumes: `"flags_dark"` (parked because its flags are off — if the flag gate opens while still parked, the health digest reports **`parked_enabled`**, since a parked Lane can never read `absent`) or `"gate_open"` (parked deliberately while enabled — nothing reported). Its restore schedule stays in `crons`; un-parking = deleting the `parked` field, deploying, then `PUT /api/inngest`, then flipping the flags.
 _Avoid_: "disabled" (a disabled Lane may still have its cron), "paused" (that is a brake).
 
 **Scam Cluster**:

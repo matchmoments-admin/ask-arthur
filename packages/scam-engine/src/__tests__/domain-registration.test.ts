@@ -46,7 +46,7 @@ describe("lookupDomainRegistration", () => {
 
   it("flag OFF → whoisjson only, RDAP never called", async () => {
     lookupWhois.mockResolvedValue(WHOIS);
-    const r = await lookupDomainRegistration("x.shop");
+    const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
     expect(lookupRdapOutcome).not.toHaveBeenCalled();
     expect(r.source).toBe("whoisjson");
     expect(r.registrar).toBe("GoDaddy");
@@ -58,7 +58,7 @@ describe("lookupDomainRegistration", () => {
   it("flag ON + RDAP has data → whoisjson NOT called (quota preserved)", async () => {
     flags.rdapLookup = true;
     lookupRdapOutcome.mockResolvedValue({ result: RDAP, outcome: "found" });
-    const r = await lookupDomainRegistration("x.shop");
+    const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
     expect(lookupWhois).not.toHaveBeenCalled();
     expect(r.source).toBe("rdap");
     expect(r.statuses).toEqual(["client hold"]);
@@ -73,7 +73,7 @@ describe("lookupDomainRegistration", () => {
       result: { ...RDAP, registrar: null, createdDate: null },
       outcome: "found",
     });
-    const r = await lookupDomainRegistration("x.shop");
+    const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
     expect(lookupWhois).not.toHaveBeenCalled();
     expect(r.source).toBe("rdap");
     expect(r.statuses).toEqual(["client hold"]);
@@ -85,7 +85,7 @@ describe("lookupDomainRegistration", () => {
       flags.rdapLookup = true;
       lookupRdapOutcome.mockResolvedValue({ result: null, outcome });
       lookupWhois.mockResolvedValue(WHOIS);
-      const r = await lookupDomainRegistration("x.ru");
+      const r = await lookupDomainRegistration("x.ru", { priority: "batch" });
       expect(lookupWhois).toHaveBeenCalledOnce();
       expect(r.source).toBe("whoisjson");
     },
@@ -103,7 +103,7 @@ describe("lookupDomainRegistration", () => {
     flags.rdapLookup = true;
     lookupRdapOutcome.mockRejectedValue(new Error("boom"));
     lookupWhois.mockResolvedValue(WHOIS);
-    expect((await lookupDomainRegistration("x.shop")).source).toBe("whoisjson");
+    expect((await lookupDomainRegistration("x.shop", { priority: "batch" })).source).toBe("whoisjson");
   });
 
   // #1253. Go-red (2026-09-27): make fromWhois always return
@@ -149,14 +149,14 @@ describe("lookupDomainRegistration", () => {
         status: 429,
       },
     });
-    const r = await lookupDomainRegistration("x.shop");
+    const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
     expect(r.source).toBe("deferred");
     expect(r.deferralStatus).toBe(429);
   });
 
   it("a served whoisjson answer with no registrar stays 'whoisjson' (final)", async () => {
     lookupWhois.mockResolvedValue({ ...WHOIS, registrar: null });
-    const r = await lookupDomainRegistration("x.shop");
+    const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
     expect(r.source).toBe("whoisjson");
     expect(r.retryAfter).toBeUndefined();
   });
@@ -165,7 +165,7 @@ describe("lookupDomainRegistration", () => {
     flags.rdapLookup = true;
     lookupRdapOutcome.mockResolvedValue({ result: null, outcome: "error" });
     lookupWhois.mockResolvedValue(null);
-    const r = await lookupDomainRegistration("x.shop");
+    const r = await lookupDomainRegistration("x.shop", { priority: "batch" });
     expect(r.source).toBe("none");
     expect(r.registrar).toBeNull();
   });

@@ -5,7 +5,7 @@ import { logger } from "@askarthur/utils/logger";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { resolvesToHost } from "@/lib/clone-watch/liveness";
 import { recordLaneError, recordLaneOutcome } from "@askarthur/scam-engine/lane-outcome";
-import { laneGate } from "@/lib/laneHealth";
+import { laneCrons, laneGate } from "@/lib/laneHealth";
 
 /**
  * Clone-Watch — takedown re-emergence monitor (Wave 1).
@@ -42,14 +42,14 @@ export const cloneWatchReemergenceMonitor = inngest.createFunction(
     concurrency: { limit: 1 },
     timeouts: { finish: "27m" },
   },
-  // Manual-trigger only (no cron). FF_CLONE_ENFORCEMENT +
-  // FF_CLONE_REEMERGENCE_MONITOR are dark in prod, so a scheduled tick just
-  // burned an execution to early-return (fleet audit 2026-09-16). Invoke on
-  // demand via the `shopfront/clone.reemergence.manual-trigger.v1` event.
-  // **At launch, restore the sweep by re-adding
-  // `...laneCrons("shopfront-clone-reemergence-monitor")`** (its schedule is
-  // declared in LANE_SHAPES) alongside this event trigger.
-  { event: "shopfront/clone.reemergence.manual-trigger.v1" },
+  [
+    // PARKED via LANE_SHAPES.parked (flags dark in prod; fleet audit
+    // 2026-09-16): laneCrons() is empty while parked, so the event below is
+    // the only trigger. Un-park = delete `parked` in LANE_SHAPES, deploy,
+    // PUT /api/inngest — this array does not change.
+    ...laneCrons("shopfront-clone-reemergence-monitor"),
+    { event: "shopfront/clone.reemergence.manual-trigger.v1" },
+  ],
   withAxiomLogging(
     { fnId: "shopfront-clone-reemergence-monitor" },
     async ({ step, runId }) => {
