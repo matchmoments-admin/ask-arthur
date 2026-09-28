@@ -70,6 +70,10 @@ const EMPTY_RESULT: URLScanResult = {
  * "100/day free tier" figure in this repo was wrong by 10x and had never been
  * verified): public 5,000/day, unlisted 1,000/day, private 50/day, retrieve
  * 10,000/day. Clone-watch submits as unlisted, so 1,000/day is the real cap.
+ * The unlisted limits (60/min, 100/hour, 1,000/day, re-read 2026-09-26) and
+ * every lane that spends them are owned by
+ * apps/web/lib/clone-watch/urlscan-budget.ts. A new caller of this function
+ * must be added to that roster.
  *
  * Existing legacy surface — returns `null` on any failure. New code
  * should prefer `submitURLScanWithDetails` so it can record the failure

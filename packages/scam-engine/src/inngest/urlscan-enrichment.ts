@@ -1,6 +1,12 @@
-// URLScan.io async enrichment — runs 30 min after entity enrichment.
+// URLScan.io async enrichment — three times a day (URLSCAN_ENRICHMENT_CRONS).
 // Finds URL entities that have completed enrichment but no urlscan data,
-// submits up to 20 for scanning, waits 60s, then retrieves and stores results.
+// submits up to URLSCAN_ENRICHMENT_MAX_PER_RUN for scanning, waits 60s, then
+// retrieves and stores results.
+//
+// Submits are UNLISTED (urlscan.ts), so this lane spends the same key-wide
+// unlisted quota as the clone-watch submit and recheck lanes. Its share and
+// schedule are declared once in ./urlscan-enrichment-schedule.ts and summed
+// with every other spender in apps/web/lib/clone-watch/urlscan-budget.ts.
 
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -9,8 +15,12 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { submitURLScan, retrieveURLScan } from "../urlscan";
 import { logCost, ENGINE_PRICING } from "../cost-log";
 import { withAxiomLogging } from "./with-axiom-logging";
+import {
+  URLSCAN_ENRICHMENT_CRONS,
+  URLSCAN_ENRICHMENT_MAX_PER_RUN,
+} from "./urlscan-enrichment-schedule";
 
-const MAX_URLS_PER_RUN = 20;
+const MAX_URLS_PER_RUN = URLSCAN_ENRICHMENT_MAX_PER_RUN;
 
 // inngest-finish-budget: 41 boundaries — 1 static + 2 per-URL steps
 // (submit, retrieve) x MAX_URLS_PER_RUN (20).
@@ -20,19 +30,22 @@ export const urlscanEnrichment = inngest.createFunction(
     timeouts: { finish: "22m" },
     name: "Pipeline: URLScan.io Async Enrichment",
     concurrency: { limit: 1 },
-    // urlscan.io is metered (paid tier ~$0.03/scan; free tier ~100 scans/day).
-    // The cron paces submissions to ~20 URLs every 4h, but a manual re-trigger
-    // burst would blow through the free-tier budget in seconds. Outer rateLimit
-    // prevents storms; throttle caps submissions across runs as a global lid.
+    // urlscan's UNLISTED quota is 60/min, 100/hour, 1,000/day (/user/quotas,
+    // 2026-09-26 — the "free tier ~100/day" this comment used to quote was
+    // wrong by 10x). The lane is cron-only — no manual-trigger event — so its
+    // spend is URLSCAN_ENRICHMENT_MAX_PER_RUN × three fires a day, and
+    // urlscanBudget.test.ts proves that fits beside the clone-watch lanes.
+    // rateLimit (DISCARDS) 1/10m: acceptable on a cron-only fn, where the only
+    // extra invocations are replays/redeploy double-fires. The throttle counts
+    // RUNS, not submissions (docs/inngest-brakes.md §glossary): 50 runs/h is
+    // not a submission lid, it is never reached by a three-a-day cron.
     rateLimit: { limit: 1, period: "10m" },
     throttle: { limit: 50, period: "1h", key: "urlscan-submissions" },
   },
-  // 03:00 / 15:00 / 21:00 — three runs a day as before (was `30 */8`), moved
-  // OFF the clone-watch recheck's :30 hours: both submit UNLISTED scans, and a
-  // 90-scan recheck at 00:30 plus this lane's 20 breached urlscan's 100/hour
-  // (#1231). Each slot sits >2h from a recheck batch and the 09:00 submit.
-  // Pending-status queue is self-draining + capped per run.
-  { cron: "0 3,15,21 * * *" },
+  // 03:00 / 15:00 / 21:00 UTC — declared once in urlscan-enrichment-schedule.ts
+  // (moved off the recheck's :30 hours in #1231). Pending-status queue is
+  // self-draining + capped per run.
+  URLSCAN_ENRICHMENT_CRONS.map((cron) => ({ cron })),
   withAxiomLogging(
     { fnId: "pipeline-urlscan-enrichment" },
     async ({ step }) => {
@@ -100,7 +113,10 @@ export const urlscanEnrichment = inngest.createFunction(
         const submission = await step.run(`submit-${entity.id}`, async () => {
           const result = await submitURLScan(entity.url);
           if (!result) return null;
-          void logCost({
+          // Awaited: this row is the lane's entry in the unlisted-urlscan
+          // ledger the manual-trigger budget guard reads
+          // (urlscan-budget.ts); a fire-and-forget write can be lost.
+          await logCost({
             feature: "urlscan-enrichment",
             provider: "urlscan",
             operation: "scan.submit",

@@ -6,18 +6,22 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_SCAN_REQUESTED_EVENT } from "@askarthur/scam-engine/inngest/events";
+import {
+  URLSCAN_SPENDERS,
+  decideUnlistedSpend,
+  readUnlistedLedger,
+} from "@/lib/clone-watch/urlscan-budget";
 
 const BodySchema = z.object({
   alertId: z.number().int().positive(),
 });
 
-// Soft rate-limit on operator-triggered manual scans — protects the urlscan
-// free-tier daily quota (100/day) from accidental button-mashing.
-// Counts cost_telemetry rows for the admin-triggered operation in the last
-// hour; rejects if > MAX. Per-feature (not per-user) so it caps the whole
-// operator team rather than allowing N admins × N scans.
-// Closes ultrareview F20.
-const MAX_ADMIN_SCANS_PER_HOUR = 20;
+// Operator scans spend urlscan's key-wide UNLISTED quota (60/min, 100/hour,
+// 1,000/day), the same quota the submit, recheck and enrichment lanes spend.
+// Their own caps (20/hour, 100/day, in UNITS) and the key-wide headroom are
+// declared once in lib/clone-watch/urlscan-budget.ts. Per-feature, not
+// per-user, so it caps the whole operator team. Closes ultrareview F20.
+const OWN_CAP = URLSCAN_SPENDERS.scanOne.ownCap!;
 
 export const dynamic = "force-dynamic";
 
@@ -61,44 +65,46 @@ export async function POST(req: Request) {
     );
   }
 
-  // Soft rate-limit on admin-triggered scans (ultrareview F20).
+  // Budget check (ultrareview F20, reworked for the urlscan budget Module).
   //
-  // This counts cost_telemetry rows under feature='shopfront_clone_urlscan'.
-  // Until scan-one started writing one row per operator scan, the only rows here
-  // were the batch lanes' ~13/day, so no rolling hour could reach 20 and this
-  // cap could not fire however hard the button was clicked.
-  const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
-  const { count: recentScanCount, error: recentScanErr } = await sb
-    .from("cost_telemetry")
-    .select("id", { head: true, count: "exact" })
-    .eq("feature", "shopfront_clone_urlscan")
-    .gte("created_at", oneHourAgo);
-  // A failed head-count returns count:null AND error:null (204, no body to
-  // parse), so `?? 0` silently reads as "zero scans this hour" and opens the
-  // gate. A rate limit that fails open is not a rate limit — treat an
-  // unreadable count as the cap being reached.
-  if (recentScanErr || recentScanCount === null) {
-    logger.warn("admin scan: rate-limit count unreadable, failing closed", {
-      error: recentScanErr?.message ?? null,
-    });
+  // It counts UNITS, not rows. The old cap counted cost_telemetry ROWS under
+  // feature='shopfront_clone_urlscan', and a recheck run's 90 submits are ONE
+  // recheck_submit row, while retrieve_batch rows (another quota) counted
+  // too. It also ignored the other lanes' spend, so a click during a 90-scan
+  // recheck batch passed. Now: the scan-one units in the trailing hour/day
+  // against OWN_CAP, plus every unlisted spender's units and any scheduled
+  // batch in flight or due within the hour against 100/hour and 1,000/day.
+  //
+  // An unreadable ledger returns null, never an empty list, and fails CLOSED.
+  // A failed head-count used to read as "zero scans".
+  const nowMs = Date.now();
+  const decision = decideUnlistedSpend(
+    "scanOne",
+    URLSCAN_SPENDERS.scanOne.perRun,
+    await readUnlistedLedger(sb, nowMs),
+    nowMs,
+  );
+  if (!decision.ok && decision.reason === "ledger_unreadable") {
+    logger.warn("admin scan: urlscan ledger unreadable, failing closed", {});
     return NextResponse.json(
       {
         error: "rate_limit_unavailable",
         details:
-          "Could not read the recent-scan count, so the hourly cap cannot be enforced. Try again shortly.",
+          "Could not read recent urlscan spend, so the hourly cap cannot be enforced. Try again shortly.",
       },
       { status: 503 },
     );
   }
-  if (recentScanCount >= MAX_ADMIN_SCANS_PER_HOUR) {
-    logger.warn("admin scan: rate-limited", {
-      recentScanCount,
-      max: MAX_ADMIN_SCANS_PER_HOUR,
-    });
+  if (!decision.ok) {
+    logger.warn("admin scan: refused by urlscan budget", { ...decision });
     return NextResponse.json(
       {
         error: "rate_limited",
-        details: `Soft cap of ${MAX_ADMIN_SCANS_PER_HOUR} clone-watch scans per hour reached. Wait for the next cycle to preserve urlscan's daily quota.`,
+        reason: decision.reason,
+        details:
+          decision.reason === "own_hourly_cap" || decision.reason === "own_daily_cap"
+            ? `Operator scan cap reached (${OWN_CAP.perHour}/hour, ${OWN_CAP.perDay}/day).`
+            : `urlscan's unlisted quota has no headroom right now (used ${decision.usedHour}/h + ${decision.reservedHour} reserved for scheduled lanes; ${decision.usedDay}/day). Try again later.`,
       },
       { status: 429 },
     );

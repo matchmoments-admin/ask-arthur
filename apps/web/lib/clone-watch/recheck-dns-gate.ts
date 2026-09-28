@@ -7,8 +7,9 @@ import { probeStockDns, type DnsLookup } from "@/lib/clone-watch/liveness";
  * whether a due recheck row is worth a urlscan rescan.
  *
  * WHY. The recheck lane's designed cadence asks for ~3,800 urlscan rescans a
- * day; urlscan's unlisted quota is 1,000/day and the lane spends 360 of it
- * (measured 2026-09-26: 90/run, due_total 1,354–1,441). Most due rows have not
+ * day; urlscan's unlisted quota is 1,000/day and the lane's share is 360 of it
+ * (90/run × 4 — both numbers owned by lib/clone-watch/urlscan-budget.ts;
+ * due_total 1,354–1,441 measured 2026-09-26). Most due rows have not
  * changed since their last rescan, and a phishing kit going live almost always
  * moves DNS — a parked name gains a hosting A record, NS moves off the
  * registrar's parking servers. Reading that is a few resolver queries, not a

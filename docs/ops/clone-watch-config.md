@@ -1352,11 +1352,34 @@ gate.
 > **Throughput caps (#1231, 2026-09-26).** urlscan's real limits (read from
 > `/user/quotas`): unlisted **60/min, 100/hour, 1,000/day**; retrieve 120/min,
 > 5,000/h, 10,000/day. Two unlisted caps bind: **per minute** (a submit is
-> ~1.5–2.2 s, so width 3 unpaced would push ~80/min — recheck paces one start
-> per 1.1 s, ~55/min) and **per hour** (a batch stays ≤90; the manual-trigger
-> cooldown is 65 min so two batches never share an hour, and
+> ~1.5–2.2 s, so width 3 unpaced would push ~80/min — recheck and submit pace
+> one start per 1.1 s, ≤55/min) and **per hour** (a batch stays ≤90, and
 > `pipeline-urlscan-enrichment` moved to 03/15/21:00, off the recheck's :30
-> hours). Sizes now: recheck 90/run at width 3 paced, retrieve 100/run × 5 at width 3 (the first 429 stops every
+> hours).
+>
+> **The urlscan budget Module (2026-09-28).** Every number above lives in
+> `apps/web/lib/clone-watch/urlscan-budget.ts`: the limits, and each unlisted
+> spender's schedule, per-run cap and pacing. `apps/web/__tests__/urlscanBudget.test.ts`
+> proves the scheduled lanes fit every rolling hour, minute and day. A
+> **manual** recheck or submit fire, and an admin "Scan now", must pass
+> `decideUnlistedSpend`. It sums every lane's unlisted units in the trailing
+> hour and day from `cost_telemetry`, and reserves scheduled batches that are
+> in flight or due within the hour. It refuses with
+> `skipped: urlscan_budget_<reason>` (Inngest) or a 429/503 (admin route). An
+> unreadable ledger refuses. The daily side counts scheduled runs still due
+> in the next 24h. An admitted manual run writes a `manual_reservation` row
+> (`cost_telemetry`, $0, units = its batch) before it spends, so a second
+> manual fire minutes later is refused instead of stacking.
+>
+> A manual recheck (request 90) therefore only fits in the gaps between the
+> scheduled batches: roughly 01:35–02:00, 04:00–05:30, 07:35–08:00,
+> 10:05–11:30, 13:35–14:00, 16:00–17:30, 19:35–20:00 and 22:00–23:30 UTC
+> while `pipeline-urlscan-enrichment` is on (`urlScanIO`); while it is off
+> its 02:00–04:00, 14:00–16:00 and 20:00–22:00 blocks open up too. The old 65-min recheck cooldown read
+> only recheck's own rows, so a manual fire at 09:05 passed while the 09:00
+> submit batch was spending: 165/h.
+>
+> Sizes now: recheck 90/run at width 3 paced, retrieve 100/run × 5 at width 3 (the first 429 stops every
 > worker), submit 75/day (unchanged), reconcile 40 uuids/run, resubmit 15/day,
 > enricher 60/day **oldest-first** (newest-first let its tail age out of the
 > 35-day window). Every capped lane writes `cap` + `cap_reached` in its

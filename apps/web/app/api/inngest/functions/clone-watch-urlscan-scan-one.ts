@@ -15,8 +15,12 @@ import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
  * Triggered by `shopfront/clone.scan-requested.v1`, which the admin "scan this
  * alert" endpoint (/api/admin/clone-watch/scan) emits. OPERATOR-ONLY: since
  * v224 the lifecycle-recheck loop submits its rescans INLINE (not via this
- * event), so this path is now low-volume single-click scans and needs no
- * throttle. Unlike the gated batch cron, this deliberately bypasses the
+ * event), so this path is now low-volume single-click scans. It has no Inngest
+ * throttle: its spend is bounded where the event is emitted, by the admin
+ * route's urlscan budget check (lib/clone-watch/urlscan-budget.ts, spender
+ * `scanOne`: 20/hour, 100/day in units, plus key-wide unlisted headroom).
+ * Its log-cost row is what that check counts. Unlike the gated batch cron,
+ * this deliberately bypasses the
  * preclassifier gate — the operator chose this specific alert, so we honour
  * it. It only SUBMITS (reputation + urlscan
  * UUID); `clone-watch-urlscan-retrieve` picks up the result on its next tick.
@@ -57,14 +61,11 @@ export const cloneWatchUrlscanScanOne = inngest.createFunction(
       }),
     );
 
-    // This path submitted to urlscan and logged NOTHING to cost_telemetry, with
-    // two consequences. First, operator scans were invisible in the spend/volume
-    // record while every batch lane was accounted for. Second — and worse — the
-    // admin route's "20 clone-watch scans per hour" soft cap counts
-    // cost_telemetry rows under feature='shopfront_clone_urlscan', so it was
-    // counting only the batch lanes' ~13 rows/day: no rolling hour could ever
-    // reach 20, and the limit could not fire however hard the button was
-    // clicked. Writing one row per operator scan is what makes it real.
+    // This row is the scan's entry in the unlisted-urlscan ledger. The admin
+    // route's budget check (urlscan-budget.ts) sums its units per hour/day.
+    // Before this path wrote it, operator scans were invisible in the spend
+    // record, and the route's cap could not fire however hard the button was
+    // clicked.
     await step.run("log-cost", async () => {
       await logCostAsync({
         feature: "shopfront_clone_urlscan",
