@@ -5,6 +5,8 @@ import {
   buildOutcomesLine,
   hasOutcomes,
   lifecycleBadge,
+  publicListBadge,
+  stewardshipOutcomeLines,
 } from "@/lib/clone-watch/outcome-copy";
 import { generateCloneWatchCaption } from "@/lib/clone-watch/clone-watch-caption";
 
@@ -234,7 +236,7 @@ describe("generateCloneWatchCaption", () => {
     );
     // The flip claim attaches ONLY to weaponisedAfterDecline — its own
     // sentence since v329 (from timestamps, not a subset of `weaponised`).
-    expect(c.body).toContain("Our scans confirmed 8 domains now serving active phishing.");
+    expect(c.body).toContain("Our scans caught 8 domains serving active phishing.");
     expect(c.body).toContain(
       "1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
     );
@@ -288,13 +290,13 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
 
   it("no false-escalation claim: weaponised>0 with escalated=0 says nothing about escalating", () => {
     const block = buildOutcomesBlock({ ...ZERO, declined: 20, weaponised: 3 });
-    expect(block).toContain("3 domains now serving active phishing");
+    expect(block).toContain("caught 3 domains serving active phishing");
     expect(block.toLowerCase()).not.toContain("escalat");
   });
 
   it("no flip attribution when weaponisedAfterDecline=0 (most weaponised were phishing at first scan)", () => {
     const block = buildOutcomesBlock({ ...ZERO, weaponised: 5 });
-    expect(block).toContain("Our scans confirmed 5 domains now serving active phishing.");
+    expect(block).toContain("Our scans caught 5 domains serving active phishing.");
     expect(block).not.toContain("no threat");
     expect(block).not.toContain("flipped");
   });
@@ -302,7 +304,7 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
   it("self-contained weaponised sentence even with no lead (declined=0, takenDown=0)", () => {
     const block = buildOutcomesBlock({ ...ZERO, weaponised: 2, weaponisedAfterDecline: 1 });
     expect(block).toBe(
-      "Our scans confirmed 2 domains now serving active phishing. 1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
+      "Our scans caught 2 domains serving active phishing. 1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
     );
     expect(block).not.toContain("of those");
   });
@@ -323,7 +325,7 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
     });
     expect(singulars).toContain("1 has been actioned");
     expect(singulars).toContain("1 is currently graded “no threat”");
-    expect(singulars).toContain("1 domain now serving active phishing");
+    expect(singulars).toContain("caught 1 domain serving active phishing");
     expect(singulars).not.toContain("1 domains");
     expect(singulars).not.toContain("of those");
   });
@@ -522,5 +524,144 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
   it("still forbids time-to-takedown, as outcome-copy requires", () => {
     const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
     expect(c.body).not.toMatch(/time.to.takedown|median/i);
+  });
+});
+
+/**
+ * PR-D (map #1224) — one wording home per published fact, pinned on the
+ * caption. GO-RED record:
+ *   - the old claimable=0 matcher sentence restored in buildTrendDisclosure →
+ *     "states a matcher change exactly once" fails (2 occurrences);
+ *   - the caption's own mover template restored (">= priorClones * 2" +
+ *     ", more than double") → "words the mover through moverCopy" fails;
+ *   - the "290+" literal arithmetic replaced by a fixed "~50" →
+ *     "quotes the monitored-brand count in the shared wording" fails.
+ */
+describe("caption — one wording per fact (PR-D)", () => {
+  it("states a matcher change exactly once", () => {
+    const card: CloneWatchReportCard = {
+      ...JULY,
+      mom: { ...JULY.mom, available: false, methodChanged: true },
+      brandTrends: {
+        ...JULY.brandTrends,
+        excluded: { ...JULY.brandTrends.excluded, belowFloor: 60, methodChanged: 40 },
+      },
+    };
+    const body = generateCloneWatchCaption(card).body;
+    expect(body.match(/changed how lookalikes are matched/g)?.length).toBe(1);
+  });
+
+  it("words the mover through moverCopy (exactly double is 'doubled')", () => {
+    const card: CloneWatchReportCard = {
+      ...JULY,
+      spotlight: { kind: "mover", brand: "kmart.com.au", clones: 56, auRank: 3, priorClones: 28, delta: 28 },
+    };
+    const body = generateCloneWatchCaption(card).body;
+    expect(body).toContain("its lookalike domains doubled, from 28 last month to 56");
+    expect(body).not.toMatch(/more than double/);
+  });
+
+  // Review of #1286. `weaponised` is sticky — the last scan, not liveness (of
+  // 90 weaponised on 2026-09-29, 9 offline, 34 Netcraft `unavailable`, 75
+  // last seen >14 days ago) — so the caption states a past observation.
+  // GO-RED: restoring "Our scans confirmed N domains now serving active
+  // phishing." in buildOutcomesBlock fails this.
+  it("never says 'now serving' (weaponised is the last scan, not liveness)", () => {
+    const card: CloneWatchReportCard = {
+      ...JULY,
+      kpis: { ...JULY.kpis, takenDown: 3, declined: 4, weaponised: 8, escalated: 1, weaponisedAfterDecline: 1 },
+    };
+    const outputs = [
+      generateCloneWatchCaption(card).body,
+      buildOutcomesBlock({ ...card.kpis }),
+      buildOutcomesLine(card.kpis),
+    ];
+    for (const text of outputs) expect(text).not.toMatch(/now serving/i);
+    expect(outputs[0]).toContain("Our scans caught 8 domains serving active phishing.");
+  });
+
+  it("quotes the monitored-brand count in the shared wording", () => {
+    expect(generateCloneWatchCaption(JUNE).body).toContain("against 290+ major Australian brands");
+  });
+});
+
+describe("stewardshipOutcomeLines (Brand Stewardship email)", () => {
+  const zero = {
+    takenDown: 0,
+    declined: 0,
+    escalated: 0,
+    weaponised: 0,
+    weaponisedAfterDecline: 0,
+    reTakenDown: 0,
+  };
+
+  // GO-RED: re-nesting the flip line under `weaponised > 0` fails this; so
+  // does dropping weaponisedAfterDecline from hasOutcomes (the block hides).
+  it("shows the flip even when nothing is weaponised now (it went offline)", () => {
+    const k = { ...zero, weaponisedAfterDecline: 2 };
+    expect(hasOutcomes(k)).toBe(true);
+    const lines = stewardshipOutcomeLines(k, "ANZ");
+    expect(lines.map((l) => l.kind)).toEqual(["weaponised_after_decline"]);
+    expect(lines[0]!.text).toContain("after Netcraft had graded them “no threat”");
+  });
+
+  // GO-RED: restoring "of those we escalated" fails this.
+  it("escalated is its own line, never 'of those' (it is not a subset of declined)", () => {
+    const lines = stewardshipOutcomeLines({ ...zero, declined: 1, escalated: 3 }, "ANZ");
+    const text = lines.map((l) => l.text).join(" ");
+    expect(text).not.toMatch(/of those|of them/i);
+    expect(lines.find((l) => l.kind === "escalated")!.n).toBe(3);
+  });
+
+  it("keeps the verb discipline", () => {
+    const lines = stewardshipOutcomeLines(
+      { takenDown: 2, declined: 1, escalated: 1, weaponised: 1, weaponisedAfterDecline: 1, reTakenDown: 1 },
+      "ANZ",
+    );
+    const text = lines.map((l) => l.text).join(" ");
+    expect(text).toContain("actioned by Netcraft");
+    expect(text).toContain("including 1 only after we escalated");
+    expect(text).not.toMatch(/we took down|we removed|removed by/i);
+    expect(lines.every((l) => l.n > 0)).toBe(true);
+  });
+});
+
+/**
+ * GO-RED (review of #1286): dropping the Netcraft-evidence condition from the
+ * taken_down branch fails "a taken_down row without Netcraft's evidence gets
+ * no badge" — 83 of 95 confirmed taken_down rows in prod (2026-09-29).
+ */
+describe("publicListBadge (/clone-watch list rows)", () => {
+  const row = (
+    lifecycleState: string | null,
+    extra: Partial<Parameters<typeof publicListBadge>[0]> = {},
+  ) =>
+    publicListBadge({
+      lifecycleState,
+      offlineSince: null,
+      netcraftTakedownSource: null,
+      netcraftUrlState: null,
+      ...extra,
+    });
+
+  it("'Actioned by Netcraft' only with Netcraft's own evidence", () => {
+    const viaLog = row("taken_down", { netcraftTakedownSource: "netcraft_log" });
+    expect(viaLog!.label).toBe("Actioned by Netcraft");
+    expect(viaLog!.title).toMatch(/may still be online/);
+    expect(row("taken_down", { netcraftUrlState: "malicious" })!.label).toBe("Actioned by Netcraft");
+  });
+
+  it("a taken_down row without Netcraft's evidence gets no badge", () => {
+    expect(row("taken_down")).toBeNull();
+    // Our own witnessed stamp is not Netcraft's evidence.
+    expect(row("taken_down", { netcraftTakedownSource: "witnessed", netcraftUrlState: "no threats" })).toBeNull();
+  });
+
+  it("offline only when our DNS sweep witnessed it; nothing it cannot prove", () => {
+    expect(row("dormant", { offlineSince: "2026-09-26T10:01:47Z" })!.label).toBe("Offline");
+    // v285's never-scanned dormant: no evidence either way → no badge.
+    expect(row("dormant")).toBeNull();
+    expect(row("weaponised")).toBeNull();
+    expect(row(null)).toBeNull();
   });
 });

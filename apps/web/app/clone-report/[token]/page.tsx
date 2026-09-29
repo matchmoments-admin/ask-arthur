@@ -18,6 +18,7 @@ import {
   squattingSummary,
   type SquatView,
 } from "@/lib/clone-watch/squatting";
+import { lookalikeDomainsNoun } from "@/lib/clone-watch/targeting-copy";
 import ShareCharts, { type Slice } from "./ShareCharts";
 
 // Colour carries meaning only alongside the text label (never alone).
@@ -90,8 +91,7 @@ export default async function CloneReportPage({ params }: PageProps) {
             {clones.detected}
           </span>
           <span className="ml-2 text-slate-600">
-            lookalike domain{clones.detected === 1 ? "" : "s"} detected this
-            period
+            {lookalikeDomainsNoun(clones.detected)} detected this period
           </span>
         </div>
 

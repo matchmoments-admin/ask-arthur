@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   TREND_FLOOR,
   brandsCoveredForMonth,
+  brandsMonitoredOn,
+  monitoredBrandsPhrase,
   classifyTrend,
   moveSigma,
   coveredForWholeMonth,
@@ -491,5 +493,51 @@ describe("malformed period months (review finding)", () => {
     expect(() => coveredForWholeMonth(LONG_COVERED, "2026-8")).toThrow(
       /unparseable periodMonth/,
     );
+  });
+});
+
+/**
+ * The monitored-brand count (PR-D, map #1224): one reader of coverage, one
+ * wording. Prod on 2026-09-28: 295 rows, 293 open → "290+".
+ *
+ * GO-RED: `coveredTo > day` → `>=` fails "a brand closed today is already
+ * gone"; dropping the null/zero guard in monitoredBrandsPhrase fails "no
+ * number rather than a guess".
+ */
+describe("brandsMonitoredOn + monitoredBrandsPhrase", () => {
+  const row = (b: string, from: string, to: string | null): BrandCoverage => ({
+    brandDomain: `${b}.com.au`,
+    brandNormalized: b,
+    coveredFrom: from,
+    coveredTo: to,
+  });
+  const rows = [
+    row("kmart", "2026-05-24", null),
+    row("target", "2026-05-24", null),
+    row("lendi", "2026-05-24", "2026-09-01"), // de-listed, closed on the 1 Sep run
+    row("mecca", "2026-07-21", null),
+    row("mecca", "2026-05-24", "2026-06-01"), // an earlier window of the same brand
+  ];
+
+  it("counts brands covered on the day, each once", () => {
+    expect(brandsMonitoredOn(rows, "2026-09-28T03:00:00Z")).toBe(3);
+    expect(brandsMonitoredOn(rows, "2026-07-01")).toBe(3); // lendi still in, mecca between windows
+  });
+
+  it("a brand closed today is already gone (coveredTo is a detection date)", () => {
+    expect(brandsMonitoredOn(rows, "2026-09-01")).toBe(3);
+    expect(brandsMonitoredOn(rows, "2026-08-31")).toBe(4);
+  });
+
+  it("rounds down to the ten, with a plus", () => {
+    expect(monitoredBrandsPhrase(293)).toBe("290+");
+    expect(monitoredBrandsPhrase(290)).toBe("290+");
+    expect(monitoredBrandsPhrase(7)).toBe("7");
+  });
+
+  it("no number rather than a guess when the count is unknown or empty", () => {
+    expect(monitoredBrandsPhrase(null)).toBeNull();
+    expect(monitoredBrandsPhrase(undefined)).toBeNull();
+    expect(monitoredBrandsPhrase(0)).toBeNull();
   });
 });

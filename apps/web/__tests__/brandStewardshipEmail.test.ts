@@ -342,3 +342,54 @@ describe("F2 slot gating (review fix)", () => {
     expect(html).toContain("unactioned lookalikes above"); // updated slot copy
   });
 });
+
+/**
+ * The caption's honesty rules, applied to the rendered email (PR-D, map
+ * #1224). The outcome words now come from outcome-copy.ts
+ * stewardshipOutcomeLines; these tests read the HTML a brand receives.
+ *
+ * GO-RED: restoring the template's inline "↩️ N of those we escalated" fails
+ * "no 'of those'"; re-nesting the flip line under weaponised > 0 fails
+ * "shows the flip with nothing weaponised now".
+ */
+describe("outcome block honesty (rendered)", () => {
+  const render_ = (kpis: Record<string, number>) =>
+    render(
+      BrandStewardshipReport({
+        brandName: "ANZ",
+        periodLabel: "September 2026",
+        detected: 0,
+        reportedByDestination: {},
+        reportsSent: 0,
+        reportRef: "BSR-anz-2026-09",
+        cloneDetections: {
+          detected: 6,
+          netcraftReported: 6,
+          byClassification: {},
+          byCountry: {},
+          byRegistrar: {},
+          byAsn: {},
+          domains: [],
+          ...kpis,
+        },
+      }),
+    );
+
+  it("no 'of those': escalated is not a subset of the declined line above it", async () => {
+    const html = await render_({ declined: 1, escalated: 3 });
+    expect(html).toContain("escalated back to Netcraft");
+    expect(html).not.toMatch(/of those/i);
+  });
+
+  it("shows the flip with nothing weaponised now (the flipped clones went offline)", async () => {
+    const html = await render_({ weaponised: 0, weaponisedAfterDecline: 2 });
+    expect(html).toContain("What Netcraft did with them");
+    expect(html).toMatch(/served phishing after Netcraft had graded them/);
+  });
+
+  it("keeps the verbs: actioned, never removed or taken down by us", async () => {
+    const html = await render_({ takenDown: 2, reTakenDown: 1, escalated: 1 });
+    expect(html).toContain("actioned by Netcraft");
+    expect(html).not.toMatch(/we took down|we removed|now serving active phishing/i);
+  });
+});

@@ -30,7 +30,9 @@ export interface TakedownStats {
     median: number | null;
     p90: number | null;
   } | null;
-  /** Our witness of live phishing (weaponised_at) → Netcraft's classification. */
+  /** Our witness of live phishing (weaponised_at) → Netcraft's classification.
+   *  Since v340 only rows weaponised INSIDE the window, so `n` counts rows of
+   *  `cohort.weaponised` (a pre-v340 row can exceed it — see blocklistTile). */
   detectToBlock: {
     n: number;
     median: number | null;
@@ -140,9 +142,17 @@ export interface BlocklistTile {
 
 /**
  * The ONE wording of the public "time to blocklisting" figure (lead's decision,
- * #1254): detection → blocklist, labelled "n=7 of 41 weaponised in window",
+ * #1254): detection → blocklist, labelled "n=X of Y weaponised in window",
  * with the explanation that most of that time is our own submit cadence. Null
  * below the publish floor or when unmeasured — the caller shows its fallback.
+ *
+ * "of Y" asserts that the X timed clones are among the Y weaponised in the
+ * window. Before v340 it was not true: the SQL sample was windowed on the
+ * blocklist date and the cohort on weaponised_at, so a clone weaponised before
+ * the window and blocklisted inside it was in X and not in Y (prod 2026-09-28:
+ * "n=11 of 44" was 10 of the 44 plus one from outside them). v340 makes the
+ * sample a subset in SQL; the clause is still withheld whenever X > Y, so a
+ * deploy that lands before the migration shows less, never a false subset.
  */
 export function blocklistTile(
   stats: TakedownStats | null,
@@ -151,7 +161,9 @@ export function blocklistTile(
   const d = stats?.detectToBlock ?? null;
   const median = publishableMedian(d, floor);
   if (median === null || !d) return null;
-  const of = stats?.cohort ? ` of ${stats.cohort.weaponised} weaponised in window` : "";
+  const cohortN = stats?.cohort?.weaponised ?? null;
+  const of =
+    cohortN !== null && d.n <= cohortN ? ` of ${cohortN} weaponised in window` : "";
   return {
     value: formatDurationMinutes(median),
     label: "Median time to blocklisting",

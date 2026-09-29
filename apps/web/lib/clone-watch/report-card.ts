@@ -200,9 +200,11 @@ export interface CloneWatchReportCard {
     escalated: number;
     /** Currently serving active phishing (lifecycle weaponised). */
     weaponised: number;
-    /** Weaponised AND previously Netcraft-declined — the only subset for which
-     *  the "graded no-threat, later flipped" story is provable (see
-     *  lib/clone-watch/outcome-copy.ts honesty rules). */
+    /** Weaponised AFTER Netcraft declined it, from timestamps, whatever its
+     *  state is now — the only rows for which the "graded no-threat, later
+     *  flipped" story is provable. NOT a subset of `weaponised` (current
+     *  state) since v329: a flipped clone now offline or taken down still
+     *  counts (clone-metrics.ts, outcome-copy.ts honesty rules). */
     weaponisedAfterDecline: number;
     /** Escalated → then taken down ("we forced it through"). Subset of takenDown. */
     reTakenDown: number;

@@ -1,9 +1,11 @@
-import { describeTotalMove, threeMonthLine } from "@/lib/clone-watch/trend-copy";
+import { describeTotalMove, moverCopy, threeMonthLine } from "@/lib/clone-watch/trend-copy";
+import { monitoredBrandsPhrase } from "@/lib/clone-watch/brand-coverage";
 import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
 import {
   buildClassifierCaveat,
   buildTldLine,
   buildTrendDisclosure,
+  lookalikeDomains,
 } from "@/lib/clone-watch/targeting-copy";
 import { buildOutcomesBlock } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
@@ -106,9 +108,10 @@ export function generateCloneWatchCaption(
     // every month. Reading `AU_BRAND_WATCHLIST.length` fixed that but left a
     // subtler version: a card can be built for any past month, and the live
     // length only grows, so re-exporting June with today's number overstates
-    // what we were actually sweeping then. Rounded down to the nearest ten so
-    // it stays true between watchlist edits.
-    `Not confirmed scams — lookalike domains: freshly-registered web addresses built to resemble a real brand. We sweep new domain registrations against ${Math.floor(card.watchlistSize / 10) * 10}+ major Australian brands every day and review the matches by hand.`;
+    // what we were actually sweeping then. Worded by monitoredBrandsPhrase
+    // (brand-coverage.ts), the one home shared with the slide, the public page
+    // and the blog prompt.
+    `Not confirmed scams — lookalike domains: freshly-registered web addresses built to resemble a real brand. We sweep new domain registrations against ${monitoredBrandsPhrase(card.watchlistSize) ?? "a watchlist of"} major Australian brands every day and review the matches by hand.`;
 
   // ── Findings (numbered; count adapts) ─────────────────────────────────────
   const findings: string[] = [];
@@ -130,8 +133,8 @@ export function generateCloneWatchCaption(
     const restClause = rest.length ? `, with ${joinAnd(rest)} close behind` : "";
     findings.push(
       fundIsLead
-        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
-        : `${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}.`,
+        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${lookalikeDomains(lead.n)})${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
+        : `${lead.name} was the most-copied Australian brand (${lookalikeDomains(lead.n)})${restClause}.`,
     );
   }
 
@@ -148,18 +151,12 @@ export function generateCloneWatchCaption(
   const spName = sp.brand ? prettyBrand(sp.brand) : null;
   const spotlightIsLead = spName != null && au[0]?.name === spName;
   if (sp.kind === "mover" && spName && !spotlightIsLead) {
-    const doubled = sp.priorClones != null && sp.priorClones > 0 && sp.clones >= sp.priorClones * 2;
-    findings.push(
-      // NOT "one actor registering in bulk". Nothing in a month-over-month
-      // count says how many people are behind it — that line inferred an actor
-      // from a volume change alone, which is a weaker basis than the
-      // infrastructure fingerprint we already decline to call an actor
-      // (campaign-summary.ts, targeting-copy.ts rule 3). Say what we measured.
-      `${spName} was the month's sharpest riser — ${sp.priorClones} lookalike domains last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump that size is worth a look: it is registration activity concentrating on one brand rather than spreading evenly.`,
-    );
+    // Worded by trend-copy.ts moverCopy — the one home shared with the
+    // carousel's spotlight slide (it also holds the no-actor rule).
+    findings.push(moverCopy(spName, sp).sentence);
   } else if (sp.kind === "new_entrant" && spName && !spotlightIsLead) {
     findings.push(
-      `${spName} appeared on the map for the first time (${sp.clones} lookalike domains) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
+      `${spName} appeared on the map for the first time (${lookalikeDomains(sp.clones)}) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
     );
   } else if (sp.kind === "super_fund" && spName && !fundIsLead) {
     findings.push(

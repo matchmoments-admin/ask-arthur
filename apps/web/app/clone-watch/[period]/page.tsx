@@ -10,7 +10,12 @@
 // `noindex` until FF_CLONE_WATCH_PUBLIC is ON (waits on #371 vetted copy); the
 // route still renders behind noindex so it can be previewed.
 
-import { shortTotalMove, type MomLike } from "@/lib/clone-watch/trend-copy";
+import {
+  methodChangeSentence,
+  shortTotalMove,
+  type MomLike,
+} from "@/lib/clone-watch/trend-copy";
+import { lookalikeDomains } from "@/lib/clone-watch/targeting-copy";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -163,8 +168,10 @@ export default async function CloneWatchMonthPage({
   const label = periodLabel(row.period_month);
   const mom = row.mom;
   // trend-copy.ts decides the wording (#1226): noise reads "about the same",
-  // a matcher change shows nothing, a % only above the floor.
+  // a % only above the floor, and a matcher change shows no delta but DOES
+  // say why (methodChangeSentence — until 2026-09-28 this page went silent).
   const momLine = mom ? shortTotalMove(mom) : null;
+  const methodNote = mom ? methodChangeSentence(mom) : null;
 
   return (
     <>
@@ -183,8 +190,8 @@ export default async function CloneWatchMonthPage({
         <Link href="/clone-watch/method" className="underline">
           how we measure this
         </Link>
-        . These are suspected lookalikes submitted for review, not adjudicated
-        findings.
+        . These are suspected lookalikes, not adjudicated findings; the ones we
+        confirm are reported to Netcraft.
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
@@ -201,14 +208,15 @@ export default async function CloneWatchMonthPage({
           {mom!.brandsDelta} brands).
         </p>
       )}
+      {methodNote && <p className="text-sm text-gov-slate mb-8">{methodNote}</p>}
 
       {row.super_fund && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 mb-8 text-sm leading-relaxed text-amber-900">
           <p className="font-semibold mb-1">Spotlight: superannuation</p>
           <p>
             {row.super_fund.brand} was the #{row.super_fund.auRank} most-targeted
-            Australian brand this month ({row.super_fund.clones} lookalike
-            domains) — a sign impersonation has moved beyond banks and retail to
+            Australian brand this month ({lookalikeDomains(row.super_fund.clones)})
+            — a sign impersonation has moved beyond banks and retail to
             any trusted brand with money attached.
           </p>
         </div>

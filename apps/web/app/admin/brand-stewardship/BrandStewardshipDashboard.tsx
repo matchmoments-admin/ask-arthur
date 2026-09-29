@@ -12,6 +12,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
+import { lookalikeDomains } from "@/lib/clone-watch/targeting-copy";
 
 export interface StewardshipRow {
   id: string;
@@ -46,10 +47,14 @@ function linkedInMessage(r: StewardshipRow): string {
   return [
     `Hi ${brand} team — I'm Brendan from Ask Arthur, an Australian scam-detection service.`,
     ``,
-    `This month we detected ${n} lookalike domain${n === 1 ? "" : "s"} impersonating ${brand} — typosquats set up to phish your customers. Here's the full breakdown of where each one is hosted and registered:`,
+    // No intent claim (targeting-copy.ts rule 2): "typosquats set up to phish
+    // your customers" was false for ~94% of rows — most are never seen serving
+    // anything. StewardshipRow carries no weaponised count, so the optional
+    // "K of them were seen serving phishing" clause is not added here.
+    `This month we detected ${lookalikeDomains(n)} resembling ${brand}. Lookalike names like these can be used to phish your customers. Here's where each one is hosted and registered:`,
     shareUrl,
     ``,
-    `We already report these to global blocklists automatically, but wanted your team to have the list directly. With the Scams Prevention Framework now in effect, we'd be glad to send ${brand} a free monthly clone report — a simple way to show you're proactively protecting customers. Keen to help.`,
+    `We already report the confirmed ones to global blocklists automatically, but wanted your team to have the list directly. With the Scams Prevention Framework now in effect, we'd be glad to send ${brand} a free monthly clone report — a simple way to show you're proactively protecting customers. Keen to help.`,
   ].join("\n");
 }
 

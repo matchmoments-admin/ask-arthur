@@ -7,6 +7,11 @@ import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { appendBlogCtaBlock } from "@/lib/blog-cta";
+import {
+  brandsCoveredForMonth,
+  monitoredBrandsPhrase,
+} from "@/lib/clone-watch/brand-coverage";
+import { readBrandCoverage } from "@/lib/clone-watch/brand-coverage-data";
 
 /**
  * Monthly intel blog — data layer + generator.
@@ -51,6 +56,9 @@ export interface MonthlyIntelFacts {
   cloneWatch: {
     totalClones: number;
     brandCount: number;
+    /** Brands the watchlist covered for the WHOLE month (brand_coverage_history,
+     *  the same count the caption and slide quote); null = coverage unreadable. */
+    monitoredBrands: number | null;
     reportedOnward: number;
     topBrands: Array<{ brand: string; clones: number; reported: number }>;
     weaponisedDomains: Array<{
@@ -100,7 +108,7 @@ export async function collectMonthlyIntelFacts(
 
   const periodMonth = startIso.slice(0, 7);
 
-  const [competitor, weaponised, regulator, coverage] = await Promise.all([
+  const [competitor, weaponised, regulator, coverage, brandCoverage] = await Promise.all([
     sb
       .from("competitor_intel_observations")
       .select("scam_title, scam_type, brands, novelty, summary")
@@ -137,6 +145,7 @@ export async function collectMonthlyIntelFacts(
       .eq("status", "published")
       .order("published_at", { ascending: false })
       .limit(100),
+    readBrandCoverage(sb, "monthly-intel-blog"),
   ]);
 
   // Paged, not `.limit(N)`: PostgREST caps every response at 1000 rows, so the
@@ -250,6 +259,12 @@ export async function collectMonthlyIntelFacts(
         0,
       ),
       brandCount: cloneRows.length,
+      // Same rule as the report card's watchlistSize: brands covered for the
+      // whole month. An empty table is a missing measurement, not zero brands.
+      monitoredBrands:
+        brandCoverage && brandCoverage.length > 0
+          ? brandsCoveredForMonth(brandCoverage, periodMonth).size
+          : null,
       reportedOnward: cloneRows.reduce(
         (s, r) => s + ((r.reported_to_netcraft as number) ?? 0),
         0,
@@ -350,6 +365,19 @@ const VALID_CATEGORIES = [
   "real-stories",
 ];
 
+/**
+ * The prompt's coverage sentence. The number is `monitoredBrandsPhrase` — the
+ * one wording shared with the caption, the slide and the public page — so the
+ * post cannot contradict them. It replaced a literal "~130" that was already
+ * less than half the watchlist.
+ */
+export function monitoredBrandsSentence(monitoredBrands: number | null): string {
+  const phrase = monitoredBrandsPhrase(monitoredBrands);
+  return phrase
+    ? `Our clone-watch scans newly registered domains against ${phrase} monitored brands; if you state the count, write exactly "${phrase}".`
+    : "Our clone-watch scans newly registered domains against a watchlist of monitored brands; do not state how many.";
+}
+
 export async function generateMonthlyIntelPost(
   facts: MonthlyIntelFacts,
 ): Promise<MonthlyGeneratedPost | null> {
@@ -382,7 +410,7 @@ GROUNDING RULES (non-negotiable):
 - Australian English, general audience, practical advice.
 
 HONESTY RULES for our own detection data (non-negotiable — we show our working):
-- Detection counts are a FLOOR, not a total: write "our monitoring detected N", never "there are N". Our clone-watch scans newly registered domains against ~130 monitored brands; clones we don't detect exist.
+- Detection counts are a FLOOR, not a total: write "our monitoring detected N", never "there are N". ${monitoredBrandsSentence(facts.cloneWatch.monitoredBrands)} Clones we don't detect exist.
 - When you cite a detected count next to a smaller reported count, EXPLAIN the gap using the provided lifecycle facts. The funnel vocabulary: "detected" = lexical brand match on a new domain (many sit parked, not yet malicious); "monitoring" = we recheck it for changes; "weaponised" = it started serving live content; "reported" = submitted to takedown services with evidence; "declined" = the takedown service declined to act until the site turns visibly malicious (we keep watching); "taken_down" = confirmed gone. Not-yet-malicious parked domains and evidence requirements are the usual reasons a detection isn't reported the same day.
 - Never claim or imply a takedown that isn't in the facts.
 - Verifiability: when the post uses clone-watch data, tell readers the live aggregate numbers are publicly visible at https://askarthur.au/clone-watch — this is the one permitted askarthur.au link (the CTA block is still appended automatically; add nothing else).

@@ -408,4 +408,18 @@ describe("public blocklist metric wording lives in the metric module", () => {
     expect(tile.note).toContain("not Netcraft");
     expect(blocklistTile({ ...s, detectToBlock: { n: 4, median: 231, p90: null } }, 5)).toBeNull();
   });
+
+  // PR-D (v340): "n=X of Y" asserts X ⊆ Y. v340 makes it so in SQL
+  // (clonePublicCohortsSql.test.ts); a pre-v340 row can still have X > Y, and
+  // then the tile must drop "of Y" rather than print a false subset.
+  // GO-RED: removing `d.n <= cohortN` from blocklistTile fails this test.
+  it("never prints 'n=X of Y' with X > Y (a pre-v340 row)", () => {
+    const s = parseTakedownStats([
+      { window_days: 30, takedowns_total: 12, timed_n: 0, detect_to_block_n: 11, detect_to_block_median_minutes: 52, weaponised_n: 9 },
+    ])!;
+    const tile = blocklistTile(s, 5)!;
+    expect(tile.sub).toBe("phishing detected → Netcraft blocklist · n=11");
+    const ok = blocklistTile({ ...s, cohort: { ...s.cohort!, weaponised: 44 } }, 5)!;
+    expect(ok.sub).toBe("phishing detected → Netcraft blocklist · n=11 of 44 weaponised in window");
+  });
 });

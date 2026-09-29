@@ -64,8 +64,12 @@ function claudeResult(result: unknown) {
   };
 }
 
-const { generateMonthlyIntelPost, factsAreTooThin, monthlyGenerationSchema } =
-  await import("@/lib/monthly-intel-blog");
+const {
+  generateMonthlyIntelPost,
+  factsAreTooThin,
+  monthlyGenerationSchema,
+  monitoredBrandsSentence,
+} = await import("@/lib/monthly-intel-blog");
 const { ghostAdminToken } = await import("@/lib/ghost-admin");
 import type { MonthlyIntelFacts } from "@/lib/monthly-intel-blog";
 
@@ -83,6 +87,7 @@ function facts(overrides: Partial<MonthlyIntelFacts> = {}): MonthlyIntelFacts {
     cloneWatch: {
       totalClones: 804,
       brandCount: 129,
+      monitoredBrands: 293,
       reportedOnward: 628,
       topBrands: [{ brand: "target.com.au", clones: 43, reported: 34 }],
       weaponisedDomains: [{ domain: "taget.one", target: "target.com.au", date: "2026-07-03" }],
@@ -111,7 +116,7 @@ describe("factsAreTooThin", () => {
       factsAreTooThin(
         facts({
           reddit: { cohortSize: 0, categories: [], brands: [], tactics: [], noveltySignals: [] },
-          cloneWatch: { totalClones: 0, brandCount: 0, reportedOnward: 0, topBrands: [], weaponisedDomains: [], lifecycle: [] },
+          cloneWatch: { totalClones: 0, brandCount: 0, monitoredBrands: null, reportedOnward: 0, topBrands: [], weaponisedDomains: [], lifecycle: [] },
           regulatorAlerts: [],
         })
       )
@@ -242,5 +247,36 @@ describe("ghostAdminToken", () => {
 
   it("rejects a key without the id:secret shape", () => {
     expect(ghostAdminToken("no-colon-here")).toBeNull();
+  });
+});
+
+/**
+ * The monitored-brand count reaches the prompt from coverage, not a literal
+ * (PR-D, map #1224). The prompt said "~130 monitored brands" while the
+ * watchlist held 293 — the blog would have published less than half our real
+ * coverage beside a caption that says "290+".
+ *
+ * GO-RED: restoring the literal "~130" line in generateMonthlyIntelPost's
+ * system prompt fails "passes the live count"; making monitoredBrandsSentence
+ * print a number for null fails "names no number when coverage is unknown".
+ */
+describe("monitored-brand count in the prompt", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.ANTHROPIC_API_KEY = "test-key";
+  });
+
+  it("passes the live count, in the shared wording, and never the stale literal", async () => {
+    mockCallClaudeJson.mockResolvedValue(claudeResult(validGeneration));
+    await generateMonthlyIntelPost(facts());
+    const system = (mockCallClaudeJson.mock.calls[0]![0] as { system: string }).system;
+    expect(system).toContain("against 290+ monitored brands");
+    expect(system).not.toMatch(/~\s?130|~\s?50\b/);
+  });
+
+  it("names no number when coverage is unknown", () => {
+    const s = monitoredBrandsSentence(null);
+    expect(s).not.toMatch(/\d/);
+    expect(s).toMatch(/do not state how many/);
   });
 });

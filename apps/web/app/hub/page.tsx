@@ -21,6 +21,14 @@ import { getAllPosts } from "@/lib/blog";
 import { blogPostPath } from "@/lib/blogPath";
 import { withUtm } from "@/lib/utm";
 import { OG_BASE } from "@/lib/og";
+import {
+  MATCHES_LABEL,
+  parsePublicImpact,
+  REPORTED_LABEL,
+  REPORTING_STATEMENT_ELSEWHERE,
+  type PublicImpactSnapshot,
+} from "@/lib/clone-watch/public-impact";
+import { lookalikeDomains } from "@/lib/clone-watch/targeting-copy";
 import Deck from "./Deck";
 import type { Chapter } from "./chapters";
 
@@ -79,24 +87,19 @@ function linkHref(href: string): string {
    Data
    ----------------------------------------------------------------------- */
 
-interface ImpactSnapshot {
-  candidates_total: number;
-  brands_protected: number;
-  netcraft_submits_total: number;
-}
-
 interface EditionRow {
   period_month: string;
   total_domains: number;
   brand_count: number;
 }
 
-async function getImpact(): Promise<ImpactSnapshot | null> {
+// The row, its labels and the reporting sentence are public-impact.ts —
+// shared with the /clone-watch panel so a correction lands on both.
+async function getImpact(): Promise<PublicImpactSnapshot | null> {
   const supabase = createServiceClient();
   if (!supabase) return null;
   const { data } = await supabase.rpc("clone_watch_public_impact", { p_days: 30 });
-  if (!Array.isArray(data) || data.length === 0) return null;
-  return data[0] as ImpactSnapshot;
+  return parsePublicImpact(data);
 }
 
 // Newest durable monthly summary row. Self-advances the "Latest edition" card
@@ -244,15 +247,15 @@ export default async function HubPage() {
       eyebrow: "04 · Clone-watch",
       kicker: "Daily NRD sweep",
       title: "What we watch",
-      lede: "Every day we sweep newly-registered domains for names that mimic Australian brands. Factual observations from a public registry — not accusations.",
+      lede: "Every day we sweep newly-registered domains for names that mimic Australian brands, and publish the ones we confirm as lookalikes.",
       // Null, not zeros. A failed RPC returns no rows with no error, and a
       // confident "0 candidates surfaced" on a page whose entire proposition
       // is "we measure this" is worse than showing nothing.
       stats: impact
         ? [
-            { n: n(impact.candidates_total), k: "Candidates surfaced" },
+            { n: n(impact.candidates_total), k: MATCHES_LABEL },
             { n: n(impact.brands_protected), k: "Brands protected" },
-            { n: n(impact.netcraft_submits_total), k: "Reported to Netcraft", accent: true },
+            { n: n(impact.netcraft_submits_total), k: REPORTED_LABEL, accent: true },
           ]
         : null,
       statsWindow: "Last 30 days · aggregate only",
@@ -260,12 +263,12 @@ export default async function HubPage() {
       // clone_watch_public_impact.brand_notifications_total is 0 — that lane
       // exists in code but has never fired. Do not re-add the claim without
       // checking the column first.
-      note: "We never publish which specific domains we report. Reports go to community blocklists so suspect domains get browser-blocked globally.",
+      note: REPORTING_STATEMENT_ELSEWHERE,
       featured: edition
         ? {
             kicker: "Latest edition",
             title: editionLabel(edition.period_month),
-            meta: `${n(edition.total_domains)} lookalike domains across ${n(edition.brand_count)} brands`,
+            meta: `${lookalikeDomains(edition.total_domains)} across ${n(edition.brand_count)} brands`,
             href: linkHref(`${ORIGIN}/clone-watch/${editionSlug(edition.period_month)}`),
           }
         : null,

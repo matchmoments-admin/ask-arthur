@@ -1,8 +1,10 @@
 /**
  * Vendor-outcome vocabulary — THE single source of the published outcome copy
- * for the monthly LinkedIn carousel (slide 06) and the deterministic caption.
- * The Brand Stewardship email shares the guard + verb discipline (its richer
- * multi-line JSX stays in the template, but its claims follow the same rules).
+ * for the monthly LinkedIn carousel (slide 06), the deterministic caption, the
+ * Brand Stewardship email's outcome block (stewardshipOutcomeLines) and the
+ * public /clone-watch list's row badges (publicListBadge). The email's words
+ * used to live in its own JSX "following the same rules"; they did not (see
+ * stewardshipOutcomeLines).
  *
  * HONESTY RULES (hard — pinned by cloneWatchCaption.test.ts):
  *  - Lifecycle buckets are MUTUALLY EXCLUSIVE current states (the aggregator's
@@ -49,9 +51,19 @@ export interface CloneOutcomeKpis {
 }
 
 /** True when the month's cohort has any vendor outcome worth publishing.
- *  Includes escalated so an escalated-only month is never silently hidden. */
+ *  Includes escalated so an escalated-only month is never silently hidden, and
+ *  weaponisedAfterDecline because since v329 a flipped clone that has gone
+ *  offline is `dormant` — in none of the other four — and the flip is the one
+ *  fact every outcome surface exists to show. */
 export function hasOutcomes(kpis: CloneOutcomeKpis): boolean {
-  return kpis.takenDown + kpis.declined + kpis.weaponised + kpis.escalated > 0;
+  return (
+    kpis.takenDown +
+      kpis.declined +
+      kpis.weaponised +
+      kpis.escalated +
+      kpis.weaponisedAfterDecline >
+    0
+  );
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -97,6 +109,124 @@ export function lifecycleBadge(
     default:
       return null;
   }
+}
+
+/**
+ * Badge for a row on the PUBLIC /clone-watch list — narrower than
+ * `lifecycleBadge`, because the public list states only what happened to a
+ * confirmed lookalike after we reported it, never what it serves:
+ *   - taken_down WITH Netcraft's own evidence → "Actioned by Netcraft" (the
+ *     same verb as the watch-list badge). Evidence = the takedown dated from
+ *     Netcraft's classification log (`takedown_at_source = 'netcraft_log'`)
+ *     or Netcraft's per-URL state `malicious`. Measured 2026-09-29: only 12 of
+ *     95 confirmed taken_down rows carry either; the other 83 are older rows
+ *     whose `taken_down` came from paths that recorded no vendor evidence
+ *     (67 with no takedown stamp at all, 16 with only our witnessed stamp).
+ *     No other column proves those were taken down, so they get NO badge —
+ *     not a neutral "Taken down", which would be the same unproven claim.
+ *   - dormant WITH offline_since        → "Offline" (our DNS sweep saw the
+ *                                          name gone twice ≥ 12 h apart, v329);
+ *   - anything else, including a dormant row with no offline_since (the v285
+ *     "gave up waiting for a scan" meaning of dormant, CONTEXT.md flagged
+ *     ambiguities) → null. Never read a missing badge, or "Offline", as safe.
+ */
+export interface PublicListRowState {
+  lifecycleState: string | null;
+  offlineSince: string | null;
+  /** submitted_to->netcraft->>takedown_at_source */
+  netcraftTakedownSource: string | null;
+  /** submitted_to->netcraft->>url_state */
+  netcraftUrlState: string | null;
+}
+
+export function publicListBadge(
+  row: PublicListRowState,
+): { label: string; title: string } | null {
+  const state = row.lifecycleState;
+  const offlineSince = row.offlineSince;
+  const netcraftEvidence =
+    row.netcraftTakedownSource === "netcraft_log" || row.netcraftUrlState === "malicious";
+  if (state === "taken_down" && netcraftEvidence) {
+    return {
+      label: "Actioned by Netcraft",
+      title: "Netcraft classified it malicious, so browsers that use its feed block it. The site may still be online.",
+    };
+  }
+  if (state === "dormant" && offlineSince) {
+    return {
+      label: "Offline",
+      title: "Our DNS checks found the name no longer resolves. A registrar hold can be lifted, so it may come back.",
+    };
+  }
+  return null;
+}
+
+/**
+ * The outcome lines of the Brand Stewardship email ("What Netcraft did with
+ * them"), one self-contained line per non-zero KPI, in display order. The
+ * template renders each with its icon; the words live here, under the rules
+ * in this module's header.
+ *
+ * Two defects this replaced, both in the email's own inline JSX:
+ *  - "N of those we escalated" — `escalated` is not a subset of the declined
+ *    line above it (lifecycle states are mutually exclusive, and an escalated
+ *    clone is often taken_down or weaponised by now), so "of those" named the
+ *    wrong denominator.
+ *  - `weaponisedAfterDecline` rendered only INSIDE the weaponised line, so a
+ *    month whose flipped clones had since gone offline or been actioned
+ *    (weaponised = 0) hid the one fact the report exists to show. It is its
+ *    own line now, as in the caption and the slide.
+ */
+export type OutcomeLineKind =
+  | "taken_down"
+  | "declined"
+  | "escalated"
+  | "weaponised"
+  | "weaponised_after_decline";
+
+export function stewardshipOutcomeLines(
+  kpis: CloneOutcomeKpis,
+  brandName: string,
+): Array<{ kind: OutcomeLineKind; n: number; text: string }> {
+  const lines: Array<{ kind: OutcomeLineKind; n: number; text: string }> = [];
+  if (kpis.takenDown > 0) {
+    const viaEscalation =
+      kpis.reTakenDown > 0 ? `, including ${kpis.reTakenDown} only after we escalated` : "";
+    lines.push({
+      kind: "taken_down",
+      n: kpis.takenDown,
+      text: `actioned by Netcraft (added to browser and blocklist protection)${viaEscalation}.`,
+    });
+  }
+  if (kpis.declined > 0) {
+    lines.push({
+      kind: "declined",
+      n: kpis.declined,
+      text: `currently graded “no threat” and left live — lookalikes of ${brandName} that are unactioned and could be weaponised at any time.`,
+    });
+  }
+  if (kpis.escalated > 0) {
+    lines.push({
+      kind: "escalated",
+      n: kpis.escalated,
+      text: `escalated back to Netcraft with our scan evidence to force a re-review.`,
+    });
+  }
+  if (kpis.weaponised > 0) {
+    lines.push({
+      kind: "weaponised",
+      n: kpis.weaponised,
+      text: `observed serving phishing at the time of this report.`,
+    });
+  }
+  if (kpis.weaponisedAfterDecline > 0) {
+    lines.push({
+      kind: "weaponised_after_decline",
+      n: kpis.weaponisedAfterDecline,
+      text: `served phishing after Netcraft had graded ${plural(kpis.weaponisedAfterDecline, "it", "them")} “no threat” — “no threat” did not mean safe.`,
+    });
+  }
+  return lines;
 }
 
 /**
@@ -165,8 +295,12 @@ export function buildOutcomesBlock(
   }
 
   if (kpis.weaponised > 0) {
+    // A past-tense OBSERVATION, never "now serving": `weaponised` is sticky
+    // (lifecycle_state records the last scan, not liveness). Measured
+    // 2026-09-29: of 90 weaponised, 9 offline, 34 Netcraft `unavailable`,
+    // 75 last seen >14 days ago. Pinned by cloneWatchCaption.test.ts.
     sentences.push(
-      `Our scans confirmed ${kpis.weaponised} ${plural(kpis.weaponised, "domain", "domains")} now serving active phishing.`,
+      `Our scans caught ${kpis.weaponised} ${plural(kpis.weaponised, "domain", "domains")} serving active phishing.`,
     );
     const caveat = weaponisedStateCaveat(opts.periodMonth);
     if (caveat) sentences.push(caveat);
