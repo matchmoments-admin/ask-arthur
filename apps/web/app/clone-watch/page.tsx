@@ -80,6 +80,9 @@ interface CloneAlertRow {
   offline_since: string | null;
   /** signals->0->>signal_type — the first signal's type, the only part read. */
   signal_type: string | null;
+  /** Netcraft's own evidence for a taken_down row (publicListBadge). */
+  netcraft_takedown_source: string | null;
+  netcraft_url_state: string | null;
 }
 
 async function getAlerts(): Promise<CloneAlertRow[]> {
@@ -89,7 +92,7 @@ async function getAlerts(): Promise<CloneAlertRow[]> {
   const { data } = await supabase
     .from("shopfront_clone_alerts")
     .select(
-      "candidate_domain, inferred_target_domain, first_seen_at, lifecycle_state, offline_since, signal_type:signals->0->>signal_type",
+      "candidate_domain, inferred_target_domain, first_seen_at, lifecycle_state, offline_since, signal_type:signals->0->>signal_type, netcraft_takedown_source:submitted_to->netcraft->>takedown_at_source, netcraft_url_state:submitted_to->netcraft->>url_state",
     )
     .is("target_shop_id", null)
     .eq("source", "nrd")
@@ -421,7 +424,12 @@ export default async function CloneWatchPage() {
     brand: a.inferred_target_domain,
     typeKey: typeKeyFor(a.signal_type),
     firstSeenAt: a.first_seen_at,
-    badge: publicListBadge(a.lifecycle_state, a.offline_since),
+    badge: publicListBadge({
+      lifecycleState: a.lifecycle_state,
+      offlineSince: a.offline_since,
+      netcraftTakedownSource: a.netcraft_takedown_source,
+      netcraftUrlState: a.netcraft_url_state,
+    }),
   }));
 
   return (

@@ -236,7 +236,7 @@ describe("generateCloneWatchCaption", () => {
     );
     // The flip claim attaches ONLY to weaponisedAfterDecline — its own
     // sentence since v329 (from timestamps, not a subset of `weaponised`).
-    expect(c.body).toContain("Our scans confirmed 8 domains now serving active phishing.");
+    expect(c.body).toContain("Our scans caught 8 domains serving active phishing.");
     expect(c.body).toContain(
       "1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
     );
@@ -290,13 +290,13 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
 
   it("no false-escalation claim: weaponised>0 with escalated=0 says nothing about escalating", () => {
     const block = buildOutcomesBlock({ ...ZERO, declined: 20, weaponised: 3 });
-    expect(block).toContain("3 domains now serving active phishing");
+    expect(block).toContain("caught 3 domains serving active phishing");
     expect(block.toLowerCase()).not.toContain("escalat");
   });
 
   it("no flip attribution when weaponisedAfterDecline=0 (most weaponised were phishing at first scan)", () => {
     const block = buildOutcomesBlock({ ...ZERO, weaponised: 5 });
-    expect(block).toContain("Our scans confirmed 5 domains now serving active phishing.");
+    expect(block).toContain("Our scans caught 5 domains serving active phishing.");
     expect(block).not.toContain("no threat");
     expect(block).not.toContain("flipped");
   });
@@ -304,7 +304,7 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
   it("self-contained weaponised sentence even with no lead (declined=0, takenDown=0)", () => {
     const block = buildOutcomesBlock({ ...ZERO, weaponised: 2, weaponisedAfterDecline: 1 });
     expect(block).toBe(
-      "Our scans confirmed 2 domains now serving active phishing. 1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
+      "Our scans caught 2 domains serving active phishing. 1 lookalike served phishing after the vendor had graded it “no threat” — proof that “no threat” doesn’t mean safe.",
     );
     expect(block).not.toContain("of those");
   });
@@ -325,7 +325,7 @@ describe("buildOutcomesBlock (caption paragraph)", () => {
     });
     expect(singulars).toContain("1 has been actioned");
     expect(singulars).toContain("1 is currently graded “no threat”");
-    expect(singulars).toContain("1 domain now serving active phishing");
+    expect(singulars).toContain("caught 1 domain serving active phishing");
     expect(singulars).not.toContain("1 domains");
     expect(singulars).not.toContain("of those");
   });
@@ -561,6 +561,25 @@ describe("caption — one wording per fact (PR-D)", () => {
     expect(body).not.toMatch(/more than double/);
   });
 
+  // Review of #1286. `weaponised` is sticky — the last scan, not liveness (of
+  // 90 weaponised on 2026-09-29, 9 offline, 34 Netcraft `unavailable`, 75
+  // last seen >14 days ago) — so the caption states a past observation.
+  // GO-RED: restoring "Our scans confirmed N domains now serving active
+  // phishing." in buildOutcomesBlock fails this.
+  it("never says 'now serving' (weaponised is the last scan, not liveness)", () => {
+    const card: CloneWatchReportCard = {
+      ...JULY,
+      kpis: { ...JULY.kpis, takenDown: 3, declined: 4, weaponised: 8, escalated: 1, weaponisedAfterDecline: 1 },
+    };
+    const outputs = [
+      generateCloneWatchCaption(card).body,
+      buildOutcomesBlock({ ...card.kpis }),
+      buildOutcomesLine(card.kpis),
+    ];
+    for (const text of outputs) expect(text).not.toMatch(/now serving/i);
+    expect(outputs[0]).toContain("Our scans caught 8 domains serving active phishing.");
+  });
+
   it("quotes the monitored-brand count in the shared wording", () => {
     expect(generateCloneWatchCaption(JUNE).body).toContain("against 290+ major Australian brands");
   });
@@ -607,14 +626,42 @@ describe("stewardshipOutcomeLines (Brand Stewardship email)", () => {
   });
 });
 
+/**
+ * GO-RED (review of #1286): dropping the Netcraft-evidence condition from the
+ * taken_down branch fails "a taken_down row without Netcraft's evidence gets
+ * no badge" — 83 of 95 confirmed taken_down rows in prod (2026-09-29).
+ */
 describe("publicListBadge (/clone-watch list rows)", () => {
-  it("names what happened after we reported it — and nothing it cannot prove", () => {
-    expect(publicListBadge("taken_down", null)!.label).toBe("Actioned by Netcraft");
-    expect(publicListBadge("taken_down", null)!.title).toMatch(/may still be online/);
-    expect(publicListBadge("dormant", "2026-09-26T10:01:47Z")!.label).toBe("Offline");
+  const row = (
+    lifecycleState: string | null,
+    extra: Partial<Parameters<typeof publicListBadge>[0]> = {},
+  ) =>
+    publicListBadge({
+      lifecycleState,
+      offlineSince: null,
+      netcraftTakedownSource: null,
+      netcraftUrlState: null,
+      ...extra,
+    });
+
+  it("'Actioned by Netcraft' only with Netcraft's own evidence", () => {
+    const viaLog = row("taken_down", { netcraftTakedownSource: "netcraft_log" });
+    expect(viaLog!.label).toBe("Actioned by Netcraft");
+    expect(viaLog!.title).toMatch(/may still be online/);
+    expect(row("taken_down", { netcraftUrlState: "malicious" })!.label).toBe("Actioned by Netcraft");
+  });
+
+  it("a taken_down row without Netcraft's evidence gets no badge", () => {
+    expect(row("taken_down")).toBeNull();
+    // Our own witnessed stamp is not Netcraft's evidence.
+    expect(row("taken_down", { netcraftTakedownSource: "witnessed", netcraftUrlState: "no threats" })).toBeNull();
+  });
+
+  it("offline only when our DNS sweep witnessed it; nothing it cannot prove", () => {
+    expect(row("dormant", { offlineSince: "2026-09-26T10:01:47Z" })!.label).toBe("Offline");
     // v285's never-scanned dormant: no evidence either way → no badge.
-    expect(publicListBadge("dormant", null)).toBeNull();
-    expect(publicListBadge("weaponised", null)).toBeNull();
-    expect(publicListBadge(null, null)).toBeNull();
+    expect(row("dormant")).toBeNull();
+    expect(row("weaponised")).toBeNull();
+    expect(row(null)).toBeNull();
   });
 });

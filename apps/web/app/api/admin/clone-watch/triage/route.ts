@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAdmin, getAdminRateLimitKey } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -142,6 +143,19 @@ export async function POST(req: Request) {
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+    // The public /clone-watch list names confirmed lookalikes and is ISR-cached
+    // for an hour. A row an operator has just cleared as a false positive must
+    // not stay published for that hour. This route is the only writer of
+    // triage_status='fp' (grep set_clone_alert_triage), so this is the one
+    // place to purge it. Non-fatal: the hourly revalidate still catches it.
+    try {
+      revalidatePath("/clone-watch");
+    } catch (err) {
+      logger.warn("clone-watch triage: revalidatePath failed", {
+        alertId: parsed.alertId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Inline enqueue for the brand-notification path. Replaces the

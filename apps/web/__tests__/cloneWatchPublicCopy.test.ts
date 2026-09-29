@@ -45,7 +45,7 @@ const SURFACES = [
 const BANNED = [
   /from report to removal/i,
   /time-to-takedown/i,
-  /now serving active phishing/i,
+  /now serving/i,
   // PR-D additions — the caption's rules, now on every public surface.
   /never publish which specific domains/i,
   /no specific domains are published/i,
@@ -83,6 +83,31 @@ describe("clone-watch public copy", () => {
       expect(hits).toEqual([]);
     });
   }
+});
+
+/**
+ * Review of #1286.
+ * GO-RED: restoring "typosquats set up to phish your customers" in the
+ * dashboard's LinkedIn message fails the first test; deleting the
+ * revalidatePath call from the triage route's fp branch fails the second.
+ */
+describe("brand-facing outreach + fp purge (review of #1286)", () => {
+  it("the stewardship LinkedIn message makes no intent claim", () => {
+    const src = stripComments(
+      readFileSync(join(ROOT, "app/admin/brand-stewardship/BrandStewardshipDashboard.tsx"), "utf8"),
+    );
+    expect(src).not.toMatch(/set up to phish/i);
+    expect(src).toContain("${lookalikeDomains(n)} resembling ${brand}");
+  });
+
+  it("an operator fp purges /clone-watch at once instead of waiting out the ISR hour", () => {
+    const route = readFileSync(join(ROOT, "app/api/admin/clone-watch/triage/route.ts"), "utf8");
+    const fpBranch = route.slice(
+      route.indexOf('} else if (parsed.status === "fp") {'),
+      route.indexOf("return NextResponse.json({\n    ok: true"),
+    );
+    expect(fpBranch).toMatch(/revalidatePath\("\/clone-watch"\)/);
+  });
 });
 
 describe("/clone-watch list — the claims the page makes are enforced by its query", () => {
