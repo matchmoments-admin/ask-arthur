@@ -10,6 +10,10 @@ export {
 } from "./canonicalise";
 export {
   LEXICAL_MATCHER_VERSION,
+  candidateLabelKey,
+  MATCHER_V5_FROM,
+  MATCHER_VERSION_CUTOVERS,
+  matcherVersionForPeriod,
   lexicalMatch,
   type MatchResult,
   type SignalType,

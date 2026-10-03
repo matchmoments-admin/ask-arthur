@@ -252,7 +252,10 @@ describe("buildTrendRows — v325 stock columns", () => {
       is_au: true,
       active_stock_eom: 0,
       coverage_full_month: true,
+      // August was ingested under v4: stamped v4, and targeting events were
+      // never measured for it — NULL, not 0 (#1262 D2).
       matcher_version: "v4",
+      targeting_events: null,
       // a squat from an EARLIER month taken down in August
       taken_down_in_month: 1,
     });
@@ -274,7 +277,7 @@ describe("buildTrendRows — v325 stock columns", () => {
     );
     const k = t.brandRows[0];
     expect(k.new_registered).toBe(3);
-    expect(k.matcher_version).toBe("v4");
+    expect(k.matcher_version).toBe("v4"); // the period's matcher, not the code's
     expect(k.classifier_version).toBe("jev-1.13.0+claude-haiku-4-5"); // a swap month shows both
     expect(k.swept_domains).toBe(2_100_000);
     expect(k.coverage_full_month).toBeNull(); // coverage unreadable ≠ not covered

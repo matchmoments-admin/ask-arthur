@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildTrendDisclosure } from "@/lib/clone-watch/targeting-copy";
+import { buildTrendDisclosure, LOOKALIKE_DOMAINS_UNIT } from "@/lib/clone-watch/targeting-copy";
 import {
   describeTotalMove,
   methodChangeSentence,
@@ -133,26 +133,33 @@ describe("matcher change — said once, by trend-copy", () => {
  */
 describe("moverCopy", () => {
   it("exactly double is 'doubled', not 'more than doubled'", () => {
-    expect(moverCopy("Kmart", { priorClones: 10, clones: 20 }).verb).toBe("doubled");
+    expect(moverCopy("Kmart", { priorClones: 10, clones: 20 }, LOOKALIKE_DOMAINS_UNIT).verb).toBe("doubled");
   });
   it("more than double is 'more than doubled'", () => {
-    expect(moverCopy("Kmart", { priorClones: 10, clones: 21 }).verb).toBe("more than doubled");
+    expect(moverCopy("Kmart", { priorClones: 10, clones: 21 }, LOOKALIKE_DOMAINS_UNIT).verb).toBe("more than doubled");
   });
   it("a rise short of 2× 'jumped' — never 'more than jumped'", () => {
-    const c = moverCopy("Kmart", { priorClones: 30, clones: 45 });
+    const c = moverCopy("Kmart", { priorClones: 30, clones: 45 }, LOOKALIKE_DOMAINS_UNIT);
     expect(c.verb).toBe("jumped");
     expect(`${c.sentence} ${c.lead}`).not.toMatch(/more than jumped/);
   });
   it("no actor attribution, and the scope of 'sharpest' is stated", () => {
-    const c = moverCopy("Kmart", { priorClones: 30, clones: 45 });
+    const c = moverCopy("Kmart", { priorClones: 30, clones: 45 }, LOOKALIKE_DOMAINS_UNIT);
     expect(`${c.sentence} ${c.lead}`).not.toMatch(/one actor|in bulk|campaign/i);
     expect(c.sentence).toContain("Australian brands we monitored for both months");
   });
+  it("a v5 mover is worded in the card's unit, never 'lookalike domains' (#1262, D1)", () => {
+    const c = moverCopy("Kmart", { priorClones: 10, clones: 21 }, "lookalikes");
+    expect(c.sentence).toContain("its lookalikes more than doubled");
+    expect(c.sentence).not.toMatch(/lookalike domains/);
+  });
   it("the caption and the admin slide both word the mover through moverCopy", () => {
     const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-    expect(read("lib/clone-watch/clone-watch-caption.ts")).toMatch(/moverCopy\(spName, sp\)\.sentence/);
+    // #1262: the call also passes the card's per-brand unit noun (v5 movers
+    // are targeting events), so pin the call shape up to that argument.
+    expect(read("lib/clone-watch/clone-watch-caption.ts")).toMatch(/moverCopy\(spName, sp, perBrandUnitNoun\(card\.perBrandUnit\)\)\.sentence/);
     const slide = read("app/admin/report-card/page.tsx");
-    expect(slide).toMatch(/moverCopy\(name, sp\)/);
+    expect(slide).toMatch(/moverCopy\(name, sp, perBrandUnitNoun\(data\.perBrandUnit\)\)/);
     expect(slide).not.toMatch(/more than \{/);
   });
 });

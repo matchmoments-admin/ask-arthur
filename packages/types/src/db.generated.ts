@@ -1565,6 +1565,7 @@ export type Database = {
           tactic_mix: Json | null
           taken_down: number
           taken_down_in_month: number | null
+          targeting_events: number | null
           tld_mix: Json | null
           weaponised: number
           weaponised_after_decline: number | null
@@ -1602,6 +1603,7 @@ export type Database = {
           tactic_mix?: Json | null
           taken_down?: number
           taken_down_in_month?: number | null
+          targeting_events?: number | null
           tld_mix?: Json | null
           weaponised?: number
           weaponised_after_decline?: number | null
@@ -1639,6 +1641,7 @@ export type Database = {
           tactic_mix?: Json | null
           taken_down?: number
           taken_down_in_month?: number | null
+          targeting_events?: number | null
           tld_mix?: Json | null
           weaponised?: number
           weaponised_after_decline?: number | null

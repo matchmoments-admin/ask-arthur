@@ -1,0 +1,242 @@
+// Matcher v5 (#1150) — short-brand recall without the word class.
+//
+// Every guard below was run RED before it was trusted (2026-09-27), because
+// this Module's history is guards that passed while asserting nothing (the
+// "does not flood on EY" test never reached the branch it named):
+//
+//   G1 eight threats     — deleted `openShortNeighbourhood` from Apple/Bonds
+//                          AND the homoglyph return → 8/8 red.
+//   G10 cut-overs        — appended a later v4 entry to MATCHER_VERSION_CUTOVERS
+//                          → both G10 tests red.
+//   G11 word list       — (#1262 review, D3/D4) edits to the committed list:
+//                          drop "bondy" (a stale regeneration) → "every
+//                          SUPPLEMENT word" + bondy.cn red; add "appie" → G1's
+//                          five appie threats + the appie pin red; add a stray
+//                          "zebra" → "one edit from a covered token" red;
+//                          drop the six D3 words → six G2 foreign cases red.
+//   G9 Coles stays shut  — set `openShortNeighbourhood: true` back on Coles
+//                          → woles.net / colex.ca / coleg.ru match, red.
+//   G2 word floor        — commented out the SHORT_BRAND_NEIGHBOUR_WORDS check
+//                          in shortBrandRecovery → bonus/bands/gonds/apply/
+//                          bondi/cowes red (the open brands re-admit them).
+//   G3 homoglyph path    — removed "o>0" and "e>3" from HOMOGLYPH_SUBSTITUTIONS
+//                          → b0nds/k0gan/sh3in red; closed-brand non-words
+//                          stayed green (they must — they are the negative half).
+//   G4 v4 untouched      — made `recovery` fire even when shortBrandTrusted →
+//                          xbonds.net / b0nds.shop carried `short_brand_gate`,
+//                          red. (The first fixture, qkmart.com, stayed GREEN
+//                          under that mutation — Kmart is closed, so recovery
+//                          returned null anyway. Replaced.)
+//   G5 covered tokens    — added a fake 5-char brand "Zzzzz" to a copy of the
+//                          watchlist passed to the guard → red.
+//   G6 flag can act      — set openShortNeighbourhood on a ≥6-char brand in a
+//                          fixture → red.
+//   G7 version           — reverted LEXICAL_MATCHER_VERSION to "v4" → red.
+//   G8 label key         — made candidateLabelKey skip the confusable fold →
+//                          the Cyrillic case red.
+import { describe, expect, it } from "vitest";
+import { AU_BRAND_WATCHLIST, type BrandEntry } from "../au-brand-watchlist";
+import {
+  LEXICAL_MATCHER_VERSION,
+  MATCHER_V5_FROM,
+  MATCHER_VERSION_CUTOVERS,
+  matcherVersionForPeriod,
+  candidateLabelKey,
+  lexicalMatch,
+} from "../lexical-match";
+import {
+  NEIGHBOUR_WORDS_COVERED_TOKENS,
+  SHORT_BRAND_NEIGHBOUR_WORDS,
+} from "../short-brand-neighbour-words";
+import { SUPPLEMENT } from "../../scripts/gen-short-brand-neighbour-words";
+
+const fiveCharTokens = (list: readonly BrandEntry[]) =>
+  list.flatMap((e) =>
+    [e.brand, ...(e.aliases ?? [])]
+      .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, ""))
+      .filter((t) => t.length === 5)
+      .map((token) => ({ entry: e, token })),
+  );
+
+describe("G1 — eight of the nine confirmed threats v4 missed are matched", () => {
+  // Every one is weaponised, likely_phishing, or taken down in prod.
+  const cases: Array<[string, string]> = [
+    ["appve.vu", "Apple"],
+    ["bonos.buzz", "Bonds"],
+    ["bnds.cl", "Bonds"],
+    ["appie.bond", "Apple"],
+    ["appie.beer", "Apple"],
+    ["appie.autos", "Apple"],
+    ["appie.mom", "Apple"],
+    ["appie.beauty", "Apple"],
+  ];
+  it.each(cases)("%s → %s", (domain, brand) => {
+    const m = lexicalMatch(domain);
+    expect(m?.brand).toBe(brand);
+    expect(m?.signal_type).toBe("levenshtein");
+    expect(m?.evidence.short_brand_gate).toBeDefined();
+  });
+});
+
+describe("G2 — the precision failures stay dead, including on open brands", () => {
+  // Neutral TLDs on purpose. `.shop` / `.store` / `.online` carry a scam-context
+  // token, which v4 already trusts OUTSIDE the primary label — `gonds.online`
+  // matches in v4 and v5 alike, and is #1084's bulk-registration fold's job.
+  it.each([
+    // bonds (OPEN) — the word class, and the #1084 bulk label
+    "bonus.business", "bands.io", "bounds.io", "bones.club", "binds.co",
+    "ponds.net", "gonds.quest", "gonds.co", "bondi.ink",
+    // apple (OPEN)
+    "apply.wiki", "ample.io",
+    // foreign / brandable neighbours of the OPEN brands (#1262 review, D3)
+    "appli.work", "appele.net", "bonde.cloud", "bondo.net", "bondy.cn", "bondu.berlin",
+    // coles (closed since the #1150 decision; words stay dead regardless)
+    "codes.net", "holes.net", "roles.world", "cowes.yachts",
+    // closed brands — word neighbours
+    "mart.services", "bank.camera", "stage.tours", "snake.io",
+    "logan.net", "hogan.io",
+  ])("%s does not match", (domain) => {
+    expect(lexicalMatch(domain)).toBeNull();
+  });
+
+  it("closed 5-char brands still gate non-word neighbours (no homoglyph)", () => {
+    for (const d of ["dmart.app", "medex.care", "xbank.one", "vinet.dev", "festa.social", "nesta.top", "stakz.xyz"]) {
+      expect(lexicalMatch(d), d).toBeNull();
+    }
+  });
+});
+
+describe("G3 — homoglyph substitution is recovered for every 5-char brand", () => {
+  it.each([
+    ["b0nds.com", "Bonds"],
+    ["c0les.net", "Coles"],
+    ["sh3in.co", "Shein"],
+    ["k0gan.xyz", "Kogan"],
+  ])("%s → %s via homoglyph", (domain, brand) => {
+    const m = lexicalMatch(domain);
+    expect(m?.brand).toBe(brand);
+    expect(m?.evidence.short_brand_gate).toBe("homoglyph");
+  });
+
+  it("a transposition is two edits and stays out of reach (kmrat)", () => {
+    expect(lexicalMatch("kmrat.com")).toBeNull();
+  });
+});
+
+describe("G4 — v4 matches are untouched", () => {
+  // On an OPEN brand, and on a homoglyph, so the recovery WOULD fire if it
+  // were consulted — a closed-brand fixture (qkmart) passed the red run.
+  it.each([
+    ["xbonds.net", "Bonds"], // insertion keeps the brand contiguous
+    ["b0nds.shop", "Bonds"], // context token outside the primary label
+  ])("%s is a v4 match and carries no v5 gate", (domain, brand) => {
+    const m = lexicalMatch(domain);
+    expect(m?.brand).toBe(brand);
+    expect(m?.evidence.short_brand_gate).toBeUndefined();
+  });
+});
+
+describe("G5/G6 — the denylist covers every token the recovery can reach", () => {
+  // Pure over its input so the red run could pass a doctored list.
+  const uncovered = (list: readonly BrandEntry[]) =>
+    fiveCharTokens(list)
+      .map((t) => t.token)
+      .filter((t) => !NEIGHBOUR_WORDS_COVERED_TOKENS.includes(t));
+
+  it("every 5-char watchlist token was in the generator run", () => {
+    // Red: re-run scripts/gen-short-brand-neighbour-words.ts.
+    expect(uncovered(AU_BRAND_WATCHLIST)).toEqual([]);
+  });
+
+  it("the guard itself goes red on a new uncovered token", () => {
+    expect(
+      uncovered([...AU_BRAND_WATCHLIST, { brand: "Zzzzz", legitimate_domains: ["zzzzz.com"] }]),
+    ).toEqual(["zzzzz"]);
+  });
+
+  it("openShortNeighbourhood is only set where a 5-char token exists", () => {
+    const decorative = (list: readonly BrandEntry[]) =>
+      list
+        .filter((e) => e.openShortNeighbourhood)
+        .filter((e) => !fiveCharTokens([e]).length)
+        .map((e) => e.brand);
+    expect(decorative(AU_BRAND_WATCHLIST)).toEqual([]);
+    expect(
+      decorative([{ brand: "Bunnings", legitimate_domains: [], openShortNeighbourhood: true }]),
+    ).toEqual(["Bunnings"]);
+  });
+});
+
+describe("G7 — the version moved with the behaviour", () => {
+  it("is v5", () => {
+    expect(LEXICAL_MATCHER_VERSION).toBe("v5");
+  });
+});
+
+describe("G8 — candidateLabelKey (the #1084 bulk-registration key)", () => {
+  it("is the same name across TLDs", () => {
+    expect(candidateLabelKey("gonds.co")).toBe("gonds");
+    expect(candidateLabelKey("GONDS.online")).toBe("gonds");
+  });
+  it("decodes IDN and folds confusables like the matcher does", () => {
+    expect(candidateLabelKey("xn--auspst-9ya.com")).toBe(candidateLabelKey("xn--auspst-9ya.shop"));
+    expect(candidateLabelKey("аpple.com")).toBe("apple"); // Cyrillic а
+  });
+});
+
+describe("G9 — Coles is NOT an open neighbourhood (#1150 decision, 2026-09-27)", () => {
+  // Accuracy before any brand contact: opting Coles in took it 11 → 20 in 90
+  // days for one threat (woles.net) shaped like koles.fi / noles.net.
+  it("woles.net is a KNOWN MISS, and Coles' non-word neighbours stay out", () => {
+    for (const d of ["woles.net", "colex.ca", "coleg.ru", "koles.fi", "noles.net"]) {
+      expect(lexicalMatch(d), d).toBeNull();
+    }
+  });
+  it("the flag is off on the Coles entry", () => {
+    const coles = AU_BRAND_WATCHLIST.find((e) => e.brand === "Coles");
+    expect(coles?.openShortNeighbourhood).toBeUndefined();
+  });
+  it("the homoglyph path still covers Coles", () => {
+    expect(lexicalMatch("c0les.net")?.evidence.short_brand_gate).toBe("homoglyph");
+  });
+});
+
+describe("G10 — the matcher a PERIOD was ingested under (#1262 review, D2)", () => {
+  it("June–September 2026 are v4; October onward is v5", () => {
+    expect(matcherVersionForPeriod("2026-06-01")).toBe("v4");
+    expect(matcherVersionForPeriod("2026-09-01")).toBe("v4");
+    expect(matcherVersionForPeriod("2026-10-01")).toBe("v5");
+    expect(matcherVersionForPeriod("2027-01-01")).toBe("v5");
+    expect(MATCHER_V5_FROM).toBe("2026-10-01");
+  });
+  it("the newest cut-over IS the code's version — the next bump must add one", () => {
+    expect(MATCHER_VERSION_CUTOVERS.at(-1)?.version).toBe(LEXICAL_MATCHER_VERSION);
+  });
+});
+
+describe("G11 — the committed neighbour-word list (#1262 review, D3/D4)", () => {
+  // The generator's INPUTS are not pinned in the repo (macOS dictionaries,
+  // a fetched frequency list — see the script header), so there is no
+  // "committed == regenerated" check. These are the checks that can run anywhere.
+  const oneEdit = (a: string, b: string) => {
+    if (Math.abs(a.length - b.length) > 1 || a === b) return false;
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return a.slice(i + 1) === b.slice(i + 1) || a.slice(i) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i);
+  };
+
+  it("every committed word is one edit from a covered token (nothing stale or stray)", () => {
+    const stray = [...SHORT_BRAND_NEIGHBOUR_WORDS].filter(
+      (w) => !NEIGHBOUR_WORDS_COVERED_TOKENS.some((t) => oneEdit(w, t)),
+    );
+    expect(stray).toEqual([]);
+  });
+
+  it("every SUPPLEMENT word made it into the committed list", () => {
+    expect(SUPPLEMENT.filter((w) => !SHORT_BRAND_NEIGHBOUR_WORDS.has(w))).toEqual([]);
+  });
+
+  it("appie is NOT a word here — it is a confirmed Apple campaign (nl_50k has it)", () => {
+    expect(SHORT_BRAND_NEIGHBOUR_WORDS.has("appie")).toBe(false);
+  });
+});
