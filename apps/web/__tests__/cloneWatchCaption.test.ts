@@ -121,7 +121,12 @@ describe("generateCloneWatchCaption", () => {
     expect(c.documentTitle).toBe("Australian Clone Watch — June 2026");
     // numbers come only from the data
     expect(c.body).toContain("we detected 804 newly-registered copycat domains");
-    expect(c.body).toContain("Target was the most-copied Australian brand (43 lookalikes)");
+    // June is a pre-v5 edition: its per-brand numbers are domains (#1262 D1,
+    // worded by targeting-copy.ts perBrandCount). A v5 edition says "lookalikes".
+    expect(c.body).toContain("Target was the most-copied Australian brand (43 lookalike domains)");
+    expect(
+      generateCloneWatchCaption({ ...JUNE, perBrandUnit: "targeting_events" }).body,
+    ).toContain("Target was the most-copied Australian brand (43 lookalikes)");
     expect(c.body).toContain("Kmart (28)");
     // super-fund finding, casing + spelled-out rank + exact count
     expect(c.body).toContain(
@@ -175,7 +180,7 @@ describe("generateCloneWatchCaption", () => {
     };
     const c = generateCloneWatchCaption(fundLeads);
     expect(c.body).toContain(
-      "A super fund led the month: HESTA was the most-copied Australian brand (50 lookalikes)",
+      "A super fund led the month: HESTA was the most-copied Australian brand (50 lookalike domains)",
     );
     // no separate spotlight finding, and not two contradictory "#1" claims
     expect(c.body).not.toContain("It's not just shopping — or banking. HESTA");
