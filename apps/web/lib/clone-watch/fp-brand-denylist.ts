@@ -6,16 +6,18 @@
  * "clones" of them. They were removed from the watchlist (v176), but stale
  * detections linger in shopfront_clone_alerts — so every consumer of clone
  * detections must exclude them too. The single source of truth for the TS
- * side. SQL can't import this, so two worklist RPCs keep a literal copy —
+ * side. SQL can't import this, so three SQL objects keep a literal copy —
+ * the Brand Cohort view clone_watch_brand_cohort (v342, the membership every
+ * per-brand count reads) and the worklist RPCs
  * list_clone_alerts_pending_netcraft_auto and _netcraft_issue — and
- * __tests__/fpBrandDenylistSqlDrift.test.ts fails if either one's latest
+ * __tests__/fpBrandDenylistSqlDrift.test.ts fails if any one's latest
  * migration definition disagrees with this set. Changing it = edit here AND
- * ship a migration re-creating both functions.
+ * ship a migration re-creating all three.
  *
  * Consumers:
  *  - the netcraft-auto worklist (never report these to Netcraft)
- *  - report-brand-stewardship.ts (never surface these in the brand digest /
- *    LinkedIn worklist)
+ *  - the Brand Cohort view (v342) — so every per-brand count, the brand
+ *    digest and the LinkedIn worklist included, excludes them
  */
 export const FP_BRAND_DENYLIST: ReadonlySet<string> = new Set([
   "domain.com.au",

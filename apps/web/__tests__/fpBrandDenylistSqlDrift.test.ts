@@ -100,3 +100,24 @@ describe("FP brand denylist — SQL copies match FP_BRAND_DENYLIST", () => {
     ).toEqual([...FP_BRAND_DENYLIST].sort());
   });
 });
+
+/**
+ * #1296 (v342): the Brand Cohort VIEW is the third SQL carrier — and the one
+ * that matters most, because every per-brand count reads it. Views are not
+ * matched by FUNCTION_RE, so it is checked on its own: the LATEST migration
+ * that creates the view must carry exactly the TS set.
+ * Go-red: adding "example.com.au" to FP_BRAND_DENYLIST fails this.
+ */
+describe("FP brand denylist — the Brand Cohort view matches FP_BRAND_DENYLIST", () => {
+  it("clone_watch_brand_cohort carries exactly the TS set", () => {
+    const VIEW_RE = /create\s+or\s+replace\s+view\s+public\.clone_watch_brand_cohort[\s\S]*?;/i;
+    const latest = readdirSync(MIGRATIONS)
+      .filter((f) => f.endsWith(".sql") && !Number.isNaN(migrationVersion(f)))
+      .sort((a, b) => migrationVersion(a) - migrationVersion(b))
+      .map((f) => ({ f, m: VIEW_RE.exec(stripSqlComments(readFileSync(join(MIGRATIONS, f), "utf8"))) }))
+      .filter((x) => x.m)
+      .pop();
+    expect(latest, "no migration creates clone_watch_brand_cohort").toBeDefined();
+    expect(denylistIn(latest!.m![0]), `view (${latest!.f})`).toEqual([...FP_BRAND_DENYLIST].sort());
+  });
+});
