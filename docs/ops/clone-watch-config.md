@@ -444,17 +444,31 @@ lane that stops logging is `absent`, never invisible. **Brake state comes
 from `feature_brakes.paused_until`**, not from the row's `braked` field — a
 cleared brake otherwise read as braked until the lane's next run.
 
-| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                                                                                   | consecutive |
-| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0 ∧ rate_limited=0 ∧ dns_unchanged=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed>0` (an all-DNS-unchanged run is healthy, v334) | 2           |
-| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                                                                                    | 1           |
-| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                                                                                          | 3           |
-| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape); **braked** = `feature_brakes`                                                           | 1           |
-| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                                                                                  | 1           |
-| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                                                                               | 3           |
-| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`                                                                                                    | 1           |
-| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                                                                                            | 1           |
-| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                                                                                     | —           |
+| lane               | row (`feature / operation`)                     | silent-zero predicate                                                                                                                                                                                                       | consecutive |
+| ------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| lifecycle-recheck  | `shopfront_clone_recheck / recheck_batch`       | `pool>0 ∧ rechecked=0 ∧ rate_limited=0 ∧ dns_unchanged=0`, or `rechecked>0 ∧ submitted=0 ∧ submit_failed>0` (an all-DNS-unchanged run is healthy, v334)                                                                     | 2           |
+| urlscan-submit     | `shopfront_clone_urlscan / submit_batch`        | `units>0 ∧ submitted=0 ∧ rate_limited=0` (`units` is the row column)                                                                                                                                                        | 1           |
+| urlscan-retrieve   | `… / retrieve_batch`                            | `classified=0 ∧ still_pending>0`, or `unnotified_weaponised>0`                                                                                                                                                              | 3           |
+| netcraft-issue     | `shopfront_clone_netcraft_issue / issue_report` | `uuids>0 ∧ permanentRejects≥uuids` (the #1157 "not yet" shape); **braked** = `feature_brakes`                                                                                                                               | 1           |
+| netcraft-resubmit  | `… / resubmit_bulk`                             | `candidates>0 ∧ marked=0 ∧ deferred=0`                                                                                                                                                                                      | 1           |
+| netcraft-reconcile | `… / lifecycle_reconcile`                       | `uuids=0`                                                                                                                                                                                                                   | 3           |
+| nrd-daily-ingest   | `shopfront_clone_watch / nrd_daily_ingest`      | `domains_scanned=0`, or `failed_chunks≥total_chunks`, or `preclassify_errored`, or `preclassify_gave_up_24h>0` (#1300); **cap_bound** = `preclassify_cap_reached` 2 runs running with `preclassify_due_total` not shrinking | 1           |
+| feed-platform      | `clone_watch_feed_entity / feed_batch`          | `pool>0 ∧ written=0` (event-driven: absence is not a signal)                                                                                                                                                                | 1           |
+| preclassify        | `shopfront_clone_preclassify / classify`        | no row in 26h (per-alert rows; absence is the only readable signal)                                                                                                                                                         | —           |
+
+**Pre-classifier coverage (#1300, v345).** The NRD ingest fans out up to
+`PRECLASSIFY_FANOUT_CAP` = 100 alerts/day (`packages/scam-engine/src/inngest/preclassify-fanout.ts`;
+measured demand 2026-10-13: p50 31, p95 47.8, max 70/day; the old ask of 50
+bound on 4 days ever, last 2026-10-06). The worklist
+(`list_clone_alerts_pending_preclassify`) is oldest-first, never-tried before
+retried, and skips alerts the classifier failed on 3 UTC days
+(`clone_watch_preclassify_failures`, stamped inside `classify-batch`). The NRD
+ingest's Outcome Row — now written AFTER the fan-out — carries
+`preclassify_fanned_out / _errored / _cap / _cap_reached / _due_total /
+_gave_up / _gave_up_24h / _aged_out` (from `clone_watch_preclassify_coverage()`);
+the pre-classifier's batch row carries `failure_stamped / failure_stamp_failed`
+(pages). Poison inputs: `SELECT * FROM clone_watch_preclassify_failures WHERE
+attempts >= 3`. Re-offer one by deleting its row.
 
 Absence windows: 9h for the 6h lanes, 26h for the daily ones. **Every roster
 lane writes one outcome row per run, including its quiet-day path** (`units 0`,

@@ -615,6 +615,96 @@ describe("classifyLaneHealth", () => {
     }
   });
 
+  // #1300. Go-red (2026-10-13): each arm below dropped from LANE_SHAPES in
+  // turn → its case reported [] and failed:
+  //   - preclassify `|| o.failure_stamp_failed === true`
+  //   - nrd `|| o.preclassify_errored === true`
+  //   - nrd `|| n(o, "preclassify_gave_up_24h") > 0`
+  //   - nrd `capBound` (whole entry)
+  describe("pre-classifier coverage (#1300)", () => {
+    const kinds = (rows: LaneCostRow[]) =>
+      classifyLaneHealth(rows, { now: NOW }).map((p) => `${p.lane}:${p.kind}`);
+    const nrdRow = (h: number, extra: Record<string, unknown>) =>
+      outcomeRow("shopfront-nrd-daily-ingest", h, 70000, {
+        domains_scanned: 70000,
+        hits_found: 27,
+        total_chunks: 1,
+        failed_chunks: 0,
+        preclassify_fanned_out: 27,
+        preclassify_errored: false,
+        preclassify_cap: 100,
+        preclassify_cap_reached: false,
+        preclassify_due_total: 27,
+        preclassify_gave_up: 0,
+        preclassify_gave_up_24h: 0,
+        preclassify_aged_out: 0,
+        ...extra,
+      });
+    const withNrd = (rows: LaneCostRow[]) => [
+      ...healthyRows().filter((r) => r.operation !== LANES["shopfront-nrd-daily-ingest"].operation),
+      ...rows,
+    ];
+
+    it("a failed failure-stamp pages the pre-classifier even when the batch classified", () => {
+      const rows = healthyRows();
+      rows.push(
+        outcomeRow("shopfront-clone-haiku-preclassify", 5, 4, {
+          alerts: 5,
+          classified: 4,
+          failed: 1,
+          failure_stamped: 0,
+          failure_stamp_failed: true,
+        }),
+      );
+      expect(kinds(rows)).toEqual(["shopfront-clone-haiku-preclassify:silent_zero"]);
+    });
+
+    it("a stamped failure alone is quiet (one bad alert is not a broken lane)", () => {
+      const rows = healthyRows();
+      rows.push(
+        outcomeRow("shopfront-clone-haiku-preclassify", 5, 4, {
+          alerts: 5,
+          classified: 4,
+          failed: 1,
+          failure_stamped: 1,
+          failure_stamp_failed: false,
+        }),
+      );
+      expect(kinds(rows)).toEqual([]);
+    });
+
+    it("a healthy fan-out, a flag-off fan-out, and a pre-#1300 row are quiet", () => {
+      expect(kinds(withNrd([nrdRow(22, {}), nrdRow(46, {})]))).toEqual([]);
+      expect(kinds(withNrd([nrdRow(22, { preclassify_skipped: "flag_off" })]))).toEqual([]);
+      expect(kinds(healthyRows())).toEqual([]);
+    });
+
+    it("a failed fan-out pages on the first run", () => {
+      expect(kinds(withNrd([nrdRow(22, { preclassify_errored: true, preclassify_fanned_out: 0 })]))).toEqual([
+        "shopfront-nrd-daily-ingest:silent_zero",
+      ]);
+    });
+
+    it("an alert given up today pages; one given up earlier does not page again", () => {
+      expect(kinds(withNrd([nrdRow(22, { preclassify_gave_up: 1, preclassify_gave_up_24h: 1 })]))).toEqual([
+        "shopfront-nrd-daily-ingest:silent_zero",
+      ]);
+      expect(kinds(withNrd([nrdRow(22, { preclassify_gave_up: 1, preclassify_gave_up_24h: 0 })]))).toEqual([]);
+    });
+
+    it("cap_bound: the cap binding two runs running with the worklist not shrinking pages", () => {
+      const bound = (h: number, due: number) =>
+        nrdRow(h, { preclassify_fanned_out: 100, preclassify_cap_reached: true, preclassify_due_total: due });
+      expect(kinds(withNrd([bound(22, 140), bound(46, 130)]))).toEqual([
+        "shopfront-nrd-daily-ingest:cap_bound",
+      ]);
+      // Draining at the cap — the cap working.
+      expect(kinds(withNrd([bound(22, 110), bound(46, 130)]))).toEqual([]);
+      // One bound day (2026-10-06's shape) is quiet.
+      expect(kinds(withNrd([bound(22, 130), nrdRow(46, {})]))).toEqual([]);
+    });
+  });
+
   it("the retired auto-triage lane is gone from the roster and the digest (#1230)", () => {
     expect(Object.keys(LANES)).not.toContain("clone-watch-auto-triage");
     expect(Object.keys(LANE_SHAPES)).not.toContain("clone-watch-auto-triage");

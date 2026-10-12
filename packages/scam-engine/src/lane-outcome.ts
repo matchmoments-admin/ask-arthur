@@ -368,6 +368,27 @@ export interface LaneOutcome {
     domains_scanned: number;
     total_chunks: number;
     failed_chunks: number;
+    // #1300 — the pre-classifier fan-out (inngest/preclassify-fanout.ts).
+    // All absent before 2026-10-13; `preclassify_skipped` instead of the
+    // rest when FF_SHOPFRONT_CLONE_PRECLASSIFY is off.
+    preclassify_skipped?: "flag_off";
+    /** Events sent to the pre-classifier this run. */
+    preclassify_fanned_out?: number;
+    /** The worklist read, the coverage read or the send failed. */
+    preclassify_errored?: boolean;
+    preclassify_error?: string;
+    /** The per-run cap asked for (PRECLASSIFY_FANOUT_CAP). */
+    preclassify_cap?: number;
+    /** Demand (due_total) exceeded the cap — alerts waited a day. */
+    preclassify_cap_reached?: boolean;
+    /** Worklist size before its LIMIT. null = the coverage read failed. */
+    preclassify_due_total?: number | null;
+    /** Unclassified alerts given up after 3 failed days (v345), in horizon. */
+    preclassify_gave_up?: number | null;
+    /** …given up in the last 24 h. */
+    preclassify_gave_up_24h?: number | null;
+    /** Unclassified alerts past the 14-day horizon, lifetime. */
+    preclassify_aged_out?: number | null;
   };
   "shopfront-clone-feed-platform": {
     pool: number;
@@ -445,6 +466,12 @@ export interface LaneOutcome {
     auto_parked?: number;
     /** #1230 — the park read/UPDATE failed; the batch still succeeded. */
     auto_park_failed?: boolean;
+    /** #1300 — alerts the classifier threw on (`failed`) stamped into
+     *  clone_watch_preclassify_failures (v345) this batch. */
+    failure_stamped?: number;
+    /** #1300 — the stamp write failed; the alerts re-present tomorrow
+     *  uncounted, so a poison alert would never be given up. */
+    failure_stamp_failed?: boolean;
   };
   "clone-watch-report-summary": {
     reason?: "frozen" | "no_clones";

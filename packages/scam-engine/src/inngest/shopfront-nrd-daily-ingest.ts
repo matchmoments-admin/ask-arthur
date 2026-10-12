@@ -31,7 +31,7 @@ import { fetch as undiciFetch } from "undici";
 
 import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
-import { CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT } from "./events";
+import { fanOutPreclassify } from "./preclassify-fanout";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -125,21 +125,6 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         return upsertHitsInChunks(hits);
       });
 
-      await step.run("log-cost-telemetry", () =>
-        recordLaneOutcome("shopfront-nrd-daily-ingest", domains_scanned, {
-          domains_scanned,
-          hits_found: hits.length,
-          rows_inserted: upsertResult.inserted,
-          failed_chunks: upsertResult.failed_chunks,
-          total_chunks: upsertResult.total_chunks,
-        }),
-      );
-
-      // Phase A.3 — fan out urlscan jobs for any pending-initial-scan rows
-      // (newly inserted today + any unscanned backlog within 14 days).
-      // Gated independently of the master clone-watch flag so we can canary
-      // urlscan without flipping outreach.
-      //
       // urlscan scanning is no longer fanned out from here. The async rebuild
       // (v178) moved it to a dedicated, gated cron pair:
       //   clone-watch-urlscan-submit   — picks gated candidates, reputation +
@@ -149,72 +134,45 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       // This ingest only needs to create the alert rows + fan out preclassify;
       // the submit cron reads the alerts straight from the table.
 
-      // PR-D2 (#498) + PR-I (#509) — fan out Haiku preclassify-requested
-      // events for NRD candidates that have no clone_watch_classifications
-      // row yet. Independent flag + try/catch for the same poison-resistance
-      // reason as the urlscan fan-out above.
-      await step.run("fan-out-haiku-preclassify", async () => {
+      // PR-D2 (#498) + PR-I (#509) + #1300 — fan out pre-classifier events for
+      // NRD alerts with no classification yet (body: ./preclassify-fanout.ts,
+      // which never throws). Its result rides the Outcome Row below, which is
+      // why the row is now written AFTER the fan-out.
+      const fanOut = await step.run("fan-out-haiku-preclassify", async () => {
         if (!featureFlags.shopfrontClonePreclassify) {
-          return { fanned_out: 0 };
+          return { preclassify_skipped: "flag_off" as const };
         }
-        try {
-          const sb = createServiceClient();
-          if (!sb) return { fanned_out: 0, reason: "no_supabase_client" };
-
-          // Dedicated classification-absence selector (#509): returns NRD
-          // alerts with no clone_watch_classifications row yet + the brand
-          // (inferred_target_domain) to classify against. Decoupled from
-          // urlscan timing — fixes F4, where a row urlscanned before this
-          // fan-out read the reused urlscan selector was permanently
-          // excluded. The LIMIT (≤100) is the load-bearing cost cap; the
-          // classifier's own idempotency key (event.data.alertId) prevents
-          // double-classification if Inngest delivers twice.
-          const { data } = await sb.rpc(
-            "list_clone_alerts_pending_preclassify",
-            {
-              p_limit: 50,
-            },
-          );
-          const rows =
-            (data as Array<{
-              id: number;
-              inferred_target_domain: string;
-              candidate_domain: string;
-              candidate_url: string;
-            }> | null) ?? [];
-          if (rows.length === 0) return { fanned_out: 0 };
-
-          // Stamp the event id with the run date so a still-pending row is
-          // re-fanned with a FRESH id on each daily sweep. A bare
-          // `clone-watch-preclassify:<id>` id was deduped by Inngest's
-          // event-send dedup AND matched the consumer's old alertId-keyed
-          // function idempotency, so any alert whose first classify attempt
-          // skipped (FF off / brake / supabase blip) or exhausted retries was
-          // PERMANENTLY stranded — the selector kept returning it but it could
-          // never re-run (verified 2026-05-29: 6 rows stuck ~2 days). The
-          // selector already excludes classified alerts, so date-rotating is
-          // safe — only genuinely-pending rows are ever re-attempted, one extra
-          // attempt per day, until classified or aged out by retention.
-          const fanDate = formatUtcDate(new Date());
-          const events = rows.map((r) => ({
-            name: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
-            id: `clone-watch-preclassify:${r.id}:${fanDate}`,
-            data: {
-              alertId: r.id,
-              brand: r.inferred_target_domain,
-              candidateDomain: r.candidate_domain,
-              candidateUrl: r.candidate_url,
-            },
-          }));
-          await inngest.send(events);
-          return { fanned_out: events.length };
-        } catch (err) {
-          logger.error("shopfront-nrd: haiku-preclassify fan-out failed", {
-            error: err instanceof Error ? err.message : String(err),
+        const sb = createServiceClient();
+        if (!sb) {
+          return {
+            preclassify_fanned_out: 0,
+            preclassify_errored: true,
+            preclassify_error: "no_supabase_client",
+          };
+        }
+        const outcome = await fanOutPreclassify(
+          sb,
+          (events) => inngest.send(events),
+          formatUtcDate(new Date()),
+        );
+        if (outcome.preclassify_errored) {
+          logger.error("shopfront-nrd: preclassify fan-out failed", {
+            error: outcome.preclassify_error,
           });
-          return { fanned_out: 0, errored: true };
         }
+        return outcome;
       });
+
+      await step.run("log-cost-telemetry", () =>
+        recordLaneOutcome("shopfront-nrd-daily-ingest", domains_scanned, {
+          domains_scanned,
+          hits_found: hits.length,
+          rows_inserted: upsertResult.inserted,
+          failed_chunks: upsertResult.failed_chunks,
+          total_chunks: upsertResult.total_chunks,
+          ...fanOut,
+        }),
+      );
 
       await step.run("send-telegram-digest", async () => {
         await sendTelegramDigest({

@@ -10,6 +10,7 @@ import {
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { autoParkNotClones } from "@/lib/clone-watch/auto-park";
+import { stampPreclassifyFailures } from "@/lib/clone-watch/preclassify-failure-stamp";
 import { isPreclassifyBraked } from "@/lib/clone-watch/jev-classify-one";
 import {
   ClassificationOutputSchema,
@@ -82,6 +83,15 @@ import { laneGate } from "@/lib/laneHealth";
  * step boundary. A failed park is logged and counted (`auto_park_failed` on
  * the Outcome Row); it never fails the batch, and the alert simply stays
  * `pending` for a human.
+ *
+ * FAILURE STAMP (#1300, v345): alerts the classifier threw on are stamped in
+ * the same step (lib/clone-watch/preclassify-failure-stamp.ts) — one attempt
+ * per UTC day; the daily selector gives up after 3. `failure_stamped` /
+ * `failure_stamp_failed` on the Outcome Row; a failed stamp pages.
+ *
+ * NAME: the id `shopfront-clone-haiku-preclassify` predates ADR-0026 (Jev is
+ * primary, Haiku the rollback). It is kept: renaming an Inngest function id
+ * orphans its history and it is pinned in CLONE_WATCH_KEEP_IDS (#1293).
  */
 
 /** Parse + dedupe a batch's events: one entry per alertId (Inngest dedupes
@@ -144,7 +154,8 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     // Inngest at ingest (24 h), alertsFromEvents dedupes within a batch, and
     // record_clone_watch_classification is an UPSERT. The daily selector
     // excludes alerts that already have a classification row, so a failed
-    // alert is re-fanned tomorrow with a fresh id (the existing backstop).
+    // alert is re-fanned tomorrow with a fresh id (the existing backstop) —
+    // stamped first (#1300, v345), and given up after 3 failed days.
     timeouts: { finish: "8m" },
   },
   { event: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT },
@@ -176,6 +187,8 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
               results: [],
               autoParked: 0,
               autoParkError: null,
+              failureStamped: 0,
+              failureStampError: null,
             };
           }
           const mode = preclassifyMode();
@@ -206,12 +219,29 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
               error: park.error,
             });
           }
+          // Failure stamp (#1300, v345): every alert the classifier threw on
+          // is counted, so the selector gives up on a poison alert after 3
+          // failed days instead of re-presenting it at the head. Unreached
+          // alerts (budget expired) are NOT failures and are not stamped.
+          // Inside the step: a replay does not re-stamp (and the RPC counts
+          // one attempt per UTC day anyway). Never throws.
+          const stamp = await stampPreclassifyFailures(
+            sb,
+            out.flatMap((r) => (r.ok ? [] : [{ alertId: r.alertId, error: r.error }])),
+          );
+          if (stamp.error) {
+            logger.warn("clone-watch preclassify: failure stamp failed", {
+              error: stamp.error,
+            });
+          }
           return {
             braked: false as const,
             mode,
             results: out,
             autoParked: park.parked,
             autoParkError: park.error,
+            failureStamped: stamp.stamped,
+            failureStampError: stamp.error,
           };
         },
       );
@@ -226,6 +256,8 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
             results: memoised as AlertResult[],
             autoParked: 0,
             autoParkError: null,
+            failureStamped: 0,
+            failureStampError: null,
           }
         : memoised;
 
@@ -245,6 +277,9 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       // `?? 0`: a run memoised before #1230 carries no auto-park fields.
       const autoParked = batch.autoParked ?? 0;
       const autoParkFailed = Boolean(batch.autoParkError);
+      // `?? 0` / `?? null`: a run memoised before #1300 carries no stamp fields.
+      const failureStamped = batch.failureStamped ?? 0;
+      const failureStampFailed = Boolean(batch.failureStampError ?? null);
       const classified = results.filter((r) => r.ok).length;
       const failed = results.length - classified;
       const unreached = alerts.length - results.length;
@@ -258,6 +293,8 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
           mode,
           auto_parked: autoParked,
           auto_park_failed: autoParkFailed,
+          failure_stamped: failureStamped,
+          failure_stamp_failed: failureStampFailed,
         }),
       );
       logger.info("clone-watch preclassify: batch done", {
