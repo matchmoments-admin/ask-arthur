@@ -40,11 +40,17 @@ it("leaves the database untouched on quota exhaustion", async () => {
 });
 
 // DNS precheck (2026-09-23; PR B): a name with no A/AAAA costs no urlscan and
-// no reputation call, and is stamped exactly like urlscan's no-DNS 400 so the
-// v277 dead-domain cadence applies unchanged. The gate is "points at a host",
-// not "not NXDOMAIN": a zone with NS but no A (prod sucway.net, apple.co.mw,
-// amazom.yoga) still drew urlscan's "400 DNS Error" under the old check.
-it("skips urlscan + reputation for a name with no host and stamps a 400", async () => {
+// no reputation call. The gate is "points at a host", not "not NXDOMAIN": a
+// zone with NS but no A (prod sucway.net, apple.co.mw, amazom.yoga) still drew
+// urlscan's "400 DNS Error" under the old check.
+//
+// v343 (#1297): the reading is recorded in its own column (p_dns_precheck),
+// and p_evidence is NULL so the row keeps its urlscan evidence. Before v343 the
+// precheck wrote a fake {status: 400} into urlscan_evidence, which overwrote
+// 255 retrieved renders and 23 Safe Browsing hits in prod. Go-red (2026-10-13):
+// against the pre-v343 submit-one, 5 of these failed: both "never sends urlscan
+// evidence …" cases, "records the live reading …", and both skip cases.
+it("skips urlscan + reputation for a name with no host and records the reading", async () => {
  m.host.mockResolvedValue("no_host");
  m.rpc.mockResolvedValue({ error: null });
  const out = await submitCloneCandidate(candidate);
@@ -52,9 +58,19 @@ it("skips urlscan + reputation for a name with no host and stamps a 400", async 
  expect(out).toMatchObject({ kind: "dns_no_host", error: DNS_PRECHECK_ERROR });
  expect(m.submit).not.toHaveBeenCalled();
  expect(m.reputation).not.toHaveBeenCalled();
- const evidence = m.rpc.mock.calls[0][1].p_evidence;
- expect(evidence).toMatchObject({ status: 400, error: DNS_PRECHECK_ERROR });
+ expect(m.rpc).toHaveBeenCalledTimes(1);
+ expect(m.rpc.mock.calls[0][0]).toBe("record_clone_alert_urlscan_submit");
+ expect(m.rpc.mock.calls[0][1]).toMatchObject({ p_urlscan_uuid: null, p_dns_precheck: "no_host" });
 });
+for (const reading of ["no_host", "servfail"] as const) {
+ it(`never sends urlscan evidence on a ${reading} precheck (keeps a retrieved render)`, async () => {
+  m.host.mockResolvedValue(reading);
+  m.rpc.mockResolvedValue({ error: null });
+  await submitCloneCandidate(candidate);
+  // NULL → the RPC's COALESCE keeps the row's existing urlscan_evidence.
+  expect(m.rpc.mock.calls[0][1].p_evidence).toBeNull();
+ });
+}
 it("an inconclusive resolver answer still scans", async () => {
  m.host.mockResolvedValue("unknown");
  m.rpc.mockResolvedValue({ error: null });
@@ -62,18 +78,28 @@ it("an inconclusive resolver answer still scans", async () => {
  await submitCloneCandidate(candidate);
  expect(m.submit).toHaveBeenCalledTimes(1);
 });
+it("records the live reading on the urlscan paths, so a resolved name leaves the dead cadence", async () => {
+ m.rpc.mockResolvedValue({ error: null });
+ m.submit.mockResolvedValue({ ok: true, uuid: "scan-3" });
+ await submitCloneCandidate(candidate); // precheck "host" (beforeEach)
+ expect(m.rpc.mock.calls[0][1]).toMatchObject({ p_urlscan_uuid: "scan-3", p_dns_precheck: "host" });
+ m.rpc.mockClear();
+ m.host.mockResolvedValue("unknown");
+ m.submit.mockResolvedValue({ ok: false, status: 400, error: "rejected" });
+ await submitCloneCandidate(candidate);
+ // urlscan's own 400 still lands in evidence (a real urlscan answer).
+ expect(m.rpc.mock.calls[0][1]).toMatchObject({ p_dns_precheck: "unknown", p_evidence: { status: 400 } });
+});
 
 // 2026-09-25: A and AAAA both SERVFAIL — every such name measured in prod was
-// also refused by urlscan ("could not resolve"). Skipped like no_host, stamped
-// with the same status-400 shape (same 168 h cadence), counted apart.
-it("skips urlscan + reputation for a SERVFAIL name and stamps a 400 with its own error", async () => {
+// also refused by urlscan ("could not resolve"). Skipped like no_host (same
+// 168 h cadence via dns_precheck = 'servfail'), counted apart.
+it("skips urlscan + reputation for a SERVFAIL name and records it apart", async () => {
  m.host.mockResolvedValue("servfail");
  m.rpc.mockResolvedValue({ error: null });
  const out = await submitCloneCandidate(candidate);
  expect(out).toMatchObject({ kind: "dns_servfail", error: DNS_SERVFAIL_PRECHECK_ERROR });
  expect(m.submit).not.toHaveBeenCalled();
  expect(m.reputation).not.toHaveBeenCalled();
- const evidence = m.rpc.mock.calls[0][1].p_evidence;
- expect(evidence).toMatchObject({ status: 400, error: "dns_servfail_precheck", stage: "submit_failed" });
+ expect(m.rpc.mock.calls[0][1]).toMatchObject({ p_dns_precheck: "servfail" });
 });
-
