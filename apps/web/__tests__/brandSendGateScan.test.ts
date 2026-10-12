@@ -72,6 +72,13 @@ const BRAND_DATA = [
   // (clone-list-request mailed both to a requester with no gate).
   /["']shopfront_clone_alerts["']/,
   /from\s+["'][^"']*clone-watch\/resolve-brand["']/,
+  // #1296 (v342): the Brand Cohort view is the lookalike table, filtered —
+  // and reporting code names it through its constant, never the literal.
+  // Go-red: without these two, the internal digest (which now reads the
+  // cohort) dropped out of `needing` and "every exemption still … matches"
+  // FAILED.
+  /["']clone_watch_brand_cohort["']/,
+  /\bCLONE_COHORT_RELATION\b/,
 ];
 const CALLS_GATE = /\b(?:createBrandSendGate|checkBrandSend)\s*\(/;
 
@@ -163,6 +170,8 @@ describe("the detector sees each shape", () => {
     [`import Y from "@/emails/CloneWatchBrandAlert";`],
     [`await sb.from("brand_stewardship_reports").select("*");`],
     [`await sb.rpc("load_clone_alert_batch", {});`],
+    [`await sb.from("clone_watch_brand_cohort").select("*");`],
+    [`await sb.from(CLONE_COHORT_RELATION).select("*");`],
     [`await sb.from("shopfront_clone_alerts").select("candidate_domain");`],
     [`import { resolveWatchlistBrand } from "@/lib/clone-watch/resolve-brand";`],
   ])("Resend + %s → needs the gate", (line) => {

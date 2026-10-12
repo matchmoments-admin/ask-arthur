@@ -14,6 +14,7 @@ import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   applyCohortRules,
+  CLONE_COHORT_RELATION,
   CLONE_COHORT_SELECT,
   type CloneAlertRow,
 } from "@/lib/clone-watch/clone-cohort";
@@ -527,8 +528,10 @@ export const reportBrandStewardship = inngest.createFunction(
         const members: CloneAlertRow[] = [];
         for (let i = 0; i < ids.length; i += MEMBER_ID_CHUNK) {
           const chunk = ids.slice(i, i + MEMBER_ID_CHUNK);
+          // Through the Brand Cohort (v342): a member triaged `fp` SINCE
+          // publication no longer resolves, so it leaves the watch-list.
           const { data, error } = await sb
-            .from("shopfront_clone_alerts")
+            .from(CLONE_COHORT_RELATION)
             .select(CLONE_COHORT_SELECT)
             .in("id", chunk);
           if (error) {
@@ -540,8 +543,9 @@ export const reportBrandStewardship = inngest.createFunction(
           members.push(...((data ?? []) as unknown as CloneAlertRow[]));
         }
         members.sort((a, b) => a.id - b.id);
-        // Counts are frozen in the store; this only keeps a lookalike triaged
-        // `fp` SINCE publication off the brand-facing watch-list.
+        // Counts are frozen in the store; the view read above keeps a lookalike
+        // triaged `fp` since publication off the brand-facing watch-list, and
+        // this applies the audit withholding.
         const cloneRows = applyCohortRules(members);
         return {
           storeRows,
