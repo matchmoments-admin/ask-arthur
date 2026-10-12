@@ -347,11 +347,29 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     crons: ["30 8 * * *"],
     flags: ["shopfrontCloneWatch"],
     consecutive: 1,
-    shape: "domains_scanned=0, or every chunk failed",
+    // #1300: the row also carries the pre-classifier fan-out. Its cap (100,
+    // 1.4x the largest day measured) binding two days running while the
+    // worklist is not shrinking means classification is falling behind and
+    // the oldest alerts are walking toward the 14-day horizon. Rows before
+    // 2026-10-13 carry no preclassify_cap_reached and never bind.
+    capBound: {
+      consecutive: 2,
+      test: (o) => o.preclassify_cap_reached === true,
+      backlog: (o) =>
+        typeof o.preclassify_due_total === "number" ? o.preclassify_due_total : null,
+    },
+    // #1300 disjuncts: the fan-out failed (it used to read a broken selector
+    // as "nothing to classify"), or an alert was given up today after 3
+    // failed classify days — a poison input someone should look at
+    // (clone_watch_preclassify_failures.last_error).
+    shape:
+      "domains_scanned=0, or every chunk failed, or preclassify_errored, or preclassify_gave_up_24h>0",
     silentZero: (o) =>
       n(o, "domains_scanned") === 0 ||
       (n(o, "total_chunks") > 0 &&
-        n(o, "failed_chunks") >= n(o, "total_chunks")),
+        n(o, "failed_chunks") >= n(o, "total_chunks")) ||
+      o.preclassify_errored === true ||
+      n(o, "preclassify_gave_up_24h") > 0,
   },
   "shopfront-clone-netcraft-auto/auto": {
     crons: NETCRAFT_AUTO_CRONS,
@@ -452,10 +470,13 @@ export const LANE_SHAPES: { [L in LaneId]: Shape<L> } = {
     expectEvery: Number.POSITIVE_INFINITY,
     flags: ["shopfrontClonePreclassify"],
     consecutive: 1,
-    shape: "alerts>0 ∧ classified=0, or auto_park_failed",
+    // #1300: a failed failure-stamp is the same fail-soft-must-not-be-silent
+    // case — the failed alerts would re-present uncounted and never be given up.
+    shape: "alerts>0 ∧ classified=0, or auto_park_failed, or failure_stamp_failed",
     silentZero: (o) =>
       (n(o, "alerts") > 0 && n(o, "classified") === 0) ||
-      o.auto_park_failed === true,
+      o.auto_park_failed === true ||
+      o.failure_stamp_failed === true,
   },
   "clone-watch-report-summary": {
     // Monthly (1st, 11:00). Absence is THE signal for a monthly Lane: the
