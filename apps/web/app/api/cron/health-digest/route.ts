@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { readBoolEnv } from "@askarthur/utils/env";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import {
@@ -259,17 +260,25 @@ export async function GET(req: Request) {
   // and the 5 missing were exactly the dead ones. A feed that stops writing
   // drops out of any query that groups by what is present, so the harder a feed
   // failed, the more certainly it was invisible.
-  const { data: healthRows, error: healthError } = await supabase
-    .from("feed_health")
-    .select("*");
+  //
+  // Skipped in Clone-Watch-only mode (docs/ops/clone-watch-only-mode.md): the
+  // scrapers are paused via their GitHub variables, so every feed would page
+  // "stale" daily. Checks 1, 3, 4 (the Clone Watch Lanes) and 5 still run.
+  const feedsSkipped = featureFlags.cloneWatchOnly;
+  let rows: FeedHealthRow[] = [];
+  if (!feedsSkipped) {
+    const { data: healthRows, error: healthError } = await supabase
+      .from("feed_health")
+      .select("*");
 
-  if (healthError) {
-    logger.error("health-digest: feed_health query failed", {
-      error: healthError.message,
-    });
+    if (healthError) {
+      logger.error("health-digest: feed_health query failed", {
+        error: healthError.message,
+      });
+    }
+
+    rows = (healthRows ?? []) as unknown as FeedHealthRow[];
   }
-
-  const rows = (healthRows ?? []) as unknown as FeedHealthRow[];
   const { problems, mutedCount } = classifyFeedHealth(rows);
 
   const now = Date.now();
@@ -395,6 +404,7 @@ export async function GET(req: Request) {
       errors_24h: 0,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
+      feeds_skipped: feedsSkipped,
       lanes_checked: LANES_CHECKED,
       // Explicitly EMPTY, not absent. The readiness scorecard (#1237, v335
       // clone_watch_readiness_inputs) counts a day as MEASURED only when its
@@ -444,6 +454,7 @@ export async function GET(req: Request) {
       lifecycle_off_spec: offSpecSummary,
       feeds_checked: rows.length,
       feeds_muted: mutedCount,
+      feeds_skipped: feedsSkipped,
       lanes_checked: LANES_CHECKED,
       cost_usd: cost.cost_usd,
       mutedBy: legacyTelegramEnabled ? null : "FF_LEGACY_DIGEST_TELEGRAM",
