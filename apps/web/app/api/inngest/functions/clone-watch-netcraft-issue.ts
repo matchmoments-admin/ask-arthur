@@ -36,6 +36,11 @@ import {
   type PendingAlert,
 } from "@/lib/clone-watch/netcraft-urls";
 import { laneCrons, laneGate } from "@/lib/laneHealth";
+import {
+  claimNetcraftBudget,
+  netcraftLaneCap,
+  type NetcraftGrant,
+} from "@/lib/clone-watch/netcraft-budget";
 import { html, joinHtml } from "@askarthur/utils/html";
 
 /**
@@ -65,7 +70,10 @@ import { html, joinHtml } from "@askarthur/utils/html";
  * SAFETY: gated FF_CLONE_NETCRAFT_ISSUE (+ parent FF_SHOPFRONT_CLONE_OUTREACH) +
  * feature_brakes.clone_netcraft_issue. DRY-RUN by default (NETCRAFT_ISSUE_DRY_RUN
  * must be literally "false" to go live; dry-run does ZERO posts + ZERO writes).
- * Dedicated daily cap NETCRAFT_ISSUE_DAILY_CAP (default 20 uuids). `no threats`
+ * Daily cap NETCRAFT_ISSUE_DAILY_CAP (default 20 uuids), declared and counted
+ * by the Netcraft budget Module (lib/clone-watch/netcraft-budget.ts, #1301),
+ * which also holds the account-wide ceiling shared with the auto and resubmit
+ * Lanes; every report_issue POST needs its grant. `no threats`
  * only at go-live (unavailable → PR3). singleton + concurrency:1.
  *
  * v248 — TWO defects that between them lost 69% of weaponised clones:
@@ -92,7 +100,6 @@ import { html, joinHtml } from "@askarthur/utils/html";
  */
 
 const BRAKE = LANES["shopfront-clone-netcraft-issue"].brake;
-const DEFAULT_DAILY_CAP = 20;
 
 // Break the per-uuid loop before the finish budget (#1069). This fn runs up to
 // ~7 step boundaries PER UUID across its branch paths, so at the account's
@@ -133,10 +140,6 @@ const AUTOBRAKE_REJECT_COUNT = 3;
 const AUTOBRAKE_REJECT_RATIO = 0.5;
 const AUTOBRAKE_MIN_LIVE_POSTS = 2;
 
-function dailyCap(): number {
-  const raw = Number.parseInt(process.env.NETCRAFT_ISSUE_DAILY_CAP ?? "", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DAILY_CAP;
-}
 
 function isDryRun(): boolean {
   return readStringEnv("NETCRAFT_ISSUE_DRY_RUN") !== "false";
@@ -224,7 +227,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       }
 
       const dryRun = isDryRun();
-      const cap = dailyCap();
+      const cap = netcraftLaneCap("issue");
       // Escalatable states drive the /urls pre-filter (an efficiency skip when
       // a batch has nothing actionable). UNAVAILABLE is included in BOTH modes
       // as of v248: live mode now escalates `unavailable` on weaponised
@@ -237,11 +240,17 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
       ];
 
       const plan = await step.run("load-pending", async () => {
-        const { data: usedRaw } = await sb.rpc("count_todays_netcraft_issues");
-        const used = typeof usedRaw === "number" ? usedRaw : 0;
-        const remaining = Math.max(0, cap - used);
-        if (remaining <= 0)
-          return { used, remaining, groups: [] as WorklistGroup[] };
+        // Netcraft budget (#1301): this Lane's cap AND the account-wide
+        // ceiling shared with the auto and resubmit Lanes, on one UTC-day
+        // clock. Replaces count_todays_netcraft_issues(), whose failed read
+        // used to count as 0 used — an unreadable ledger now refuses.
+        const claim = await claimNetcraftBudget(sb, "issue", cap);
+        const grant: NetcraftGrant | null = claim.ok ? claim.grant : null;
+        const used = claim.ok ? claim.grant.spentLane : claim.spentLane;
+        const remaining = grant ? grant.allowed : 0;
+        const budgetRefused = claim.ok ? null : claim.reason;
+        if (!grant)
+          return { used, remaining, grant, budgetRefused, groups: [] as WorklistGroup[] };
 
         const { data: rows } = await sb.rpc(
           "list_clone_alerts_pending_netcraft_issue",
@@ -261,12 +270,18 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
               .filter((a) => !isFpBrand(a.inferred_target_domain ?? "")),
           }))
           .filter((g) => g.alerts.length > 0);
-        return { used, remaining, groups };
+        return { used, remaining, grant, budgetRefused, groups };
       });
 
       if (plan.groups.length === 0) {
+        // A memo from before #1301 has no budgetRefused key.
+        const budgetRefused = plan.budgetRefused ?? null;
         const reason =
-          plan.remaining === 0 ? "daily_cap_reached" : "nothing_pending";
+          budgetRefused && budgetRefused !== "lane_cap_reached"
+            ? "netcraft_budget"
+            : plan.remaining === 0
+              ? "daily_cap_reached"
+              : "nothing_pending";
         // One outcome row per run (#1145). The digest's silent-zero detector
         // judges this lane ABSENT when no issue_report row lands inside 26h;
         // 3 of the 13 days before this change had no row because nothing was
@@ -276,6 +291,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         await step.run("log-cost-quiet", () =>
           recordLaneOutcome("shopfront-clone-netcraft-issue", 0, {
             reason,
+            ...(budgetRefused ? { budget_refused: budgetRefused } : {}),
             dryRun,
             uuids: 0,
             filed: 0,
@@ -631,7 +647,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
 
         const candidateIds = liveCandidates.map((c) => c.alertId);
         const result = await step.run(`post-${uuid}`, () =>
-          postNetcraftIssue(uuid, buildIssuePayload(liveCandidates)),
+          postNetcraftIssue(uuid, buildIssuePayload(liveCandidates), plan.grant ?? null),
         );
         counts.livePosts++;
 

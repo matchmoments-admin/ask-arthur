@@ -289,7 +289,13 @@ export interface LaneOutcome {
     unnotified_weaponised: number | null;
   };
   "shopfront-clone-netcraft-issue": {
-    reason?: "nothing_pending" | "daily_cap_reached";
+    reason?: "nothing_pending" | "daily_cap_reached" | "netcraft_budget";
+    /** #1301 — the Netcraft budget refused the run (lib/clone-watch/
+     *  netcraft-budget.ts): ledger_unreadable | lane_cap_reached |
+     *  daily_ceiling_reached. Absent when admitted. */
+    budget_refused?: string;
+    /** #1301 — rows the budget held back for a later UTC day. */
+    budget_held?: number;
     uuids: number;
     filed: number;
     permanentRejects: number;
@@ -300,7 +306,13 @@ export interface LaneOutcome {
     processingDeferred?: number;
   };
   "shopfront-clone-netcraft-auto/resubmit": {
-    reason?: "none_pending_or_cap" | "all_dead" | "bulk_submit_failed";
+    reason?: "none_pending_or_cap" | "all_dead" | "bulk_submit_failed" | "netcraft_budget";
+    /** #1301 — the Netcraft budget refused the run (lib/clone-watch/
+     *  netcraft-budget.ts): ledger_unreadable | lane_cap_reached |
+     *  daily_ceiling_reached. Absent when admitted. */
+    budget_refused?: string;
+    /** #1301 — rows the budget held back for a later UTC day. */
+    budget_held?: number;
     candidates: number;
     marked: number;
     deferred: number;
@@ -374,7 +386,13 @@ export interface LaneOutcome {
     written: number;
   };
   "shopfront-clone-netcraft-auto/auto": {
-    reason?: "no_candidates_or_cap_reached" | "bulk_submit_failed";
+    reason?: "no_candidates_or_cap_reached" | "bulk_submit_failed" | "netcraft_budget";
+    /** #1301 — the Netcraft budget refused the run (lib/clone-watch/
+     *  netcraft-budget.ts): ledger_unreadable | lane_cap_reached |
+     *  daily_ceiling_reached. Absent when admitted. */
+    budget_refused?: string;
+    /** #1301 — rows the budget held back for a later UTC day. */
+    budget_held?: number;
     candidates: number;
     marked: number;
   };
