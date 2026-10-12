@@ -1,5 +1,4 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import {
@@ -17,7 +16,10 @@ import {
   CLONE_COHORT_SELECT,
   type CloneAlertRow,
 } from "@/lib/clone-watch/clone-cohort";
-import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
+import {
+  loadBrandCategoryLookup,
+  scoreAlertRisk,
+} from "@/lib/clone-watch/alert-risk";
 import { aggregateClonesByDomain } from "@/lib/clone-watch/clone-metrics";
 import { monthWindow, priorMonthStart } from "@/lib/clone-watch/month-window";
 import {
@@ -553,48 +555,17 @@ export const reportBrandStewardship = inngest.createFunction(
         };
       });
       const cloneRows = clonesFromStore.cloneRows;
-      // F3: per-row weaponisation risk (the ONE formula — weaponisation-risk.ts)
-      // via a lightweight brand-category map (~300 rows). Inside step.run so the
-      // clock read is replay-stable.
+      // F3: per-row weaponisation risk (the ONE formula — weaponisation-risk.ts),
+      // assembled from the row by alert-risk.ts exactly as the recheck lane
+      // ranks it (#1298). Inside step.run so the clock read is replay-stable.
       const riskByAlertId = await step.run("compute-risk-scores", async () => {
         const sb = createServiceClient();
-        const categories = new Map<string, string>();
-        if (sb) {
-          const { data } = await sb
-            .from("known_brands")
-            .select("brand_domain, brand_category")
-            .not("brand_domain", "is", null);
-          for (const r of (data ?? []) as Array<{
-            brand_domain: string | null;
-            brand_category: string | null;
-          }>) {
-            if (
-              r.brand_domain &&
-              r.brand_category &&
-              !categories.has(r.brand_domain)
-            ) {
-              categories.set(r.brand_domain, r.brand_category);
-            }
-          }
-        }
+        if (!sb) throw new Error("brand-stewardship: brand categories unavailable");
+        const categories = await loadBrandCategoryLookup(sb);
         const nowMs = Date.now();
         const out: Record<number, number> = {};
         for (const row of cloneRows) {
-          out[row.id] = computeWeaponisationRisk({
-            urlscanClassification: row.urlscan_classification,
-            signals: row.signals ?? null,
-            isClone: row.clone_watch_classifications?.is_clone ?? null,
-            confidence: row.clone_watch_classifications?.confidence ?? null,
-            attackIntent:
-              row.clone_watch_classifications?.attack_intent ?? null,
-            brandCategory: row.inferred_target_domain
-              ? (categories.get(row.inferred_target_domain) ?? null)
-              : null,
-            ...attributionRiskInputs(row.attribution, {
-              firstSeenAt: row.first_seen_at ?? null,
-            }),
-            nowMs,
-          }).score;
+          out[row.id] = scoreAlertRisk(row, categories, nowMs).score;
         }
         return out;
       });

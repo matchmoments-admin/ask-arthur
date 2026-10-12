@@ -16,6 +16,10 @@
  * weaponisation outcomes once enough accumulate (score telemetry ships in the
  * recheck fn's log-cost metadata for exactly that).
  *
+ * Callers do NOT assemble this input by hand: they pass the alert row to
+ * scoreAlertRisk (alert-risk.ts), which owns the column → input mapping and
+ * the brand-category rule, so every caller scores an alert identically (#1298).
+ *
  * Never throws; every input is null-tolerant (attribution only exists on
  * enriched alerts, the Haiku classification only on classified ones).
  */
