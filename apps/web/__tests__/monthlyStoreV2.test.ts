@@ -444,6 +444,21 @@ describe("probeChunk", () => {
     expect(isDeadDormant({ urlscan_uuid: "x", urlscan_failure_streak: 8, urlscan_evidence: { status: "400" } })).toBe(false);
     expect(isDeadDormant({ urlscan_uuid: null, urlscan_failure_streak: 8, urlscan_evidence: null })).toBe(false);
   });
+
+  // v343 (#1297): a precheck-dead row has NO 400 in its evidence any more (the
+  // precheck stopped overwriting it) — the dns_precheck reading must carry it.
+  // Go-red: against the pre-v343 twin (status 400 only) this failed on the
+  // first assertion (a no_host row with no 400 read as not dead).
+  it("isDeadDormant reads the v343 dns_precheck reading, NULL-safe", () => {
+    const base = { urlscan_uuid: null, urlscan_failure_streak: 8 };
+    expect(isDeadDormant({ ...base, urlscan_evidence: null, dns_precheck: "no_host" })).toBe(true);
+    expect(isDeadDormant({ ...base, urlscan_evidence: { status: 200 }, dns_precheck: "servfail" })).toBe(true);
+    expect(isDeadDormant({ ...base, urlscan_evidence: null, dns_precheck: "host" })).toBe(false);
+    expect(isDeadDormant({ ...base, urlscan_evidence: null, dns_precheck: "unknown" })).toBe(false);
+    expect(isDeadDormant({ ...base, urlscan_evidence: null, dns_precheck: null })).toBe(false);
+    // urlscan's own 400 still counts whatever the precheck read.
+    expect(isDeadDormant({ ...base, urlscan_evidence: { status: "400" }, dns_precheck: "host" })).toBe(true);
+  });
 });
 
 // ── The snapshot trust gate (review of #1225, defect 1) ─────────────────────

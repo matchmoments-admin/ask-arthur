@@ -56,6 +56,11 @@ beforeAll(async () => {
   // v334 re-creates the worklist with the DNS-gate queue clock and adds
   // record_clone_recheck_dns; loaded LAST so it is the body under test.
   await db.exec(migration("migration-v334-recheck-dns-change-gate.sql"));
+  // v343 (#1297) re-creates it with the dead predicate moved to
+  // clone_alert_dns_dead; loaded LAST so every case below (all of them rows
+  // with no dns_precheck reading — the legacy shape) proves v343 reads a
+  // pre-v343 row exactly as v334 did.
+  await db.exec(migration("migration-v343-clone-dns-precheck-column.sql"));
 }, 30_000);
 afterAll(async () => db?.close());
 beforeEach(async () => db.exec("DELETE FROM shopfront_clone_alerts"));

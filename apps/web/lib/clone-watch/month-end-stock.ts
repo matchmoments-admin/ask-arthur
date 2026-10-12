@@ -86,6 +86,9 @@ export interface StockRow {
   urlscan_uuid: string | null;
   urlscan_failure_streak: number | null;
   urlscan_evidence: { status?: unknown } | null;
+  /** v343 (#1297): the submit DNS precheck's last reading (dead = no_host /
+   *  servfail). NULL on rows not prechecked since v343. */
+  dns_precheck?: string | null;
   /** Read only by `isAuditWithheld` (clone-cohort.ts, #1256). */
   clone_watch_classifications?: { is_clone: boolean | null } | null;
   clone_watch_not_a_clone_samples?: AuditSampleEmbed;
@@ -95,7 +98,7 @@ export interface StockRow {
 // not-a-clone audit sample's parked_for_sale verdict would move it from `live`
 // to `parked` in the brand's persisted stock split.
 export const STOCK_ROW_SELECT =
-  "id, candidate_domain, inferred_target_domain, attribution, urlscan_classification, lifecycle_state, urlscan_uuid, urlscan_failure_streak, urlscan_evidence, clone_watch_classifications(is_clone), " +
+  "id, candidate_domain, inferred_target_domain, attribution, urlscan_classification, lifecycle_state, urlscan_uuid, urlscan_failure_streak, urlscan_evidence, dns_precheck, clone_watch_classifications(is_clone), " +
   AUDIT_SAMPLE_EMBED;
 
 /** One clone_liveness_snapshots row. */
@@ -110,20 +113,34 @@ export interface SnapshotInsert {
 }
 
 /**
- * The v326 dead-dormancy rule (#1240): urlscan refused the name as
- * unresolvable eight times running, so the recheck worklist stopped offering
- * it. TS twin of the predicate `reset_clone_alert_dead_dormancy` re-checks in
+ * The v326 dead-dormancy rule (#1240): the name was dead eight attempts
+ * running (urlscan refused it as unresolvable, or — v343 — the submit DNS
+ * precheck read no_host/servfail), so the recheck worklist stopped offering
+ * it. "Dead" is `clone_alert_dns_dead` (v343). TS twin of the predicate `reset_clone_alert_dead_dormancy` re-checks in
  * SQL (v325) — the SQL is authoritative; this only decides whom to ask about.
  * The EXIT is a Domain DNS State reading: only `presence === "resolves"` (an
  * address) — the same bar as the weaponised sweep's dormant exit (v341) and
  * the re-emergence monitor. A name with NS but no address stays dormant.
  */
 export function isDeadDormant(
-  row: Pick<StockRow, "urlscan_uuid" | "urlscan_failure_streak" | "urlscan_evidence">,
+  row: Pick<StockRow, "urlscan_uuid" | "urlscan_failure_streak" | "urlscan_evidence" | "dns_precheck">,
 ): boolean {
   return (
     row.urlscan_uuid == null &&
     (row.urlscan_failure_streak ?? 0) >= 8 &&
+    isDnsDead(row)
+  );
+}
+
+/** TS twin of `clone_alert_dns_dead` (v343): the submit precheck read
+ *  no_host/servfail, OR urlscan said 400 (which also covers every pre-v343
+ *  precheck stamp). A missing reading is not dead. */
+export function isDnsDead(
+  row: Pick<StockRow, "urlscan_evidence" | "dns_precheck">,
+): boolean {
+  return (
+    row.dns_precheck === "no_host" ||
+    row.dns_precheck === "servfail" ||
     String(row.urlscan_evidence?.status ?? "") === "400"
   );
 }
