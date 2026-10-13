@@ -47,6 +47,9 @@
  * reporting) is to route the four SQL writers through one set-based
  * transition RPC that consults this same edge set.
  *
+ * The operator's state machine (`triage_status` / `triage_source`) is a
+ * separate one, specified in `triage.ts` beside this file (#1301).
+ *
  * Zero imports by design — importable from server components, Inngest
  * closures, the caption CLI and email templates without dragging in the data
  * layer. Same discipline as `outcome-copy.ts`.

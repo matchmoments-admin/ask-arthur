@@ -15,6 +15,8 @@
 import type { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
+import { grantCovers, type NetcraftGrant } from "./netcraft-budget";
+
 type Sb = NonNullable<ReturnType<typeof createServiceClient>>;
 
 const NETCRAFT_POST_TIMEOUT_MS = 30_000;
@@ -155,8 +157,23 @@ export function buildNetcraftResubmitBody(
  */
 export async function postNetcraftBulk(
   body: NetcraftBulkBody,
-  opts: { test: boolean },
+  opts:
+    | { test: true }
+    // A LIVE send needs a budget grant for its Lane covering every url
+    // (lib/clone-watch/netcraft-budget.ts). Without one nothing is sent.
+    | { test: false; grant: NetcraftGrant | null; lane: "auto" | "resubmit" },
 ): Promise<NetcraftBulkResult> {
+  if (!opts.test && !grantCovers(opts.grant, opts.lane, body.urls.length)) {
+    return {
+      ok: false,
+      status: 0,
+      uuid: null,
+      state: null,
+      errText: `netcraft_budget: no ${opts.lane} grant covers ${body.urls.length} url(s)`,
+      raw: {},
+      urlCount: body.urls.length,
+    };
+  }
   const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
   let res: Response;
   try {
