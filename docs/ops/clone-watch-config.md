@@ -660,7 +660,11 @@ contact until the #1237 readiness gate; 100% `no_unbatched_rows`; wrote rows to
 Parked `flags_dark` (converted from comment-parking in PR-F):
 enforcement-execute, reemergence-monitor, weekly-digest — see the previous
 section. Also parked, outside the roster: `known-brands-discover` (100%
-`all_probed`; its cron line is commented in the function).
+`all_probed`; its cron line is commented in the function). Since #1304 (v348)
+it enumerates the Active Watchlist (static seed ∪ `monitored_brands` overlay),
+and Brand Subscriber activation (admin onboarding / Stripe webhook) seeds the
+brand's `known_brands` row and sends its event once — so a paying brand is
+probed without un-parking the cron.
 `clone-watch-auto-triage` is **retired**, not parked — see the next section.
 
 ### whoisjson monthly guard — what the enricher's `batch` share means (PR-F)

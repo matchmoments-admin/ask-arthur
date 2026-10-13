@@ -1,40 +1,53 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
-import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
+import {
+  brandNormalize,
+  buildBrandResolver,
+  type BrandEntry,
+} from "@askarthur/shopfront-glue";
+import { getActiveWatchlistDetailed } from "@askarthur/scam-engine/active-watchlist";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { deriveBrandKey } from "@/app/api/inngest/functions/report-brand-stewardship";
 import { html, joinHtml } from "@askarthur/utils/html";
+import { loadAliasRecord } from "@/lib/brand-aliases";
 
 /**
  * Known-brands security-contact discovery (RFC 9116 security.txt).
  *
- * Closes the long tail of the brand-contact coverage gap: the clone matcher
- * watches ~212 AU brands but known_brands only has contacts for a fraction.
- * For each watched brand with NO known_brands row yet, this fetches the brand's
- * own /.well-known/security.txt and, if it publishes a Contact, upserts a
+ * For each WATCHED brand with no known_brands row yet, this fetches the brand's
+ * own /.well-known/security.txt and, if it publishes a Contact, records a
  * VERIFIED contact (a security.txt on the brand's own apex domain is
- * authoritative). Brands with no security.txt get a contact_type='none' row so
- * they aren't re-probed every run.
+ * authoritative). A miss records a contact_type='none' row so the brand is not
+ * re-probed every run.
  *
- * Reality check: only ~15% of these brands publish security.txt, so this is a
- * slow, ongoing trickle — but it's free, fully automatic, and picks up any new
- * watchlist entry. The bulk of the gap is still manual curation (the v179 seed).
+ * WHAT "WATCHED" MEANS (#1304, v348). The roster is the ACTIVE WATCHLIST —
+ * the static AU_BRAND_WATCHLIST seed plus the monitored_brands overlay (Brand
+ * Subscribers and house-org promotions), read through the one Seam
+ * getActiveWatchlistDetailed(). Before #1304 this fn read the static array
+ * only, so a paying brand never got a known_brands row: no category for the
+ * weaponisation-risk score, no security contact. Coverage is matched on the
+ * Canonical Brand (ADR-0020: brand_normalize of the alias-resolved name) OR
+ * the brand's domain — not on deriveBrandKey, which is a display slug.
  *
- * Coverage is currently ONE-SHOT per brand: a miss writes a contact_type='none'
- * ledger row and that brand is thereafter treated as covered, so a brand that
- * publishes security.txt *after* its first probe is not re-discovered. (The
- * 2026-07-12 fleet review corrected an earlier header that wrongly claimed a
- * "re-probe of 'none' rows after 90d" — the candidate gate excludes every
- * known_brands row incl. 'none', and there is no probed_at column to base a
- * 90d window on.) A real re-probe would need: (a) a `probed_at` column set on
- * every probe, and (b) switching the miss-path upsert off `ignoreDuplicates`
- * so a re-probe can refresh it — deferred; tracked in BACKLOG.md.
+ * SEEDED ROWS. A Brand Subscriber joins the overlay only once verified, so
+ * activation does not wait for it: lib/clone-watch/known-brand-seed.ts writes
+ * its known_brands row (operator category, no contact, probed_at NULL) and
+ * sends this fn's event. An unprobed seeded row is at the HEAD of the worklist.
  *
- * Daily, capped to stay well under the 5-min Inngest budget (single fetch per
- * brand, 8s timeout, 15 brands/run).
+ * ROTATION. record_known_brand_probe (v348) stamps probed_at on every probe,
+ * hit or miss, and a row with probed_at set (or with a contact) covers its
+ * brand — so every probed candidate leaves the worklist. Coverage is still
+ * one-shot: a brand that publishes security.txt after its probe is not
+ * re-discovered (a re-probe window on probed_at is now possible; not built).
+ *
+ * Reality check: only ~15% of brands publish security.txt, so this is a slow
+ * trickle. The bulk of the contacts are manual curation (the v179 seed).
+ *
+ * PARKED (#1230): event-only, no cron. Capped at 15 probes/run (single fetch
+ * per brand, 8s timeout).
  */
 
 const DISCOVER_RUN_CAP = 15;
@@ -84,8 +97,103 @@ async function fetchSecurityTxt(domain: string): Promise<string | null> {
   return /contact:/i.test(res.body) ? res.body.slice(0, 20_000) : null;
 }
 
-// inngest-finish-budget: 17 boundaries — 2 static + 1 per-candidate probe step
-// x DISCOVER_RUN_CAP (15).
+/** A known_brands row as the discover worklist reads it. */
+export interface KnownBrandCoverageRow {
+  id: number;
+  brand_name: string | null;
+  brand_domain: string | null;
+  contact_type: string | null;
+  probed_at: string | null;
+}
+
+export interface DiscoverCandidate {
+  brand: string;
+  domain: string;
+  /** "seed": an unprobed row seeded on Brand Subscriber activation.
+   *  "roster": a watched brand with no covering known_brands row. */
+  source: "seed" | "roster";
+}
+
+function domainKey(raw: string | null | undefined): string | null {
+  const d = (raw ?? "").trim().toLowerCase().replace(/^www\./, "");
+  return d.length > 0 ? d : null;
+}
+
+/** An unprobed seeded row: contact-less and never probed (v348). */
+function isUnprobedSeed(r: KnownBrandCoverageRow): boolean {
+  return (r.contact_type ?? "none") === "none" && !r.probed_at;
+}
+
+/**
+ * THE discover worklist. Pure.
+ *
+ *   1. Unprobed seeded rows first (a paying brand asked for them), by id.
+ *   2. Then roster brands that no covering row describes — by Canonical Brand
+ *      or by any of their legitimate domains — in roster order.
+ *
+ * A row COVERS its brand when it has a contact or has been probed. The probe
+ * write stamps probed_at, so a probed candidate is not selected again: change
+ * this predicate and the probe RPC together (knownBrandsRosterSql.test.ts
+ * holds them to each other with a multi-run rotation).
+ */
+export function selectDiscoverCandidates(
+  roster: readonly BrandEntry[],
+  rows: readonly KnownBrandCoverageRow[],
+  canonicalKey: (raw: string | null | undefined) => string | null,
+  cap: number = DISCOVER_RUN_CAP,
+): DiscoverCandidate[] {
+  const coveredKeys = new Set<string>();
+  const coveredDomains = new Set<string>();
+  const out: DiscoverCandidate[] = [];
+
+  const seeds = rows
+    .filter((r) => isUnprobedSeed(r) && r.brand_name && domainKey(r.brand_domain))
+    .sort((a, b) => a.id - b.id);
+
+  for (const r of rows) {
+    // A seed claims its brand too: the roster pass must not probe it twice.
+    const k = canonicalKey(r.brand_name);
+    const d = domainKey(r.brand_domain);
+    if (k) coveredKeys.add(k);
+    if (d) coveredDomains.add(d);
+  }
+  for (const r of seeds) {
+    out.push({ brand: r.brand_name as string, domain: domainKey(r.brand_domain) as string, source: "seed" });
+  }
+
+  for (const b of roster) {
+    if (out.length >= cap) break;
+    const domains = (b.legitimate_domains ?? [])
+      .map((x) => domainKey(x))
+      .filter((x): x is string => Boolean(x));
+    if (domains.length === 0) continue;
+    const k = canonicalKey(b.brand);
+    if (k && coveredKeys.has(k)) continue;
+    if (domains.some((d) => coveredDomains.has(d))) continue;
+    out.push({ brand: b.brand, domain: domains[0], source: "roster" });
+    if (k) coveredKeys.add(k);
+    for (const d of domains) coveredDomains.add(d);
+  }
+
+  return out.slice(0, cap);
+}
+
+/** The Canonical Brand key (ADR-0020) over a loaded alias record:
+ *  brand_normalize(resolve_brand(raw) ?? raw) — the SQL twin is the match in
+ *  seed_known_brand_for_subscriber (v348). */
+export function canonicalBrandKeyFn(
+  resolve: (raw: string | null | undefined) => string | null,
+): (raw: string | null | undefined) => string | null {
+  return (raw) => brandNormalize(resolve(raw) ?? raw ?? "");
+}
+
+const CONTACT_OUTCOMES = new Set(["inserted_contact", "seed_probed_contact"]);
+
+export const KNOWN_BRANDS_DISCOVER_EVENT = "known-brands/discover.manual-trigger.v1";
+
+// inngest-finish-budget: 17 boundaries — 2 static (load-existing, telegram)
+// + 1 per-candidate probe step x DISCOVER_RUN_CAP (15).
+
 export const knownBrandsDiscover = inngest.createFunction(
   {
     id: "known-brands-discover",
@@ -96,87 +204,84 @@ export const knownBrandsDiscover = inngest.createFunction(
   },
   [
     // PARKED (#1230, 2026-09-26): the daily 06:00 run found every known brand
-    // already probed (100% `all_probed`) — one wasted run a day. Manual only;
-    // restore `{ cron: "0 6 * * *" }` when new brands arrive faster than an
-    // operator would trigger it.
-    { event: "known-brands/discover.manual-trigger.v1" },
+    // already probed (100% `all_probed`) — one wasted run a day. Event only:
+    // an operator, or Brand Subscriber activation (known-brand-seed.ts, #1304),
+    // sends it. Restore `{ cron: "0 6 * * *" }` when new brands arrive faster
+    // than activation + an operator trigger them.
+    { event: KNOWN_BRANDS_DISCOVER_EVENT },
   ],
   withAxiomLogging({ fnId: "known-brands-discover" }, async ({ step }) => {
-    const existingKeys = await step.run("load-existing", async () => {
+    // One step for the three reads (a step boundary each would push the
+    // finish floor past 10m): known_brands, the roster, the alias layer.
+    const { rows, roster, aliasRecord } = await step.run("load-existing", async () => {
       const sb = createServiceClient();
-      if (!sb) return [] as string[];
-      const { data } = await sb.from("known_brands").select("brand_name");
-      return (data ?? [])
-        .map((r) => deriveBrandKey((r.brand_name as string | null) ?? ""))
-        .filter((k): k is string => Boolean(k));
+      if (!sb) throw new Error("known-brands-discover: no service client");
+      const { data, error } = await sb
+        .from("known_brands")
+        .select("id, brand_name, brand_domain, contact_type, probed_at");
+      // Throw, don't default to []: an unread table makes every watched brand
+      // look uncovered, and the run would re-probe 15 known brands.
+      if (error) throw new Error(`known_brands read failed: ${error.message}`);
+      // The one roster: static seed + monitored_brands overlay. Fails safe to
+      // the static list (never empty) — see @askarthur/scam-engine/active-watchlist.
+      const w = await getActiveWatchlistDetailed();
+      return {
+        rows: (data ?? []) as KnownBrandCoverageRow[],
+        roster: { entries: w.entries, dynamicCount: w.dynamicCount },
+        aliasRecord: await loadAliasRecord(sb, "known-brands-discover"),
+      };
     });
-    const covered = new Set(existingKeys);
+    const canonicalKey = canonicalBrandKeyFn(buildBrandResolver(aliasRecord));
 
-    // Watched brands with no known_brands row yet, keyed on brand_key (which
-    // matches the upsert's ON CONFLICT(brand_name) arbiter — brand_key is
-    // derived from brand_name on both sides). Previously this keyed on
-    // brand_domain while the upsert keyed on brand_name with
-    // ignoreDuplicates: true, so any brand whose name already existed under a
-    // different domain was never written, stayed "uncovered", and got
-    // re-probed + re-counted as discovered on EVERY run — the perpetual
-    // "Probed 1 → discovered 1" digest. A probe domain is still required.
-    const candidates = AU_BRAND_WATCHLIST.filter((b) => {
-      const d = b.legitimate_domains?.[0]?.toLowerCase();
-      return Boolean(d) && !covered.has(deriveBrandKey(b.brand));
-    }).slice(0, DISCOVER_RUN_CAP);
+    const candidates = selectDiscoverCandidates(roster.entries, rows, canonicalKey);
+    const seeds = candidates.filter((c) => c.source === "seed").length;
 
     if (candidates.length === 0) {
-      return { ok: true, probed: 0, discovered: 0, reason: "all_probed" };
+      return {
+        ok: true,
+        probed: 0,
+        discovered: 0,
+        roster: roster.entries.length,
+        rosterDynamic: roster.dynamicCount,
+        reason: "all_probed",
+      };
     }
 
     let probed = 0;
     let discovered = 0;
+    let failed = 0;
     const discoveredBrands: string[] = [];
-    for (const b of candidates) {
-      const outcome = await step.run(`probe-${deriveBrandKey(b.brand)}`, async () => {
-        const domain = b.legitimate_domains[0];
-        const body = await fetchSecurityTxt(domain);
+    for (const c of candidates) {
+      const outcome = await step.run(`probe-${deriveBrandKey(c.brand)}`, async () => {
+        const body = await fetchSecurityTxt(c.domain);
         const found = body ? parseSecurityTxtContacts(body) : { emails: [], urls: [] };
-        const email = found.emails[0] ?? null;
-        const url = found.urls[0] ?? null;
-        const hasContact = Boolean(email || url);
 
         const sb = createServiceClient();
-        if (!sb) return { hasContact: false };
-        // security.txt on the brand's own apex domain is authoritative → mark
-        // VERIFIED. A miss writes a contact_type='none' ledger row so we don't
-        // re-probe it next run.
-        const { error } = await sb.from("known_brands").upsert(
-          {
-            brand_name: b.brand,
-            brand_domain: domain,
-            brand_key: deriveBrandKey(b.brand),
-            contact_type: email ? "email" : url ? "webform" : "none",
-            security_contact_email: email,
-            security_contact_url: url,
-            is_active: hasContact,
-            last_verified_at: hasContact ? new Date().toISOString() : null,
-            verified_by: hasContact ? "security_txt_discovery" : null,
-            source_url: hasContact ? `https://${domain}/.well-known/security.txt` : null,
-            notes: hasContact
-              ? "Auto-discovered from RFC 9116 security.txt."
-              : "Probed — no security.txt contact found.",
-          },
-          { onConflict: "brand_name", ignoreDuplicates: true },
-        );
+        if (!sb) return { ok: false, hasContact: false };
+        // security.txt on the brand's own apex domain is authoritative → the
+        // RPC marks it VERIFIED. Every call stamps probed_at (rotation).
+        const { data, error } = await sb.rpc("record_known_brand_probe", {
+          p_brand_name: c.brand,
+          p_brand_domain: c.domain,
+          p_brand_key: deriveBrandKey(c.brand),
+          p_email: found.emails[0] ?? null,
+          p_url: found.urls[0] ?? null,
+        });
         if (error) {
-          logger.warn("known-brands-discover: upsert failed", {
-            brand: b.brand,
+          logger.warn("known-brands-discover: probe record failed", {
+            brand: c.brand,
             error: error.message,
           });
-          return { hasContact: false };
+          return { ok: false, hasContact: false };
         }
-        return { hasContact };
+        const row = (data as Array<{ outcome: string }> | null)?.[0];
+        return { ok: true, hasContact: CONTACT_OUTCOMES.has(row?.outcome ?? "") };
       });
       probed++;
+      if (!outcome.ok) failed++;
       if (outcome.hasContact) {
         discovered++;
-        discoveredBrands.push(b.brand);
+        discoveredBrands.push(c.brand);
       }
     }
 
@@ -201,7 +306,8 @@ export const knownBrandsDiscover = inngest.createFunction(
       });
     }
 
-    logger.info("known-brands-discover: complete", { probed, discovered });
-    return { ok: true, probed, discovered };
+    // warn, not info: a low-frequency fn is invisible at INFO's 10% sampling.
+    logger.warn("known-brands-discover.summary", { probed, discovered, failed, seeds });
+    return { ok: true, probed, discovered, failed, seeds, roster: roster.entries.length };
   }),
 );

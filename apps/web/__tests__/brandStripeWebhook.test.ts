@@ -60,6 +60,23 @@ const state: MockState = vi.hoisted(() => ({
   canonical: null,
 }));
 
+// #1304: activation seeds the subscriber's known_brands row. Go-red
+// (2026-10-13): against the pre-#1304 webhook "an activated Brand Subscriber
+// gets its known_brands row seeded" FAILED (never called). The seed Module is
+// tested on its own (knownBrandSeed.test.ts); here only "when is it called".
+const seedMock = vi.hoisted(() =>
+  vi.fn(
+    async (): Promise<{ outcome: string; knownBrandId: number | null; probeRequested: boolean }> => ({
+      outcome: "created",
+      knownBrandId: 1,
+      probeRequested: true,
+    }),
+  ),
+);
+vi.mock("@/lib/clone-watch/known-brand-seed", () => ({
+  seedKnownBrandForSubscriber: seedMock,
+}));
+
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => ({
     rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => {
@@ -241,6 +258,36 @@ describe("webhook brand_monitor branch", () => {
       },
     ]);
     expect(state.unmatched).toHaveLength(0);
+  });
+
+  it("#1304: an activated Brand Subscriber gets its known_brands row seeded", async () => {
+    const res = await webhookPOST(makeWebhookReq(brandSubEvent("customer.subscription.updated")));
+    expect(res.status).toBe(200);
+    expect(seedMock).toHaveBeenCalledTimes(1);
+    expect(seedMock).toHaveBeenCalledWith(expect.anything(), { brandSubscriberId: 77 });
+  });
+
+  it("#1304: no seed for past_due, for an unmatched payment, or without a subscriber id", async () => {
+    await webhookPOST(
+      makeWebhookReq(brandSubEvent("customer.subscription.updated", { status: "past_due" })),
+    );
+    state.matched = 0;
+    await webhookPOST(makeWebhookReq(brandSubEvent("customer.subscription.updated")));
+    state.matched = 1;
+    await webhookPOST(
+      makeWebhookReq(
+        brandSubEvent("customer.subscription.updated", {
+          metadata: { org_id: ORG, user_id: "user-1", plan: "brand_monitor" },
+        }),
+      ),
+    );
+    expect(seedMock).not.toHaveBeenCalled();
+  });
+
+  it("#1304: a failed seed does not fail the webhook", async () => {
+    seedMock.mockResolvedValueOnce({ outcome: "failed", knownBrandId: null, probeRequested: false });
+    const res = await webhookPOST(makeWebhookReq(brandSubEvent("customer.subscription.updated")));
+    expect(res.status).toBe(200);
   });
 
   it("resolves the plus price to brand_monitor_plus", async () => {

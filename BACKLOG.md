@@ -294,9 +294,13 @@ alongside the AskSilver-inspired simplification (v67 migration widens the
   row and the candidate gate then treats the brand as covered forever, so a brand
   that publishes security.txt _after_ its first probe is never re-discovered
   (2026-07-12 fleet review corrected a header that wrongly claimed a 90d re-probe
-  already existed). To implement: add a `probed_at` column set on every probe,
-  switch the miss-path upsert off `ignoreDuplicates`, and re-include `'none'`
-  rows with `probed_at < now() - 90d` in the candidate set.
+  already existed). **Two of three steps done by v348 (#1304):** `probed_at`
+  exists and `record_known_brand_probe` stamps it on every probe, and the
+  probe write is no longer `ignoreDuplicates`. Remaining: re-include `'none'`
+  rows with `probed_at < now() - 90d` in `selectDiscoverCandidates` (and let
+  `record_known_brand_probe` refill a stale 'none' row, not only an unprobed
+  one). Note v348 backfilled `probed_at = now()` on the 236 probed misses, so a
+  90d window first opens 2027-01.
 - **Extension + mobile parity** — thumbs widget + simplified card + destination
   picker on both `apps/extension/src/components/ResultDisplay.tsx` and
   `apps/mobile/components/AnalysisResult.tsx`. Neither surface has any feedback
