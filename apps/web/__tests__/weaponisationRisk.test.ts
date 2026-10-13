@@ -165,6 +165,9 @@ describe("primarySignalType (moved home)", () => {
 });
 
 describe("selectTopRiskCandidates (recheck ranking)", () => {
+  // These rows carry no inferred_target_domain, so the RPC's brand_category
+  // (the pre-v344 fallback) is what scores; the lookup is unused.
+  const NO_CATEGORIES = new Map<string, string>();
   const row = (id: number, over: Record<string, unknown> = {}) => ({
     id,
     candidate_domain: `d${id}.click`,
@@ -189,7 +192,7 @@ describe("selectTopRiskCandidates (recheck ranking)", () => {
       row(2, { urlscan_classification: "likely_phishing", brand_category: "bank" }),
       row(3, { brand_category: "gov" }),
     ];
-    const top2 = selectTopRiskCandidates(rows, 2, NOW);
+    const top2 = selectTopRiskCandidates(rows, 2, NOW, NO_CATEGORIES);
     expect(top2.map((r) => r.id)).toEqual([2, 3]);
     expect(top2[0].risk).toBeGreaterThan(top2[1].risk);
   });
@@ -201,7 +204,7 @@ describe("selectTopRiskCandidates (recheck ranking)", () => {
       row(1, { last_rechecked_at: null }),
       row(4, { last_rechecked_at: null }),
     ];
-    const all = selectTopRiskCandidates(rows, 4, NOW);
+    const all = selectTopRiskCandidates(rows, 4, NOW, NO_CATEGORIES);
     expect(all.map((r) => r.id)).toEqual([1, 4, 2, 3]);
   });
 
@@ -223,11 +226,11 @@ describe("selectTopRiskCandidates (recheck ranking)", () => {
 
     // Without a floor this row is invisible at any batch size below the pool.
     expect(
-      selectTopRiskCandidates([...hot, starved], 10, NOW, 0).map((r) => r.id),
+      selectTopRiskCandidates([...hot, starved], 10, NOW, NO_CATEGORIES, 0).map((r) => r.id),
     ).not.toContain(1);
 
     // With the production 20% share it is guaranteed a slot.
-    const withFloor = selectTopRiskCandidates([...hot, starved], 10, NOW);
+    const withFloor = selectTopRiskCandidates([...hot, starved], 10, NOW, NO_CATEGORIES);
     expect(withFloor.map((r) => r.id)).toContain(1);
     expect(withFloor).toHaveLength(10);
     // The reserve costs exactly its share — the rest is still risk-ranked.
@@ -241,14 +244,14 @@ describe("selectTopRiskCandidates (recheck ranking)", () => {
       row(3, { brand_category: "gov" }),
     ];
     // floor(2 * 0.2) === 0 — a one-slot reserve would be half of a 2-row batch.
-    expect(selectTopRiskCandidates(rows, 2, NOW).map((r) => r.id)).toEqual([2, 3]);
+    expect(selectTopRiskCandidates(rows, 2, NOW, NO_CATEGORIES).map((r) => r.id)).toEqual([2, 3]);
   });
 
   it("never returns duplicates when the reserve overlaps the risk selection", () => {
     const rows = Array.from({ length: 30 }, (_, i) =>
       row(i + 1, { last_rechecked_at: `2026-07-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z` }),
     );
-    const picked = selectTopRiskCandidates(rows, 10, NOW);
+    const picked = selectTopRiskCandidates(rows, 10, NOW, NO_CATEGORIES);
     expect(picked).toHaveLength(10);
     expect(new Set(picked.map((r) => r.id)).size).toBe(10);
   });

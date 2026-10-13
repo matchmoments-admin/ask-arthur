@@ -1253,6 +1253,18 @@ unactioned" block; per-row `risk_score` snapshots into the report ledger).
 v1 weights are hand-set priors — revisit once weaponisation outcomes
 accumulate.
 
+**Input assembly (#1298, v344):** both consumers score through
+`apps/web/lib/clone-watch/alert-risk.ts` — `scoreAlertRisk(row, categories, nowMs)`
+takes the alert row as the caller read it (recheck worklist row or clone-cohort
+row) plus a `BrandCategoryLookup`, so the two rank an alert identically by
+construction (`__tests__/alertRiskAgreement.test.ts`). The category rule is the
+non-null `known_brands.brand_category` of the lowest `id` per `brand_domain`
+(`brandCategoryLookup`); the recheck RPC returns `inferred_target_domain` as the
+lookup key (v344). Before #1298 the recheck lane skipped the attribution
+reader's parent-zone guard (`first_seen_at` was not passed — appley.eu.cc scored
+as registered 1997; 26 of 467 pool rows on 2026-10-13) and read the category
+from an unordered `LIMIT 1` that could return a NULL-category twin.
+
 ### Reporter liveness pre-check (F3, three-valued since v248)
 
 Before filing, the issue reporter GETs each candidate URL
