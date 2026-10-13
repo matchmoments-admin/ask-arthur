@@ -233,48 +233,55 @@ export interface BrandPlan {
   monthlyAud: number | null;
   /** Max brands monitored. null = portfolio / by agreement. */
   brands: number | null;
-  /** Included managed takedowns per month. null = unlimited in agreed scope. */
+  /** Included managed takedowns per month. null = not capped (#1295: counted
+   *  and shown, never capped yet). */
   takedownsPerMonth: number | null;
   /** Sales motion — self-serve checkout vs contact/partnership. */
   motion: "self_serve" | "contact" | "partnership";
-  /** Public on the pricing page? Partnership pilots are sales-led, not listed. */
+  /** Shown on the public pricing page? (#1295: only the pilot, until the
+   *  first customer.) */
   public: boolean;
   blurb: string;
 }
 
 export const BRAND_PLANS: Record<BrandPlanKey, BrandPlan> = {
+  // #1295 (founder, 2026-10-13): sell ONLY the manual A$300 pilot until the
+  // first customer; the self-serve tiers are hidden (public: false) and pricing
+  // stays in fog. Blurbs promise only what the entitlement Module
+  // (apps/web/lib/clone-watch/brand-subscriber.ts) enforces. Managed takedowns
+  // are counted, not capped — takedownsPerMonth is null on every plan.
   brand_pilot: {
     key: "brand_pilot",
-    name: "Partnership Pilot",
+    name: "Brand Protection Pilot",
     monthlyAud: 300,
     brands: 1,
-    takedownsPerMonth: 5,
+    takedownsPerMonth: null,
     motion: "partnership",
-    public: false,
+    public: true,
     blurb:
-      "For police, government and non-profits. A low-cost pilot to take pressure off frontline scam response while we learn what your team needs.",
+      "One brand, set up by hand with you. Daily priority rescans of its live lookalikes, an urgent alert when one starts serving phishing, a monthly evidence report, and managed takedown escalation.",
   },
   brand_monitor: {
     key: "brand_monitor",
     name: "Brand Monitor",
     monthlyAud: 1950,
     brands: 1,
-    takedownsPerMonth: 5,
+    takedownsPerMonth: null,
     motion: "self_serve",
-    public: true,
+    public: false,
     blurb:
-      "Continuous lookalike-domain monitoring for one brand, with an evidence dashboard and managed takedowns.",
+      "One brand: daily priority rescans of its live lookalikes, urgent weaponised-lookalike alerts, a monthly evidence report and managed takedown escalation.",
   },
   brand_monitor_plus: {
     key: "brand_monitor_plus",
     name: "Brand Monitor+",
     monthlyAud: 2950,
     brands: 3,
-    takedownsPerMonth: 15,
+    takedownsPerMonth: null,
     motion: "self_serve",
-    public: true,
+    public: false,
     blurb:
-      "Up to three brands, higher takedown allotment, and priority evidence support.",
+      "Up to three brands, each with daily priority rescans, urgent weaponised-lookalike alerts, a monthly evidence report and managed takedown escalation.",
   },
   brand_enterprise: {
     key: "brand_enterprise",
@@ -283,8 +290,8 @@ export const BRAND_PLANS: Record<BrandPlanKey, BrandPlan> = {
     brands: null,
     takedownsPerMonth: null,
     motion: "contact",
-    public: true,
+    public: false,
     blurb:
-      "Portfolio monitoring, unlimited in-scope takedowns, threat-intel feed and SPF evidence tooling for banks, telcos and super funds.",
+      "A portfolio of brands, by agreement.",
   },
 } as const;

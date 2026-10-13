@@ -29,6 +29,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 import { readReadinessGate } from "@/lib/clone-watch/readiness-data";
+import { entitlementsFor } from "@/lib/clone-watch/brand-subscriber";
 
 type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
 
@@ -55,6 +56,10 @@ export const BRAND_SEND_CHECKS = [
   /** brand_contact_directory row for this brand carries this recipient on an
    *  accepted channel (security_txt / fraud_inbox). */
   "directory",
+  /** #1295: the recipient is the alert contact of an ENTITLED Brand
+   *  Subscriber (monitored_brands, v347) — the subscriber's own contact,
+   *  which outranks the directory. Entitlement via brand-subscriber.ts. */
+  "subscriber_contact",
 ] as const;
 export type BrandSendCheck = (typeof BRAND_SEND_CHECKS)[number];
 
@@ -152,6 +157,16 @@ export const BRAND_SEND_PROFILES = {
     checks: ["flags", "brake", "unsubscribe"],
     flags: ["cloneListRequest"],
   },
+  /** A Brand Subscriber's own contact (#1295): the weaponised alert and the
+   *  monthly report routed to the subscriber instead of the directory. It is
+   *  real brand contact, so the #371 sign-off, readiness and the outreach
+   *  brake apply exactly as for stewardship; opt-outs apply. In place of
+   *  `verified_contact` / `directory` (contacts for UNSOLICITED mail), the
+   *  recipient must be the alert contact of an entitled — therefore
+   *  ownership-verified, paying — subscriber. */
+  subscriber: {
+    checks: ["legal_signoff", "readiness", "brake", "unsubscribe", "subscriber_contact"],
+  },
 } as const satisfies Record<string, BrandSendProfileSpec>;
 
 export type BrandSendProfile = keyof typeof BRAND_SEND_PROFILES;
@@ -179,6 +194,8 @@ export interface BrandSendTarget {
   brand?: string | null;
   /** known_brands.brand_key (the `verified_contact` check). */
   brandKey?: string | null;
+  /** monitored_brands.id (the `subscriber_contact` check). */
+  subscriberId?: number | null;
   /** Free-form context for the override record (no PII). */
   context?: Record<string, unknown>;
 }
@@ -202,6 +219,8 @@ export const REFUSAL_STATUS: Record<string, number> = {
   directory_lookup_failed: 500,
   directory_row_missing: 409,
   recipient_mismatch: 409,
+  subscriber_not_entitled: 409,
+  subscriber_unreadable: 503,
   override_unrecorded: 503,
   shadow_recipient_not_internal: 403,
   gate_error: 503,
@@ -379,6 +398,7 @@ const UNREADABLE_CODE: Partial<Record<BrandSendCheck, string>> = {
   unsubscribe: "unsubscribe_unreadable",
   verified_contact: "contact_unreadable",
   directory: "directory_lookup_failed",
+  subscriber_contact: "subscriber_unreadable",
 };
 
 async function runRecipientCheck(
@@ -447,6 +467,44 @@ async function runRecipientCheck(
             check,
             code: "recipient_mismatch",
             detail: `recipient ${hash(recipient)} vs directory ${hash(row.recipient ?? "")} (${row.channel_type})`,
+          },
+        ];
+      }
+      return [];
+    }
+    case "subscriber_contact": {
+      if (!target.subscriberId) {
+        return [{ check, code: "subscriber_not_entitled", detail: "no subscriber id" }];
+      }
+      const { data: row, error } = await sb
+        .from("monitored_brands")
+        .select("plan, subscription_status, verification_status, is_active, alert_contact_email")
+        .eq("id", target.subscriberId)
+        .maybeSingle();
+      if (error) throw new Error(`monitored_brands: ${error.message}`);
+      const r = row as {
+        plan: string | null;
+        subscription_status: string | null;
+        verification_status: string | null;
+        is_active: boolean | null;
+        alert_contact_email: string | null;
+      } | null;
+      if (!r) return [{ check, code: "subscriber_not_entitled", detail: "no such subscriber" }];
+      const e = entitlementsFor({
+        plan: r.plan,
+        subscriptionStatus: r.subscription_status,
+        verificationStatus: r.verification_status,
+        isActive: r.is_active,
+      });
+      if (!e.weaponisedAlert && !e.monthlyReport) {
+        return [{ check, code: "subscriber_not_entitled" }];
+      }
+      if ((r.alert_contact_email ?? "").trim().toLowerCase() !== recipient.toLowerCase()) {
+        return [
+          {
+            check,
+            code: "recipient_mismatch",
+            detail: `recipient ${hash(recipient)} vs subscriber contact ${hash(r.alert_contact_email ?? "")}`,
           },
         ];
       }

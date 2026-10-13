@@ -77,10 +77,17 @@ function builder(table: string) {
   const res = () =>
     table === "clone_watch_readiness" ? readiness : (tableResult[table] ?? { data: null, error: null });
   const b: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "neq", "in", "order", "limit", "update", "is", "not"]) {
+  for (const m of ["select", "eq", "neq", "in", "order", "limit", "update", "is", "not", "contains"]) {
     b[m] = () => b;
   }
-  b.maybeSingle = async () => res();
+  // monitored_brands answers a list read (the subscriber lookup) and a single
+  // read (the gate's subscriber_contact check) from the same fixture.
+  b.maybeSingle = async () => {
+    const r = res();
+    return table === "monitored_brands" && Array.isArray(r.data)
+      ? { data: r.data[0] ?? null, error: r.error }
+      : r;
+  };
   b.then = (ok: (v: Res) => unknown, bad: (e: unknown) => unknown) =>
     Promise.resolve(res()).then(ok, bad);
   return b;
@@ -117,6 +124,7 @@ beforeEach(() => {
     error: null,
   };
   tableResult.brand_report_unsubscribes = { data: null, error: null };
+  tableResult.monitored_brands = { data: [], error: null };
   tableResult.known_brands = { data: { last_verified_at: "2026-09-01T00:00:00Z" }, error: null };
   // Batch route: an engaged brake is the first stop AFTER the gate, so a 503
   // cost_brake_engaged proves the gate let the request through.
@@ -300,5 +308,83 @@ describe("Brand Send Gate — gaps closed on the real routes", () => {
     expect(status).toBe(409);
     expect(body.error).toBe("recipient_unsubscribed");
     expect(resendSend).not.toHaveBeenCalled();
+  });
+});
+
+// ── #1295: the Brand Subscriber's contact outranks the known_brands contact ──
+// Go-red (2026-10-13): the route with `route` forced to the directory kind
+// (the pre-#1295 recipient) FAILED "a real send goes to the subscriber's own
+// contact". The #371 case is a guard, not a go-red: stewardship-real carries
+// the same sign-off, so it passes either way — it pins that the subscriber
+// path did not drop it.
+describe("stewardship send — Brand Subscriber routing (#1295)", () => {
+  const SUBSCRIBER = {
+    id: 9,
+    org_id: "o",
+    brand_name: "Australia Post",
+    brand_normalized: "australiapost",
+    legitimate_domains: ["auspost.com.au"],
+    plan: "brand_pilot",
+    subscription_status: "active",
+    verification_status: "verified",
+    is_active: true,
+    alert_contact_email: "fraud-team@auspost.com.au",
+    alert_contact_name: null,
+    stripe_subscription_id: null,
+    activated_at: null,
+  };
+  afterEach(() => {
+    rpc.mockReset().mockResolvedValue({ data: [], error: null });
+  });
+
+  it("a real send goes to the subscriber's own contact, not the known_brands one", async () => {
+    tableResult.monitored_brands = { data: [SUBSCRIBER], error: null };
+    tableResult.feature_brakes = { data: null, error: null };
+    rpc.mockResolvedValue({ data: false, error: null });
+    const { status } = await stewardshipSend();
+    expect(status).toBe(200);
+    expect(resendSend.mock.calls[0][0].to).toEqual(["fraud-team@auspost.com.au"]);
+  });
+
+  it("the subscriber send needs the #371 sign-off — nothing sent without it", async () => {
+    tableResult.monitored_brands = { data: [SUBSCRIBER], error: null };
+    tableResult.feature_brakes = { data: null, error: null };
+    flags.brandStewardshipSend = false;
+    try {
+      const { status, body } = await stewardshipSend();
+      expect(status).toBe(403);
+      expect(body.error).toBe("send_disabled");
+      expect(resendSend).not.toHaveBeenCalled();
+    } finally {
+      flags.brandStewardshipSend = true;
+    }
+  });
+
+  it("a canceled subscriber falls back to the known_brands contact", async () => {
+    tableResult.monitored_brands = {
+      data: [{ ...SUBSCRIBER, subscription_status: "canceled" }],
+      error: null,
+    };
+    tableResult.feature_brakes = { data: null, error: null };
+    rpc.mockResolvedValue({ data: false, error: null });
+    const { status } = await stewardshipSend();
+    expect(status).toBe(200);
+    expect(resendSend.mock.calls[0][0].to).toEqual(["security@auspost.com.au"]);
+  });
+
+  it("an unreadable subscriber store refuses (never falls back to unsolicited mail)", async () => {
+    tableResult.monitored_brands = { data: null, error: { message: "down" } };
+    const { status, body } = await stewardshipSend();
+    expect(status).toBe(503);
+    expect(body.error).toBe("subscriber_unreadable");
+    expect(resendSend).not.toHaveBeenCalled();
+  });
+
+  it("shadow mode still sends only to our inbox", async () => {
+    tableResult.monitored_brands = { data: [SUBSCRIBER], error: null };
+    shadowRecipient = "shadow@askarthur.au";
+    const { status } = await stewardshipSend();
+    expect(status).toBe(200);
+    expect(resendSend.mock.calls[0][0].to).toEqual(["shadow@askarthur.au"]);
   });
 });

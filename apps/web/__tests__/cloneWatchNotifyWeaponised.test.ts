@@ -5,6 +5,7 @@ import {
   buildWeaponisedAlertProps,
   buildWeaponisedSubject,
   buildWeaponisedTelegramMessage as buildWeaponisedTelegramHtml,
+  subscriberShadowStamp,
 } from "@/app/api/inngest/functions/clone-watch-notify-weaponised";
 import { WEAPONISED_CLONE_SLOTS, EMAIL_TEMPLATES } from "@/lib/email/copy-registry";
 
@@ -154,6 +155,20 @@ describe("buildWeaponisedTelegramMessage", () => {
     expect(msg).toContain("https://bugcrowd.com/kmart-vdp");
   });
 
+  it("subscriber_shadow (#1295): says nothing was sent and why", () => {
+    const msg = buildWeaponisedTelegramMessage({
+      stage: "subscriber_shadow",
+      brand: "Acme",
+      candidateDomain: "acme-login.com",
+      via: "recheck",
+      detail: "gate: send_disabled",
+    });
+    expect(msg).toContain("Brand Subscriber");
+    expect(msg).toContain("Shadow until #371");
+    expect(msg).toContain("nothing was sent");
+    expect(msg).toContain("send_disabled");
+  });
+
   it("escapes HTML in attacker-controlled domain strings", () => {
     const msg = buildWeaponisedTelegramMessage({
       stage: "no_contact",
@@ -256,5 +271,25 @@ describe("copy registry", () => {
     expect(WEAPONISED_CLONE_SLOTS.what_you_can_do.default).not.toContain(
       "we will file",
     );
+  });
+});
+
+describe("subscriberShadowStamp (#1295)", () => {
+  it("records the routing decision and the gate's answer, never the address", () => {
+    const stamp = subscriberShadowStamp(
+      { kind: "subscriber", recipient: "sec@acme.com.au", subscriberId: 7, brandName: "Acme" },
+      { allowed: false, codes: ["send_disabled"] },
+      "recheck",
+      "2026-10-13T00:00:00.000Z",
+    );
+    expect(stamp).toEqual({
+      status: "subscriber_shadow",
+      brand_subscriber_id: 7,
+      gate_allowed: false,
+      gate_codes: ["send_disabled"],
+      via: "recheck",
+      at: "2026-10-13T00:00:00.000Z",
+    });
+    expect(JSON.stringify(stamp)).not.toContain("@");
   });
 });
