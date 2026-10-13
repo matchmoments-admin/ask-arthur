@@ -17,9 +17,17 @@
 -- recheck ranking depended on heap order. (Today every one of the 55 happens
 -- to resolve to the categorised row; nothing guarantees it.)
 --
--- WHAT. list_clone_alerts_for_recheck — re-created from the LIVE v334 body
--- (pg_get_functiondef 2026-10-13, identical to migration-v334 modulo
--- CREATE OR REPLACE), every branch kept. Two changes:
+-- REQUIRES v343 (#1307) APPLIED FIRST; MERGE #1307 BEFORE #1305.
+-- v343 (migration-v343-clone-dns-precheck-column.sql) also redefines this
+-- function: it swaps the `urlscan_evidence->>'status' = '400'` dead test for
+-- the NULL-safe public.clone_alert_dns_dead(dns_precheck, urlscan_evidence)
+-- predicate. This file is built from v343's body so applying it after v343
+-- keeps that predicate exactly; applying it BEFORE v343 fails at CREATE (the
+-- guard below raises, and the body references v343's function and column).
+--
+-- WHAT. list_clone_alerts_for_recheck — re-created from v343's body (itself
+-- the live v334 body with the dead predicate swapped), every branch kept.
+-- Two changes:
 --   1. One more OUT column, inferred_target_domain. The lane now resolves the
 --      category in TypeScript through the SAME lookup stewardship uses
 --      (apps/web/lib/clone-watch/alert-risk.ts brandCategoryLookup), so both
@@ -32,10 +40,20 @@
 -- the same arguments and ignores the extra column.
 --
 -- Idempotent: DROP IF EXISTS + CREATE inside BEGIN/COMMIT. Read-only function;
--- no data touched. Rollback: re-run the list_clone_alerts_for_recheck block of
--- migration-v334-recheck-dns-change-gate.sql (DROP + CREATE).
+-- no data touched. Rollback: DROP this function, then re-run the
+-- list_clone_alerts_for_recheck block of
+-- migration-v343-clone-dns-precheck-column.sql (CREATE OR REPLACE).
 
 BEGIN;
+
+-- Ordering guard: v343 must already be applied.
+DO $guard$
+BEGIN
+  IF pg_catalog.to_regprocedure('public.clone_alert_dns_dead(text, jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'v344 requires v343 (#1307): public.clone_alert_dns_dead(text, jsonb) is missing — apply v343 first';
+  END IF;
+END
+$guard$;
 
 DROP FUNCTION IF EXISTS public.list_clone_alerts_for_recheck(integer, integer, integer);
 
@@ -72,16 +90,12 @@ AS $function$
   ) kb ON true
   -- v330: is this a not-a-clone audit sample still judged is_clone=false?
   LEFT JOIN LATERAL (
-    -- Same fail-closed rule as apply_clone_urlscan_verdict: a sample stays an
-    -- audit row until it is explicitly re-judged is_clone=true.
     SELECT (cwc.is_clone IS NOT TRUE AND EXISTS (
       SELECT 1 FROM public.clone_watch_not_a_clone_samples nac
       WHERE nac.alert_id = sca.id
     )) AS nac_audit
   ) aud ON true
-  -- v334: the queue clock, defined ONCE. v330's clock (an audit sample's
-  -- starts at its audit scan), moved forward by the lane's DNS-unchanged
-  -- stamp. GREATEST ignores NULLs: NULL only when neither clock exists.
+  -- v334: the queue clock, defined ONCE.
   LEFT JOIN LATERAL (
     SELECT GREATEST(
       CASE WHEN aud.nac_audit THEN COALESCE(sca.last_rechecked_at, sca.urlscan_scanned_at)
@@ -89,22 +103,26 @@ AS $function$
       sca.recheck_dns_checked_at
     ) AS at
   ) clk ON true
+  -- v343: the ONE dead predicate (never NULL).
+  CROSS JOIN LATERAL (
+    SELECT public.clone_alert_dns_dead(sca.dns_precheck, sca.urlscan_evidence) AS dead
+  ) dd
   WHERE sca.source = 'nrd'
     AND sca.lifecycle_state IN ('monitoring', 'declined')
     AND sca.first_seen_at > pg_catalog.now() - pg_catalog.make_interval(days => 90)
-    -- v326: dead-domain dormancy (see header). Same predicate as
+    -- v326: dead-domain dormancy. Same predicate as
     -- count_clone_recheck_dormant_dead — change both together.
     AND NOT (
       sca.urlscan_uuid IS NULL
       AND sca.urlscan_failure_streak >= 8
-      AND COALESCE(sca.urlscan_evidence ->> 'status', '') = '400'
+      AND dd.dead
     )
     AND (
       clk.at IS NULL
       OR clk.at
          < pg_catalog.now() - pg_catalog.make_interval(
              hours => CASE
-               WHEN sca.urlscan_evidence ->> 'status' = '400'
+               WHEN dd.dead
                  THEN GREATEST(1, p_dead_cadence_hours)
                -- v330: sampled not-a-clones are low-yield — weekly.
                WHEN aud.nac_audit
@@ -122,12 +140,11 @@ AS $function$
     )
   ORDER BY clk.at ASC NULLS FIRST,
            sca.id ASC
-  -- v334: 500 -> 1000 (the lane over-fetches 1,000 and DNS-reads 600).
   LIMIT GREATEST(1, LEAST(p_limit, 1000));
 $function$;
 
 COMMENT ON FUNCTION public.list_clone_alerts_for_recheck(integer, integer, integer) IS
-  'Recheck worklist (clone-watch-lifecycle-recheck): monitoring/declined NRD alerts < 90 days, dead-dormant held out (v326), due by the cadence CASE, stalest first, LIMIT clamped to 1000 (v334). due_total = rows due before the LIMIT (v328). Sampled not-a-clones (v330) run weekly, clocked from their audit scan. v334: queue clock = GREATEST(that clock, recheck_dns_checked_at); returns the DNS gate inputs. v344: returns inferred_target_domain (the risk scorer resolves the category via alert-risk.ts); brand_category is deterministic (lowest-id non-null) and kept for the deploy window only.';
+  'Recheck worklist (clone-watch-lifecycle-recheck): monitoring/declined NRD alerts < 90 days, dead-dormant held out (v326), due by the cadence CASE, stalest first, LIMIT clamped to 1000 (v334). due_total = rows due before the LIMIT (v328). Sampled not-a-clones (v330) run weekly, clocked from their audit scan. v334: queue clock = GREATEST(that clock, recheck_dns_checked_at); returns the DNS gate inputs. v343: dead = clone_alert_dns_dead(dns_precheck, urlscan_evidence). v344: returns inferred_target_domain (the risk scorer resolves the category via alert-risk.ts); brand_category is deterministic (lowest-id non-null) and kept for the deploy window only.';
 
 REVOKE ALL ON FUNCTION public.list_clone_alerts_for_recheck(integer, integer, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.list_clone_alerts_for_recheck(integer, integer, integer) TO service_role;
