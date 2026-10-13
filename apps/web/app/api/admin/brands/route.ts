@@ -18,6 +18,8 @@ import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { canonicalBrandKey } from "@/lib/clone-watch/canonical-brand-key";
 import { logger } from "@askarthur/utils/logger";
+import { seedKnownBrandForSubscriber } from "@/lib/clone-watch/known-brand-seed";
+import { SCORED_BRAND_CATEGORIES } from "@/lib/clone-watch/weaponisation-risk";
 
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
@@ -40,6 +42,9 @@ const Body = z.object({
   /** #1295: the Brand Subscriber's own alert contact (weaponised alerts +
    *  monthly report). Ignored for the house org, which never subscribes. */
   alertContactEmail: z.string().trim().toLowerCase().email().max(254).optional(),
+  /** #1304: the brand's category for the weaponisation-risk score, written to
+   *  its known_brands row on activation. Ignored for the house org. */
+  brandCategory: z.enum(SCORED_BRAND_CATEGORIES).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -52,8 +57,16 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const { orgId, brandName, legitimateDomains, aliases, plan, verificationMethod, alertContactEmail } =
-    parsed.data;
+  const {
+    orgId,
+    brandName,
+    legitimateDomains,
+    aliases,
+    plan,
+    verificationMethod,
+    alertContactEmail,
+    brandCategory,
+  } = parsed.data;
   const isHouse = orgId === HOUSE_ORG_ID;
 
   const bad = legitimateDomains.filter((d) => !DOMAIN.test(d));
@@ -140,5 +153,18 @@ export async function POST(req: NextRequest) {
     plan,
     domains: legitimateDomains.length,
   });
-  return NextResponse.json({ ok: true, brand: data });
+  // #1304: a customer-org row is an active Brand Subscriber from here, so it
+  // gets its known_brands row now (category + a security.txt probe) — not when
+  // it is verified onto the overlay. House rows reach known_brands through the
+  // discover roster once verified.
+  const knownBrand =
+    !isHouse && data?.id
+      ? await seedKnownBrandForSubscriber(sb, {
+          brandSubscriberId: Number(data.id),
+          brandName,
+          brandCategory: brandCategory ?? null,
+        })
+      : null;
+
+  return NextResponse.json({ ok: true, brand: data, knownBrand });
 }

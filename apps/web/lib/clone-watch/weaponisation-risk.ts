@@ -106,6 +106,21 @@ const BRAND_CATEGORY_POINTS: Record<string, number> = {
   retailer: 4,
 };
 
+/** The categories the formula scores — what an operator may assign a Brand
+ *  Subscriber's known_brands row (#1304). `retailer` is a legacy synonym of
+ *  `retail` (v49 seed) and is not offered. */
+export const SCORED_BRAND_CATEGORIES = [
+  "bank",
+  "finance",
+  "super",
+  "crypto",
+  "gov",
+  "telco",
+  "tech",
+  "retail",
+] as const;
+export type ScoredBrandCategory = (typeof SCORED_BRAND_CATEGORIES)[number];
+
 /** Fresh NRDs weaponise; WHOIS-hidden age is mildly elevated. Thresholds
  *  mirror whois-cached's domainAgeBand structurally but are owned here —
  *  this module is THE risk formula, not a copy of another feature's band. */

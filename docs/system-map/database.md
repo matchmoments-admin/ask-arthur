@@ -109,7 +109,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 - `brand_impersonation_alerts` — Detected brand abuse. Auto-escalate trigger v49.
 - `flagged_ads` — Suspicious ads (platform, url, copy, media_urls, review_status). Auto-escalate trigger v53.
-- `known_brands` — Canonical brand registry. v119.
+- `known_brands` — Canonical brand registry. v119. Per-brand category (the weaponisation-risk input, read by `brand_domain`, lowest-id non-null — #1305) and the brand's PUBLIC RFC 9116 security contact. `probed_at` (v348, #1304): when `known-brands-discover` last probed the brand; an unprobed `contact_type='none'` row is a Brand Subscriber seed awaiting its probe. Writers: `seed_known_brand_for_subscriber` (v348, on subscriber activation — category gap only, never a contact) and `record_known_brand_probe` (v348, the discover fn's one writer — always stamps `probed_at`, never overwrites a curated contact); both service-role.
 
 ### Fraud Manager & Investigation
 

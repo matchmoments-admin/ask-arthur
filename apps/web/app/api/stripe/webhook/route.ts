@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { seedKnownBrandForSubscriber } from "@/lib/clone-watch/known-brand-seed";
 import {
   resolvePhoneFootprintEntitlement,
   isPhoneFootprintPrice,
@@ -703,6 +704,13 @@ async function upsertBrandSubscription(
       brandSubscriberId,
     });
     await unmatched("no_subscriber_row");
+  }
+
+  // #1304: an activated Brand Subscriber gets its known_brands row (category
+  // gap filled / contact-less seed + one discover probe). Never throws — the
+  // activation above already succeeded and the webhook must still return 200.
+  if (matched > 0 && status === "active" && brandSubscriberId !== null) {
+    await seedKnownBrandForSubscriber(supabase, { brandSubscriberId });
   }
 
   logger.info("Brand Monitor subscription synced", {

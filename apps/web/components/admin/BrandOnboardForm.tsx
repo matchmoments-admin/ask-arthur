@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SCORED_BRAND_CATEGORIES } from "@/lib/clone-watch/weaponisation-risk";
 
 // Pilot-brand onboarding form (#953). The first monitored_brands row used to
 // mean hand-writing SQL — on the day a pilot converts, which is the worst
@@ -27,6 +28,7 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
   const [aliases, setAliases] = useState("");
   const [plan, setPlan] = useState<string>("brand_pilot");
   const [alertContact, setAlertContact] = useState("");
+  const [category, setCategory] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -53,6 +55,7 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
           aliases: parseList(aliases),
           plan,
           ...(alertContact.trim() ? { alertContactEmail: alertContact.trim() } : {}),
+          ...(category && orgId !== HOUSE_ORG.id ? { brandCategory: category } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -68,12 +71,15 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
       }
       setMsg({
         kind: "ok",
-        text: `Created "${json.brand.brand_name}" (key: ${json.brand.brand_normalized}) — status ${json.brand.verification_status}. Verify it before it goes live.`,
+        text: `Created "${json.brand.brand_name}" (key: ${json.brand.brand_normalized}) — status ${json.brand.verification_status}. Verify it before it goes live.${
+          json.knownBrand ? ` Known-brands row: ${json.knownBrand.outcome}${json.knownBrand.probeRequested ? " (security.txt probe queued)" : ""}.` : ""
+        }`,
       });
       setBrandName("");
       setDomains("");
       setAliases("");
       setAlertContact("");
+      setCategory("");
     } catch {
       setMsg({ kind: "err", text: "Request failed." });
     } finally {
@@ -120,6 +126,18 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
           <input type="email" value={alertContact} onChange={(e) => setAlertContact(e.target.value)}
             placeholder="security@brand.com.au"
             className="mt-1 w-full rounded border border-border-light px-3 py-2 text-sm" />
+        </div>
+      )}
+      {orgId !== HOUSE_ORG.id && (
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gov-slate">
+            Category <span className="font-normal normal-case text-slate-400">— optional; scores this brand&rsquo;s lookalikes (bank/finance/super/crypto weigh most). Fills a gap only, never overwrites a curated category</span>
+          </label>
+          <select value={category} onChange={(e) => setCategory(e.target.value)}
+            className="mt-1 w-full rounded border border-border-light px-3 py-2 text-sm">
+            <option value="">— none —</option>
+            {SCORED_BRAND_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
       )}
       <div>

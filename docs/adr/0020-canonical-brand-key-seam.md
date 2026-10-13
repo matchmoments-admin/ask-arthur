@@ -207,3 +207,23 @@ anywhere on the subscriber path. Not changed here: the stewardship ledger still 
   v197 (clone-triage corroboration), v198 (brand_register), v294–v297
   (brand_coverage_history + the two-key bridge above), v319 (the monthly
   store's `brand_normalized` + freeze, 2026-09-23 amendment).
+
+## Amendment 2026-10-13 — known_brands joins the roster on the Canonical Brand, and keeps its domain (v348, #1304)
+
+`known_brands` is keyed by `brand_name` (UNIQUE) and read by `brand_domain` (the
+risk category, #1305; the stewardship clone ledger), with `brand_key` holding the
+`deriveBrandKey` slug. `known-brands-discover` decided "does this watched brand
+have a row?" on that slug, and enumerated only the static array, so a Brand
+Subscriber never got a row. **Decision:** do not re-key `known_brands`. The
+roster (the Active Watchlist, CONTEXT.md) is matched to it on the Canonical
+Brand (`brand_normalize(resolve_brand(name) ?? name)`) **or** any of the
+brand's legitimate domains; the slug is no longer consulted. Measured
+2026-10-13: by Canonical Brand all 293 static entries have a row, by domain 292
+(Google: `google.com` vs the v49 row's `google.com.au`), and 5 Canonical Brands
+have two rows (a categorised v49/v179 row plus a NULL-category discovery twin —
+the same twins #1305 orders deterministically). Re-keying would merge those
+twins, which carry different contacts, and change the domain key the risk
+lookup and the stewardship ledger join on; the read-side match gives the
+roster the one key without that migration. The domain stays a second match for
+the same reason it is one for a subscriber's lookalikes (the 2026-10-13
+amendment above): it is the alert discriminator.
