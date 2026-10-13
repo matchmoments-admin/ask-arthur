@@ -7,7 +7,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { hasPermission, type OrgRole } from "@askarthur/types";
-import { brandNormalize } from "@askarthur/shopfront-glue";
+import { canonicalBrandKey } from "@/lib/clone-watch/canonical-brand-key";
 import { createPendingBrandSubscriber } from "@/lib/clone-watch/brand-subscriber";
 
 // Brand Monitor checkout (Wave 3 of clone-watch-enforcement-and-monetisation;
@@ -127,10 +127,7 @@ export async function POST(req: NextRequest) {
     // brand_normalize — so "AusPost" and "Australia Post" are one subscriber,
     // and the key matches clone alerts' target_brand_normalized. An alias
     // read failure only weakens canonicalisation (falls back to the raw name).
-    const { data: canonical } = await supabase.rpc("resolve_brand", { p_raw: brandName });
-    const brandNormalized = brandNormalize(
-      typeof canonical === "string" && canonical ? canonical : brandName,
-    );
+    const brandNormalized = await canonicalBrandKey(supabase, brandName);
     if (!brandNormalized) {
       return NextResponse.json(
         { error: "validation_error", message: "brandName has no letters or digits" },

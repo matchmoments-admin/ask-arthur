@@ -9,14 +9,14 @@
 // Deliberate constraints, all inherited from v207's own schema rather than
 // invented here: verification_status starts 'pending' (the matcher index only
 // covers verified+active, so a new row can't silently go live unverified);
-// brand_normalized comes from the CANONICAL brandNormalize() shared with the
-// SQL function and the seed generator, never a local re-implementation.
+// brand_normalized comes from canonicalBrandKey() — the one Canonical Brand
+// derivation (alias-resolve, then brandNormalize) checkout also uses (#1295).
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { brandNormalize } from "@askarthur/shopfront-glue";
+import { canonicalBrandKey } from "@/lib/clone-watch/canonical-brand-key";
 import { logger } from "@askarthur/utils/logger";
 
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
@@ -61,15 +61,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_domain", detail: bad.join(", ") }, { status: 400 });
   }
 
-  // The join key. A brand whose name normalises to null (symbols only) would
-  // match nothing forever — reject rather than create a dead row.
-  const brandNormalized = brandNormalize(brandName);
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
+
+  // The join key — the SAME Canonical Brand derivation checkout uses
+  // (ADR-0020, #1295), so an operator-onboarded brand and a bought one are
+  // one row. A name that normalises to null would match nothing forever.
+  const brandNormalized = await canonicalBrandKey(sb, brandName);
   if (!brandNormalized) {
     return NextResponse.json({ error: "brand_name_not_normalisable" }, { status: 400 });
   }
-
-  const sb = createServiceClient();
-  if (!sb) return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
 
   // A customer org must actually have members, or the v207 RLS read policy
   // (membership via org_members) means the customer can never see the brand we

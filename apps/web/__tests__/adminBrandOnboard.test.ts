@@ -18,6 +18,7 @@ vi.mock("@askarthur/utils/logger", () => ({
 const inserted: Array<Record<string, unknown>> = [];
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: () => ({
+    rpc: async () => ({ data: null, error: null }), // resolve_brand: no alias
     from: (table: string) => {
       const b: Record<string, unknown> = {};
       b.select = () => b;
