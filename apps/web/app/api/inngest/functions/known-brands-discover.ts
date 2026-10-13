@@ -1,11 +1,7 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { FETCH_DEFAULT_MAX_REDIRECTS, safeFetch } from "@askarthur/scam-engine/safe-fetch";
-import {
-  brandNormalize,
-  buildBrandResolver,
-  type BrandEntry,
-} from "@askarthur/shopfront-glue";
+import { buildBrandResolver, type BrandEntry } from "@askarthur/shopfront-glue";
 import { getActiveWatchlistDetailed } from "@askarthur/scam-engine/active-watchlist";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -13,6 +9,7 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { deriveBrandKey } from "@/app/api/inngest/functions/report-brand-stewardship";
 import { html, joinHtml } from "@askarthur/utils/html";
 import { loadAliasRecord } from "@/lib/brand-aliases";
+import { canonicalBrandKeyResolver } from "@/lib/clone-watch/canonical-brand-key";
 
 /**
  * Known-brands security-contact discovery (RFC 9116 security.txt).
@@ -178,15 +175,6 @@ export function selectDiscoverCandidates(
   return out.slice(0, cap);
 }
 
-/** The Canonical Brand key (ADR-0020) over a loaded alias record:
- *  brand_normalize(resolve_brand(raw) ?? raw) — the SQL twin is the match in
- *  seed_known_brand_for_subscriber (v348). */
-export function canonicalBrandKeyFn(
-  resolve: (raw: string | null | undefined) => string | null,
-): (raw: string | null | undefined) => string | null {
-  return (raw) => brandNormalize(resolve(raw) ?? raw ?? "");
-}
-
 const CONTACT_OUTCOMES = new Set(["inserted_contact", "seed_probed_contact"]);
 
 export const KNOWN_BRANDS_DISCOVER_EVENT = "known-brands/discover.manual-trigger.v1";
@@ -231,7 +219,7 @@ export const knownBrandsDiscover = inngest.createFunction(
         aliasRecord: await loadAliasRecord(sb, "known-brands-discover"),
       };
     });
-    const canonicalKey = canonicalBrandKeyFn(buildBrandResolver(aliasRecord));
+    const canonicalKey = canonicalBrandKeyResolver(buildBrandResolver(aliasRecord));
 
     const candidates = selectDiscoverCandidates(roster.entries, rows, canonicalKey);
     const seeds = candidates.filter((c) => c.source === "seed").length;

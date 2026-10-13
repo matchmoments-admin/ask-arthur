@@ -53,13 +53,31 @@ export interface KnownBrandSeedResult {
 
 export async function seedKnownBrandForSubscriber(
   sb: ServiceClient,
-  input: {
-    brandSubscriberId: number;
-    /** The subscriber's display name — the brand_key slug is derived from it.
-     *  Read from the row when the caller does not have it (the webhook). */
-    brandName?: string | null;
-    brandCategory?: ScoredBrandCategory | null;
-  },
+  input: SeedInput,
+): Promise<KnownBrandSeedResult> {
+  try {
+    return await seed(sb, input);
+  } catch (err) {
+    // A thrown client error (not just a returned one) is still an outcome.
+    logger.warn("known-brand-seed: seed threw", {
+      brandSubscriberId: input.brandSubscriberId,
+      error: String(err),
+    });
+    return { outcome: "failed", knownBrandId: null, probeRequested: false };
+  }
+}
+
+interface SeedInput {
+  brandSubscriberId: number;
+  /** The subscriber's display name — the brand_key slug is derived from it.
+   *  Read from the row when the caller does not have it (the webhook). */
+  brandName?: string | null;
+  brandCategory?: ScoredBrandCategory | null;
+}
+
+async function seed(
+  sb: ServiceClient,
+  input: SeedInput,
 ): Promise<KnownBrandSeedResult> {
   let brandName = input.brandName ?? null;
   if (!brandName) {
@@ -76,7 +94,12 @@ export async function seedKnownBrandForSubscriber(
       return { outcome: "failed", knownBrandId: null, probeRequested: false };
     }
     brandName = (sub?.brand_name as string | undefined) ?? null;
-    if (!brandName) return { outcome: "not_subscriber", knownBrandId: null, probeRequested: false };
+    if (!brandName)
+      return {
+        outcome: "not_subscriber",
+        knownBrandId: null,
+        probeRequested: false,
+      };
   }
 
   const { data, error } = await sb.rpc("seed_known_brand_for_subscriber", {
@@ -91,7 +114,12 @@ export async function seedKnownBrandForSubscriber(
     });
     return { outcome: "failed", knownBrandId: null, probeRequested: false };
   }
-  const row = (data as Array<{ known_brand_id: number | null; outcome: KnownBrandSeedOutcome }> | null)?.[0];
+  const row = (
+    data as Array<{
+      known_brand_id: number | null;
+      outcome: KnownBrandSeedOutcome;
+    }> | null
+  )?.[0];
   const outcome = row?.outcome ?? "failed";
   const knownBrandId = row?.known_brand_id ?? null;
 
@@ -101,7 +129,10 @@ export async function seedKnownBrandForSubscriber(
       await inngest.send({
         id: `known-brand-seed-${input.brandSubscriberId}`,
         name: KNOWN_BRANDS_DISCOVER_EVENT,
-        data: { reason: "brand_subscriber_activated", brandSubscriberId: input.brandSubscriberId },
+        data: {
+          reason: "brand_subscriber_activated",
+          brandSubscriberId: input.brandSubscriberId,
+        },
       });
       probeRequested = true;
     } catch (err) {

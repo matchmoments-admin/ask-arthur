@@ -85,6 +85,11 @@ describe("seedKnownBrandForSubscriber", () => {
       probeRequested: false,
     });
 
+    const throwing = { rpc: vi.fn(async () => { throw new Error("socket hang up"); }), from: vi.fn() };
+    await expect(seedKnownBrandForSubscriber(throwing as never, { brandSubscriberId: 3, brandName: "X Co" })).resolves.toMatchObject({
+      outcome: "failed",
+    });
+
     send.mockRejectedValueOnce(new Error("inngest down"));
     const ok = client({ data: [{ known_brand_id: 5, outcome: "created" }], error: null });
     await expect(seedKnownBrandForSubscriber(ok.sb, { brandSubscriberId: 2, brandName: "X Co" })).resolves.toMatchObject({

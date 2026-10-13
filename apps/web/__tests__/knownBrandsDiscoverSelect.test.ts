@@ -14,10 +14,10 @@ vi.mock("@/lib/bots/telegram/sendAdminMessage", () => ({ sendAdminTelegramMessag
 
 import { buildBrandResolver, type BrandEntry } from "@askarthur/shopfront-glue";
 import {
-  canonicalBrandKeyFn,
   selectDiscoverCandidates,
   type KnownBrandCoverageRow,
 } from "@/app/api/inngest/functions/known-brands-discover";
+import { canonicalBrandKeyResolver } from "@/lib/clone-watch/canonical-brand-key";
 
 // #1304: the discover worklist reads the ONE roster (the active watchlist) and
 // matches known_brands on the Canonical Brand or the domain — not on the
@@ -36,7 +36,7 @@ const row = (r: Partial<KnownBrandCoverageRow>): KnownBrandCoverageRow => ({
   probed_at: null,
   ...r,
 });
-const noAliases = canonicalBrandKeyFn(buildBrandResolver({}));
+const noAliases = canonicalBrandKeyResolver(buildBrandResolver({}));
 
 describe("selectDiscoverCandidates", () => {
   it("an overlay brand with no known_brands row is a candidate", () => {
@@ -59,7 +59,7 @@ describe("selectDiscoverCandidates", () => {
   });
 
   it("the alias layer resolves a short form to its canonical row", () => {
-    const resolve = canonicalBrandKeyFn(
+    const resolve = canonicalBrandKeyResolver(
       buildBrandResolver({ auspost: "Australia Post", australiapost: "Australia Post" }),
     );
     const roster: BrandEntry[] = [{ brand: "AusPost", legitimate_domains: ["auspost.net"] }];

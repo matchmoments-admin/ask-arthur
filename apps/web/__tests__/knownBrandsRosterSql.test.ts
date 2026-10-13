@@ -19,10 +19,10 @@ vi.mock("@/app/api/inngest/functions/report-brand-stewardship", () => ({
 
 import { buildBrandResolver, type BrandEntry } from "@askarthur/shopfront-glue";
 import {
-  canonicalBrandKeyFn,
   selectDiscoverCandidates,
   type KnownBrandCoverageRow,
 } from "@/app/api/inngest/functions/known-brands-discover";
+import { canonicalBrandKeyResolver } from "@/lib/clone-watch/canonical-brand-key";
 
 // Runs the REAL v348 SQL (#1304: one watched-brand roster) on top of v174
 // (brand_normalize / resolve_brand), v207 + v256 + v347 (the Brand Subscriber)
@@ -353,7 +353,7 @@ describe("the discover worklist rotates (worklist-gate starvation rule)", () => 
         legitimate_domains: [`rosterbrand${i}.com.au`],
       })),
     ];
-    const canonicalKey = canonicalBrandKeyFn(buildBrandResolver({}));
+    const canonicalKey = canonicalBrandKeyResolver(buildBrandResolver({}));
 
     const seen: string[] = [];
     const runs: string[][] = [];
