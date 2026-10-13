@@ -111,7 +111,19 @@ const sb = {
 } as unknown as Parameters<typeof checkBrandSend>[1];
 
 const RECIPIENT = "security@auspost.com.au";
-const TARGET = { recipient: RECIPIENT, brand: "auspost.com.au", brandKey: "auspost.com.au" };
+const TARGET = {
+  recipient: RECIPIENT,
+  brand: "auspost.com.au",
+  brandKey: "auspost.com.au",
+  subscriberId: 1,
+};
+const ENTITLED_SUBSCRIBER = {
+  plan: "brand_pilot",
+  subscription_status: "active",
+  verification_status: "verified",
+  is_active: true,
+  alert_contact_email: RECIPIENT,
+};
 
 beforeEach(() => {
   for (const k of Object.keys(m.flags)) m.flags[k] = true;
@@ -130,6 +142,7 @@ beforeEach(() => {
       data: [{ recipient: RECIPIENT, channel_type: "security_txt" }],
       error: null,
     },
+    monitored_brands: { data: ENTITLED_SUBSCRIBER, error: null },
   };
 });
 
@@ -165,6 +178,14 @@ const FAILURES: Record<string, Array<{ name: string; arrange: () => void; code: 
     { name: "recipient mismatch", arrange: () => (tables.brand_contact_directory = { data: [{ recipient: "other@x.au", channel_type: "security_txt" }], error: null }), code: "recipient_mismatch" },
     { name: "unaccepted channel", arrange: () => (tables.brand_contact_directory = { data: [{ recipient: RECIPIENT, channel_type: "web_form" }], error: null }), code: "recipient_mismatch" },
     { name: "read error", arrange: () => (tables.brand_contact_directory = { data: null, error: { message: "down" } }), code: "directory_lookup_failed" },
+  ],
+  // #1295 — go-red (2026-10-13): the check returning [] unconditionally failed
+  // all four of these.
+  subscriber_contact: [
+    { name: "canceled subscriber", arrange: () => (tables.monitored_brands = { data: { ...ENTITLED_SUBSCRIBER, subscription_status: "canceled" }, error: null }), code: "subscriber_not_entitled" },
+    { name: "unverified subscriber", arrange: () => (tables.monitored_brands = { data: { ...ENTITLED_SUBSCRIBER, verification_status: "pending" }, error: null }), code: "subscriber_not_entitled" },
+    { name: "recipient is not the subscriber's contact", arrange: () => (tables.monitored_brands = { data: { ...ENTITLED_SUBSCRIBER, alert_contact_email: "other@x.au" }, error: null }), code: "recipient_mismatch" },
+    { name: "read error", arrange: () => (tables.monitored_brands = { data: null, error: { message: "down" } }), code: "subscriber_unreadable" },
   ],
 };
 
@@ -220,6 +241,23 @@ describe("the three copy gaps are closed", () => {
     for (const c of BRAND_SEND_PROFILES.batch.checks) {
       expect(BRAND_SEND_PROFILES["auto-send"].checks).toContain(c);
     }
+  });
+});
+
+describe("subscriber profile (#1295)", () => {
+  it("is real brand contact: refused without the #371 sign-off", async () => {
+    m.flags.brandStewardshipSend = false;
+    const d = await checkBrandSend("subscriber", sb, TARGET);
+    expect(d.reasons[0].code).toBe("send_disabled");
+  });
+  it("needs a subscriber id — a recipient alone is not a subscriber", async () => {
+    const d = await checkBrandSend("subscriber", sb, { recipient: RECIPIENT });
+    expect(d.reasons.map((r) => r.code)).toContain("subscriber_not_entitled");
+  });
+  it("does not need the directory or known_brands (those are for unsolicited mail)", async () => {
+    tables.brand_contact_directory = { data: [], error: null };
+    tables.known_brands = { data: null, error: null };
+    expect((await checkBrandSend("subscriber", sb, TARGET)).allowed).toBe(true);
   });
 });
 

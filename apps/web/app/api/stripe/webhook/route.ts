@@ -16,6 +16,13 @@ import {
   mapStripeStatusToBrandBillingStatus,
 } from "@/lib/brandSkus";
 import {
+  applyBrandSubscription,
+  parseOrgId,
+  parseSubscriberId,
+  recordUnmatchedBrandPayment,
+  type UnmatchedReason,
+} from "@/lib/clone-watch/brand-subscriber";
+import {
   isDocumentPlanPrice,
   documentPlanForPrice,
   mapStripeStatusToDocumentBillingStatus,
@@ -518,6 +525,8 @@ async function upsertExtensionSubscription(
 // Metadata expected (set server-side by /api/brand/checkout):
 //   org_id  — the organization buying Brand Monitor
 //   user_id — the purchasing user (must hold billing:manage in that org)
+//   brand_subscriber_id — the pending Brand Subscriber row checkout created
+//                         (#1295, v347); absent on pre-#1295 sessions
 // Double ownership gate before any write (mirrors the Extension Pro branch):
 //   1. metadata.user_id must equal the Stripe customer's owning user
 //      (user_profiles.stripe_customer_id, server-set during checkout);
@@ -530,15 +539,18 @@ async function upsertExtensionSubscription(
 // not api-key-, anchored, so a brand row cannot live there without a schema
 // change (out of scope for this code-only PR). Instead the billing record is
 // kept org-keyed in organizations.settings.brand_billing (jsonb, cold table)
-// — plan, status, Stripe linkage — and monitored_brands.plan (v207, the column
-// the Wave 3 dashboard/watchlist reads) is synced from it. If/when a follow-up
+// — plan, status, Stripe linkage — and the Brand Subscriber rows
+// (monitored_brands, reshaped v347) take their status from it through
+// apply_brand_subscription. Entitlements are read ONLY through
+// lib/clone-watch/brand-subscriber.ts. If/when a follow-up
 // migration relaxes subscriptions.api_key_id, this handler is the single place
 // to add the ledger row.
 //
 // invoice.paid / invoice.payment_failed are NOT handled for brand subs: status
 // transitions arrive via customer.subscription.updated (Stripe emits it on
-// dunning transitions), and monitoring entitlement only changes on activation
-// or deletion — past_due keeps monitoring alive through the dunning window.
+// dunning transitions); past_due/paused make an active subscriber `lapsed`,
+// which keeps its entitlements through the dunning window. Every way a payment
+// can fail to attach is recorded in brand_unmatched_payments (#1295).
 interface BrandBillingRecord {
   plan: string;
   status: string;
@@ -579,13 +591,28 @@ async function upsertBrandSubscription(
   if (!plan) return; // Defensive — caller already gated
 
   const metadata = sub.metadata as Record<string, string> | undefined;
-  const orgId = metadata?.org_id;
+  const orgId = parseOrgId(metadata?.org_id);
   const userId = metadata?.user_id;
+  const brandSubscriberId = parseSubscriberId(metadata?.brand_subscriber_id);
+  const status = mapStripeStatusToBrandBillingStatus(sub.status as string);
+  // #1295: every way a brand payment can fail to attach lands in the admin
+  // queue (brand_unmatched_payments, /admin/brand-outreach), not only a log.
+  const unmatched = (reason: UnmatchedReason) =>
+    recordUnmatchedBrandPayment(supabase, {
+      stripeSubscriptionId: sub.id as string,
+      stripeCustomerId: (sub.customer as string | undefined) ?? null,
+      orgId,
+      brandSubscriberId,
+      plan,
+      billingStatus: status,
+      reason,
+    });
 
   if (!orgId || !userId) {
     logger.warn("Brand Monitor subscription missing org_id/user_id metadata", {
       subscriptionId: sub.id,
     });
+    await unmatched("missing_metadata");
     return;
   }
 
@@ -601,6 +628,8 @@ async function upsertBrandSubscription(
       customerOwnerId,
       isBillingManager,
     });
+    // Money arrived and nothing was provisioned — an operator must see it.
+    await unmatched("ownership_mismatch");
     // 200 (not 500) — retries won't fix tampered/incomplete metadata.
     return;
   }
@@ -619,10 +648,10 @@ async function upsertBrandSubscription(
       subscriptionId: sub.id,
       orgId,
     });
+    await unmatched("unknown_org");
     return;
   }
 
-  const status = mapStripeStatusToBrandBillingStatus(sub.status as string);
   const currentPeriodEnd = sub.current_period_end as number | undefined;
   const record: BrandBillingRecord = {
     plan,
@@ -652,29 +681,28 @@ async function upsertBrandSubscription(
     throw setErr;
   }
 
-  // Sync the plan onto the org's registered brands (the column the Wave 3
-  // dashboard + dynamic watchlist read). Only SET on active — past_due keeps
-  // the previous plan through dunning; clearing happens on deletion below.
-  if (status === "active") {
-    const { data: branded, error: mbErr } = await supabase
-      .from("monitored_brands")
-      .update({ plan, updated_at: new Date().toISOString() })
-      .eq("org_id", orgId)
-      .eq("is_active", true)
-      .select("id");
-    if (mbErr) {
-      logger.error("Failed to sync monitored_brands.plan", { error: mbErr, orgId });
-      throw mbErr;
-    }
-    if (!branded || branded.length === 0) {
-      // Paid before registering a brand (or pilot row inactive) — the
-      // brand_billing record above is authoritative; the registration flow /
-      // admin console applies the plan when the monitored_brands row lands.
-      logger.warn("Brand Monitor paid but org has no active monitored_brands rows", {
-        orgId,
-        plan,
-      });
-    }
+  // Apply the state to the Brand Subscriber(s) (v347 apply_brand_subscription):
+  // the pending row checkout created (metadata.brand_subscriber_id) plus any
+  // row already bound to this Stripe subscription. Status semantics kept from
+  // before v347: active activates; past_due/paused is `lapsed` (dunning grace
+  // — entitlements kept) and never activates a row that was never paid for.
+  const matched = await applyBrandSubscription(supabase, {
+    orgId,
+    brandSubscriberId,
+    stripeSubscriptionId: sub.id as string,
+    plan,
+    billingStatus: status,
+  });
+  if (matched === 0) {
+    // Paid with no Brand Subscriber to attach to (a pre-#1295 checkout, or a
+    // deleted pending row). The brand_billing record above is authoritative;
+    // the operator onboards the brand from the queue.
+    logger.warn("Brand Monitor paid but no Brand Subscriber row matched", {
+      orgId,
+      plan,
+      brandSubscriberId,
+    });
+    await unmatched("no_subscriber_row");
   }
 
   logger.info("Brand Monitor subscription synced", {
@@ -682,6 +710,7 @@ async function upsertBrandSubscription(
     orgId,
     plan,
     status,
+    matched,
   });
 }
 
@@ -860,7 +889,7 @@ async function handleSubscriptionDeleted(
   }
 
   // Brand Monitor branch: mark the org's brand_billing record canceled and
-  // clear monitored_brands.plan. The stored stripe_subscription_id acts as
+  // cancel the Brand Subscriber(s) bound to this subscription. The stored stripe_subscription_id acts as
   // the tamper-safe key (the brand analogue of the extension branch keying
   // on its stripe_subscription_id column): a deletion event whose sub.id
   // doesn't match the record the provisioning write stored is refused, so
@@ -868,7 +897,7 @@ async function handleSubscriptionDeleted(
   if (isBrandMonitorPrice(priceId)) {
     const plan = brandPlanForPrice(priceId);
     const metadata = sub.metadata as Record<string, string> | undefined;
-    const orgId = metadata?.org_id;
+    const orgId = parseOrgId(metadata?.org_id);
     if (!plan || !orgId) {
       logger.warn("Brand Monitor deletion missing org_id metadata", {
         subscriptionId: sub.id,
@@ -921,21 +950,17 @@ async function handleSubscriptionDeleted(
       throw setErr;
     }
 
-    // Only clear rows carrying THIS plan — a manually-provisioned
-    // brand_pilot row (billing_provider='manual') must survive a Stripe
-    // cancellation untouched.
-    const { error: mbErr } = await supabase
-      .from("monitored_brands")
-      .update({ plan: null, updated_at: new Date().toISOString() })
-      .eq("org_id", orgId)
-      .eq("plan", plan);
-    if (mbErr) {
-      logger.error("Failed to clear monitored_brands.plan on cancellation", {
-        error: mbErr,
-        orgId,
-      });
-      throw mbErr;
-    }
+    // Cancel the Brand Subscriber(s) bound to THIS Stripe subscription only
+    // (v347, keyed on the stored stripe_subscription_id — tamper-safe). A
+    // manually-provisioned brand_pilot row has no Stripe subscription and
+    // survives untouched; entitlements end because the status is canceled.
+    await applyBrandSubscription(supabase, {
+      orgId,
+      brandSubscriberId: null,
+      stripeSubscriptionId: sub.id as string,
+      plan,
+      billingStatus: "canceled",
+    });
 
     logger.info("Brand Monitor subscription canceled", {
       subscriptionId: sub.id,

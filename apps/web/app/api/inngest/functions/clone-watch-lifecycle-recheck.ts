@@ -27,6 +27,10 @@ import {
   URLSCAN_SPENDERS,
   checkUnlistedHeadroom,
 } from "@/lib/clone-watch/urlscan-budget";
+import {
+  loadPriorityRescans,
+  type PriorityRescanRow,
+} from "@/lib/clone-watch/brand-subscriber";
 
 /**
  * Clone-Watch — lifecycle re-check loop (Wave 0 PR-B).
@@ -311,7 +315,42 @@ export interface UrlscanPlan {
     /** DNS reads on a shared front (SHARED_FRONT_RANGES): 7-day floor at any
      *  age, first in stale fill. */
     dns_opaque: number;
+    /** #1295: Brand Subscriber priority rescans put at the head of the cap
+     *  regardless of the DNS verdict (list_brand_subscriber_priority_rescans). */
+    priority: number;
   };
+}
+
+/**
+ * #1295 — fold the Brand Subscriber priority rows into the DNS slice. Pure.
+ * A priority row already in the slice keeps its slice row (and risk); one the
+ * ranked slice did not pick is appended so it is DNS-read and can be planned.
+ * Its risk is unknown here (the priority worklist does not score), so 0 — the
+ * plan orders priority rows by staleness, not risk.
+ */
+export function mergePriorityRows(
+  slice: readonly SliceRow[],
+  priority: readonly PriorityRescanRow[],
+): SliceRow[] {
+  const have = new Set(slice.map((r) => r.id));
+  const extra: SliceRow[] = [];
+  for (const p of priority) {
+    const id = Number(p.id);
+    if (have.has(id)) continue;
+    have.add(id);
+    extra.push({
+      id,
+      candidate_domain: p.candidate_domain,
+      candidate_url: p.candidate_url,
+      lifecycle_state: p.lifecycle_state,
+      last_rechecked_at: p.last_rechecked_at,
+      queue_clock_at: p.last_rechecked_at,
+      first_seen_at: p.first_seen_at,
+      recheck_dns_fingerprint: p.recheck_dns_fingerprint,
+      risk: 0,
+    });
+  }
+  return [...slice, ...extra];
 }
 
 /**
@@ -338,10 +377,25 @@ export interface UrlscanPlan {
 export function planUrlscanRechecks(
   slice: readonly SliceRow[],
   reads: readonly DnsRead[],
-  limit: number,
+  cap: number,
   nowMs: number,
+  /** #1295: Brand Subscriber priority rows — scanned FIRST, whatever DNS says,
+   *  inside the same cap (no new urlscan spend). Stalest first. */
+  priorityIds: ReadonlySet<number> = new Set(),
 ): UrlscanPlan {
   const byId = new Map(reads.map((r) => [r.id, r]));
+  const staleFirst = (a: SliceRow, b: SliceRow) => {
+    const ta = a.last_rechecked_at ? Date.parse(a.last_rechecked_at) : -Infinity;
+    const tb = b.last_rechecked_at ? Date.parse(b.last_rechecked_at) : -Infinity;
+    return ta !== tb ? ta - tb : a.id - b.id;
+  };
+  const prio = slice
+    .filter((r) => priorityIds.has(r.id))
+    .sort(staleFirst)
+    .slice(0, Math.max(0, cap));
+  const prioIds = new Set(prio.map((r) => r.id));
+  // The cap the DNS gate's own selection works within, after priority rows.
+  const limit = Math.max(0, cap - prio.length);
   const eligible: SliceRow[] = [];
   const changed: SliceRow[] = [];
   const unchangedIds: number[] = [];
@@ -355,8 +409,12 @@ export function planUrlscanRechecks(
     deferred: 0,
     stale_fill: 0,
     dns_opaque: 0,
+    priority: prio.length,
   };
   for (const row of slice) {
+    // A priority row is already in the scan; it is neither stamped unchanged
+    // nor counted as gate-eligible.
+    if (prioIds.has(row.id)) continue;
     const read = byId.get(row.id);
     // Opaque (shared front, #1261 review): DNS can't see a content flip, so
     // the 7-day floor applies at any age.
@@ -422,7 +480,9 @@ export function planUrlscanRechecks(
   counts.dns_unchanged = stamped.length;
   // Changed rows lead the submit order, the fill trails it, so a wall-clock
   // stop falls on the no-signal tail, never on a DNS change.
-  const scan = [...first, ...rest, ...fill];
+  // Priority rows lead: a paying subscriber's daily rescan is the one slot a
+  // wall-clock stop must not fall on.
+  const scan = [...prio, ...first, ...rest, ...fill];
   counts.deferred =
     changed.length + eligible.length - first.length - rest.length;
   return { scan, unchangedIds: stamped, counts };
@@ -599,19 +659,41 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         "dns-gate-and-submit",
         RECHECK_SUBMIT_WALL_CLOCK_MS,
         async (budget) => {
+          // #1295: Brand Subscriber priority rescans, read HERE (no new step
+          // boundary) and put at the head of the same urlscan cap. A failed
+          // read degrades to "no priority this run" but is RECORDED in the
+          // Outcome Row (priority_error) — never a silent zero.
+          let priorityRows: PriorityRescanRow[] = [];
+          let priorityDue: number | null = 0;
+          let priorityError: string | null = null;
+          try {
+            const p = await loadPriorityRescans(sb);
+            priorityRows = p.rows;
+            priorityDue = p.dueTotal;
+          } catch (err) {
+            priorityError = err instanceof Error ? err.message : String(err);
+            priorityDue = null;
+            logger.warn("clone-watch recheck: priority rescan read failed", {
+              error: priorityError,
+            });
+          }
+          const work = mergePriorityRows(slice, priorityRows);
+          const priorityIds = new Set(priorityRows.map((r) => Number(r.id)));
+
           const dnsStart = Date.now();
           const dnsDeadline = dnsStart + RECHECK_DNS.phaseMs;
-          const dns = await readRecheckDns(slice, {
+          const dns = await readRecheckDns(work, {
             expired: () => budget.expired() || Date.now() >= dnsDeadline,
           });
           // Measured, so RECHECK_DNS.limit can be raised from evidence: the
           // cadence wants ~1,000 reads/run and this ships at 600.
           const dnsMs = Date.now() - dnsStart;
           const plan = planUrlscanRechecks(
-            slice,
+            work,
             dns.reads,
             RECHECK_BATCH_LIMIT,
             Date.now(),
+            priorityIds,
           );
           // attemptedIds is every row the loop LOOKED AT, except a 429. The
           // cadence stamp (mark_clone_alerts_rechecked) records "we looked",
@@ -657,10 +739,13 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             scanned,
             dnsUnreached: dns.unreached,
             dnsMs,
+            priorityDue,
+            priorityError,
           };
         },
       );
-      const { tally, plan, scanned, dnsUnreached, dnsMs } = batch;
+      const { tally, plan, scanned, dnsUnreached, dnsMs, priorityDue, priorityError } =
+        batch;
       const {
         submitted,
         submitFailed,
@@ -757,6 +842,10 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             ...plan.counts,
             dns_unreached: dnsUnreached,
             dns_slice: slice.length,
+            // #1295 priority rescans: due before the per-run cap (null = the
+            // read failed — see priority_error), and why it failed.
+            priority_due: priorityDue,
+            priority_error: priorityError,
             dns_ms: dnsMs,
             declined: plan.declined,
             monitoring: plan.monitoring,

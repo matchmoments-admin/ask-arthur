@@ -17,6 +17,8 @@ import {
   refusalStatus,
   SHADOW_NOT_INTERNAL,
 } from "@/lib/clone-watch/brand-send-gate";
+import { brandNormalize } from "@askarthur/shopfront-glue";
+import { loadBrandSubscriber, routeBrandAlert } from "@/lib/clone-watch/brand-subscriber";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -53,6 +55,12 @@ function periodLabel(periodMonth: string): string {
  *     (default OFF; #371 legal sign-off is the precondition to flip it), the
  *     readiness scorecard (#1237), the shopfront_clone_outreach cost brake,
  *     unsubscribe / STOP, and a verified contact — all fail-closed.
+ *   • #1295: when the brand has an entitled Brand Subscriber with an alert
+ *     contact, THAT contact is the intended recipient (it outranks the
+ *     known_brands contact) and the real send passes the gate's "subscriber"
+ *     profile instead — same #371 sign-off, readiness, brake and opt-outs, with
+ *     "is this the entitled subscriber's own contact" in place of the
+ *     known_brands verification. The shadow path above is unchanged.
  *
  * Idempotent: refuses if the row is already 'sent', and passes a stable Resend
  * idempotencyKey so a retry never double-sends. On Resend failure the row is
@@ -88,10 +96,29 @@ export async function POST(
     );
   }
 
+  // #1295: the Brand Subscriber's own contact outranks the known_brands one.
+  // A read error refuses — it must not fall back to the unsolicited contact
+  // for a brand that may be paying us.
+  let route;
+  try {
+    const brandName = String(row.brand_name ?? "");
+    const { subscriber } = await loadBrandSubscriber(sb, {
+      brandNormalized: brandNormalize(brandName),
+      // no_contact rows carry the brand's domain as their name.
+      domain: brandName.includes(".") ? brandName : null,
+    });
+    route = routeBrandAlert(subscriber, "monthlyReport");
+  } catch (err) {
+    logger.error("brand-stewardship send: subscriber lookup failed", { id, error: String(err) });
+    return NextResponse.json({ error: "subscriber_unreadable" }, { status: 503 });
+  }
+  const intended =
+    route.kind === "subscriber" ? route.recipient : (row.recipient_email as string | null);
+
   // Resolve recipient + decide whether the #371 send gate applies.
   const shadow = readStringEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT");
   const isShadow = Boolean(shadow);
-  const recipient = isShadow ? shadow! : row.recipient_email;
+  const recipient = isShadow ? shadow! : intended;
 
   // A shadow send is only ungated because it reaches our own inbox — so the
   // shadow address must be internal, or nothing is sent.
@@ -107,10 +134,17 @@ export async function POST(
     // "stewardship-real"): #371 sign-off flag, readiness (#1237), the
     // shopfront_clone_outreach brake, unsubscribe / STOP, verified contact.
     // Fail closed on any read error. The shadow path above never reaches it.
-    const decision = await checkBrandSend("stewardship-real", sb, {
-      recipient: row.recipient_email as string | null,
-      brandKey: row.brand_key as string,
-    });
+    const decision =
+      route.kind === "subscriber"
+        ? await checkBrandSend("subscriber", sb, {
+            recipient: intended,
+            subscriberId: route.subscriberId,
+            context: { stewardship_report_id: id },
+          })
+        : await checkBrandSend("stewardship-real", sb, {
+            recipient: row.recipient_email as string | null,
+            brandKey: row.brand_key as string,
+          });
     if (!decision.allowed) {
       const first = decision.reasons[0];
       // An opted-out recipient is a terminal outcome for this row, not an
@@ -238,8 +272,10 @@ export async function POST(
       sent_at: new Date().toISOString(),
       approved_by_admin_id: "hmac_admin",
       status_reason: isShadow
-        ? `shadow_send:${recipient} (intended ${row.recipient_email ?? "—"})`
+        ? `shadow_send:${recipient} (intended ${intended ?? "—"}${route.kind === "subscriber" ? ", brand subscriber" : ""})`
         : null,
+      // The ledger records who it actually went to.
+      ...(route.kind === "subscriber" && !isShadow ? { recipient_email: intended } : {}),
     })
     .eq("id", id)
     .neq("status", "sent");
