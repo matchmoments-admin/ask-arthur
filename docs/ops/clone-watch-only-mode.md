@@ -180,29 +180,109 @@ the merge until you are ready to switch.
 
 ## 7. Where the archive lives
 
-- Local: `~/Archives/askarthur/db-<date>/` (outside every repo — the repo is public).
-  Contains the full `pg_dump --format=custom` (zstd), a separate `auth` data dump,
-  the plain-SQL schema baseline, the `supabase db dump` set, `SHA256SUMS` and
-  `manifest.txt` (per-table rows + size at dump time).
-- Second copy: `<record the external drive / iCloud path here>` — SHA-256 verified.
-- Browsable restore: local Postgres 17 database `askarthur_verify`.
+Taken 2026-10-12 with the Supabase CLI (`supabase db dump --linked`), which writes
+**plain SQL, not a `pg_dump --format=custom` file**. That means `pg_restore` cannot read it.
+
+- Local: `~/Archives/askarthur/db-2026-10-12/`. It is outside every repo because the repo is public. It contains:
+  - `data.sql.zst`: every table's data as `COPY ... FROM stdin` blocks, 1.57 GB → 360 MB.
+  - `schema.sql` / `schema.sql.zst`: the public schema baseline.
+  - `schema-auth.sql` and `roles.sql`.
+  - `manifest.json`: exact per-table row counts and bytes at dump time (212 tables, 2,118,719 rows).
+  - `SHA256SUMS`.
+- Second copy: iCloud Drive → `Archives/askarthur/db-2026-10-12/`. All 10 SHA-256 sums were verified on 2026-10-14.
+- Browsable restore: a local Postgres 17 cluster at `~/Archives/askarthur/verify-pg`, database
+  `askarthur_verify`. Every public table was loaded and its row counts checked against the
+  manifest. The only things missing are Supabase-managed `storage.*` and `pgmq`, which can't load
+  into plain Postgres.
+  - Start it: `pg_ctl -D ~/Archives/askarthur/verify-pg -o "-p 54329" start`
+  - The tools are in `/opt/homebrew/opt/postgresql@17/bin`.
+
+### The Phase 4 truncate (2026-10-14)
+
+To fit the Supabase Free plan (500 MB), four tables were emptied, taking the database from 3,018 MB to 252 MB:
+- `scam_urls` (581,920 rows)
+- `scam_ips` (1,308,269)
+- `acnc_charities` (67,091)
+- `acnc_charity_embeddings` (66,745)
+
+**How it was done:**
+- One guarded `TRUNCATE` that aborted if any row count had changed since the dump.
+- No `CASCADE`. The only foreign key is embeddings → charities, and both were in the same statement.
+- No `RESTART IDENTITY`, so the ID sequences still sit above every archived ID.
+
+Every other table was kept. That includes `reddit_post_intel` (108 MB), which was kept by founder decision.
+
+**Dump of exactly those four tables,** taken immediately before:
+- Local: `~/Archives/askarthur/db-2026-10-14-pre-truncate/`
+- iCloud: `Archives/askarthur/db-2026-10-14-pre-truncate/`
+- Files: `truncated-tables.sql.zst` (1.43 GB → 322 MB), `four-tables-schema.sql`, `prod-counts-and-hashes-pre-truncate.json`, `SHA256SUMS`. Both copies were verified.
+
+**Proof it restores.** The command below was run into a fresh local Postgres 17 database. All four tables came back with prod's exact row counts **and** an identical per-table content hash:
+
+```sql
+SET timezone = 'UTC';
+SELECT sum(hashtext(row::text)::bigint) FROM ...;
+```
+
+The hash values are in the counts file.
+
+**Restore those four tables into prod:**
+
+```bash
+# $DB = prod session-pooler URL from a chmod-600 file. Never echo it.
+# Upgrade Supabase to Pro first: this is ~2.7 GB.
+cd ~/Archives/askarthur/db-2026-10-14-pre-truncate
+zstd -dc --long=27 truncated-tables.sql.zst \
+  | grep -vE '^SELECT pg_catalog\.setval|^SET (statement_timeout|lock_timeout|transaction_timeout|idle_in_transaction_session_timeout) = 0' \
+  | psql "$DB" -v ON_ERROR_STOP=1 -c "SET statement_timeout = '30min'" -f -
+```
+
+- **Why the `setval` filter.** The dump ends with 15 `pg_catalog.setval` lines covering **every** sequence in `public`, not just these four tables. Replaying them would wind other tables' ID counters back to their 2026-10-14 values, and the next insert into those tables would hit a duplicate key. The four tables' own sequences don't need resetting, because the truncate didn't restart them.
+- **Why the `SET ... = 0` filter.** The dump disables every timeout (`SET statement_timeout = 0`), which CLAUDE.md bans. The command sets a finite cap instead.
+- **No re-run needed for the embeddings** (no Voyage spend). The dump restores them, because it includes `acnc_charity_embeddings`.
 
 ## 8. Restore, in order
 
-1. If the restored database will exceed 500 MB, upgrade the Supabase project from
-   Free first (Pro), then re-add PITR / compute if wanted.
-2. For each truncated table, from the local dump (the schema is still live):
-   `pg_restore --data-only --no-owner -d "$DB" -t <table> <dump>`. Restore parents
-   before children (check `pg_constraint`); disable triggers if a table's trigger
-   would re-fire side effects.
-3. Set `FF_CLONE_WATCH_ONLY=false` and `NEXT_PUBLIC_FF_CLONE_WATCH_ONLY=false`; paste
-   the §3 crons back into `apps/web/vercel.json`; set the §4 variables back to
-   `true` and re-enable `promptfoo`.
-4. Rebuild (commit with `[build]`), then `PUT /api/inngest` and confirm the full
-   fleet registers.
-5. Re-register the bot, Cloudflare and Stripe webhooks (§5).
-6. Turn features back on one at a time, each with the pre-flip checklist in
+1. **Size first.** If the restored database will exceed 500 MB (it was about 3 GB with everything in it),
+   upgrade the Supabase project to Pro **before** loading. Then re-add PITR or a larger compute size if wanted.
+2. **Restore each truncated table from the local verify cluster.** It already holds the data in
+   Postgres form, so a per-table data dump can be piped straight into prod. The schema is still live,
+   because Phase 4 only truncates.
+
+   ```bash
+   PG=/opt/homebrew/opt/postgresql@17/bin
+   # $DB = the prod session-pooler URL, from a chmod-600 file. Never echo it.
+   "$PG/pg_dump" -p 54329 -U postgres --data-only --table='public.<table>' askarthur_verify \
+     | "$PG/psql" "$DB" -v ON_ERROR_STOP=1 \
+         -c "SET statement_timeout = '30min'" -c "SET session_replication_role = replica" -f -
+   ```
+
+   - **Order:** restore parents before children. Check `pg_constraint` for this.
+   - **Triggers:** `session_replication_role = replica` stops triggers and foreign-key checks
+     re-firing side effects during the load. `data.sql` sets the same thing.
+   - **Timeouts:** keep the finite timeout. Never use `0` (see the CLAUDE.md "Never Do" rule). For the
+     largest tables (`scam_urls` 967 MB, `acnc_charity_embeddings` 886 MB), load in a quiet window.
+   - **Fallback (no verify cluster):** extract the table's `COPY "public"."<table>"` block from
+     `zstd -dc data.sql.zst` and pipe that block through `psql`.
+   - **Re-fetch instead of restoring:** the threat-feed tables (`scam_urls`, `scam_ips`, `feed_items*`)
+     and `acnc_charities` are re-filled by their scrapers within days of `ENABLE_SCRAPER=true`.
+     Restoring them only buys back history.
+   - **Embeddings:** `acnc_charity_embeddings` can either be restored or regenerated (Voyage spend).
+3. **Flags and schedules.**
+   - Set `FF_CLONE_WATCH_ONLY=false` and `NEXT_PUBLIC_FF_CLONE_WATCH_ONLY=false`.
+   - Paste the §3 crons back into `apps/web/vercel.json`.
+   - Set the §4 variables back to `true` and re-enable `promptfoo`.
+   - `FF_CLONE_WATCH_FEED_ENTITIES` was set to `false` for Production only. Its Preview copy was
+     removed, so re-add it to both if wanted.
+4. **Rebuild and re-sync.** Rebuild (commit with `[build]`), then `PUT /api/inngest` and confirm the
+   full fleet registers. While paused, a signed GET of `/api/inngest` reports `function_count` 27.
+5. **Webhooks.** Re-register the bot, Cloudflare and Stripe webhooks (§5).
+6. **Features.** Turn them back on one at a time, each with the pre-flip checklist in
    `docs/system-map/feature-flags.md`.
+7. **What does not come back by itself:**
+   - Cancelled vendor accounts have to be re-signed-up, with new keys into Vercel.
+   - A released Twilio number is gone.
+   - The extension is unlisted in the Chrome Web Store.
 
 Effort: under a day into the existing project; 1–3 days into a new Supabase project
 (restore from the `supabase db dump` set, then re-point env vars).
