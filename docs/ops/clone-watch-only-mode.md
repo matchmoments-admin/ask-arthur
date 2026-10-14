@@ -197,6 +197,50 @@ Taken 2026-10-12 with the Supabase CLI (`supabase db dump --linked`), which writ
   - Start it: `pg_ctl -D ~/Archives/askarthur/verify-pg -o "-p 54329" start`
   - The tools are in `/opt/homebrew/opt/postgresql@17/bin`.
 
+### The Phase 4 truncate (2026-10-14)
+
+To fit the Supabase Free plan (500 MB), four tables were emptied, taking the database from 3,018 MB to 252 MB:
+- `scam_urls` (581,920 rows)
+- `scam_ips` (1,308,269)
+- `acnc_charities` (67,091)
+- `acnc_charity_embeddings` (66,745)
+
+**How it was done:**
+- One guarded `TRUNCATE` that aborted if any row count had changed since the dump.
+- No `CASCADE`. The only foreign key is embeddings → charities, and both were in the same statement.
+- No `RESTART IDENTITY`, so the ID sequences still sit above every archived ID.
+
+Every other table was kept. That includes `reddit_post_intel` (108 MB), which was kept by founder decision.
+
+**Dump of exactly those four tables,** taken immediately before:
+- Local: `~/Archives/askarthur/db-2026-10-14-pre-truncate/`
+- iCloud: `Archives/askarthur/db-2026-10-14-pre-truncate/`
+- Files: `truncated-tables.sql.zst` (1.43 GB → 322 MB), `four-tables-schema.sql`, `prod-counts-and-hashes-pre-truncate.json`, `SHA256SUMS`. Both copies were verified.
+
+**Proof it restores.** The command below was run into a fresh local Postgres 17 database. All four tables came back with prod's exact row counts **and** an identical per-table content hash:
+
+```sql
+SET timezone = 'UTC';
+SELECT sum(hashtext(row::text)::bigint) FROM ...;
+```
+
+The hash values are in the counts file.
+
+**Restore those four tables into prod:**
+
+```bash
+# $DB = prod session-pooler URL from a chmod-600 file. Never echo it.
+# Upgrade Supabase to Pro first: this is ~2.7 GB.
+cd ~/Archives/askarthur/db-2026-10-14-pre-truncate
+zstd -dc --long=27 truncated-tables.sql.zst \
+  | grep -vE '^SELECT pg_catalog\.setval|^SET (statement_timeout|lock_timeout|transaction_timeout|idle_in_transaction_session_timeout) = 0' \
+  | psql "$DB" -v ON_ERROR_STOP=1 -c "SET statement_timeout = '30min'" -f -
+```
+
+- **Why the `setval` filter.** The dump ends with 15 `pg_catalog.setval` lines covering **every** sequence in `public`, not just these four tables. Replaying them would wind other tables' ID counters back to their 2026-10-14 values, and the next insert into those tables would hit a duplicate key. The four tables' own sequences don't need resetting, because the truncate didn't restart them.
+- **Why the `SET ... = 0` filter.** The dump disables every timeout (`SET statement_timeout = 0`), which CLAUDE.md bans. The command sets a finite cap instead.
+- **No re-run needed for the embeddings** (no Voyage spend). The dump restores them, because it includes `acnc_charity_embeddings`.
+
 ## 8. Restore, in order
 
 1. **Size first.** If the restored database will exceed 500 MB (it was about 3 GB with everything in it),
