@@ -29,7 +29,7 @@ database is archived locally before any table is emptied.
 
 The allowlist (one home: `apps/web/lib/cloneWatchOnly.ts`) keeps: `/`, `/blog*`,
 `/about`, `/privacy`, `/terms`, `/contact`, `/paused`, `/clone-watch*`,
-`/clone-report*`, `/brand-exposure`, `/admin*`, `/unsubscribe`, `/go/*`, site files
+`/clone-report*`, `/brand-exposure`, `/pricing`, `/admin*`, `/unsubscribe`, `/go/*`, site files
 and static assets; APIs `/api/clone-list-request`, `/api/clone-watch/*`,
 `/api/brand-stewardship/*`, `/api/brand-exposure`, `/api/webhooks/resend`,
 `/api/subscribe`, `/api/unsubscribe`, `/api/unsubscribe-one-click`, `/api/leads`,

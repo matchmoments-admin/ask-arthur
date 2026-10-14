@@ -98,6 +98,8 @@ const ALLOWED_PAGE_PREFIXES: readonly string[] = [
   "/clone-watch",
   "/clone-report",
   "/brand-exposure",
+  // The A$300 brand pilot is sold from /pricing (contact path; #1310).
+  "/pricing",
   "/admin",
   // Spam Act: every brand / clone-watch email carries an unsubscribe link.
   "/unsubscribe",

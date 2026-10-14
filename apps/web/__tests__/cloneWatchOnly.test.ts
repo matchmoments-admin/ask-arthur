@@ -102,6 +102,7 @@ describe("isAllowedInCloneWatchOnly", () => {
     "/clone-watch/2026-09",
     "/clone-report/abc",
     "/brand-exposure",
+    "/pricing",
     "/paused",
     "/about",
     "/unsubscribe",
