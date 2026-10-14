@@ -951,6 +951,16 @@ export const featureFlags = {
    *  UI. Default OFF until the v190 schema is applied and preview verification
    *  passes; then canary ON. Zero paid-API spend → no cost brake needed. */
   analyticsAttribution: readBoolEnv("FF_ANALYTICS_ATTRIBUTION"),
+
+  /** Clone-Watch-only mode (founder decision 2026-10-12). When ON:
+   *  /api/inngest serves only the Clone Watch functions
+   *  (apps/web/lib/cloneWatchOnly.ts CLONE_WATCH_KEEP_IDS), middleware answers
+   *  every other API with 503 `paused` and redirects every other page to
+   *  /paused, the sitemap drops paused routes, and alerting-canary /
+   *  health-digest skip the checks for paused alerters and feeds. Server-side;
+   *  the homepage reads its twin NEXT_PUBLIC_FF_CLONE_WATCH_ONLY. Default OFF —
+   *  off = the full platform. Runbook: docs/ops/clone-watch-only-mode.md. */
+  cloneWatchOnly: readBoolEnv("FF_CLONE_WATCH_ONLY"),
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

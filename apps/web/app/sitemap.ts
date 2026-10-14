@@ -2,10 +2,19 @@ import type { MetadataRoute } from "next";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { isAllowedInCloneWatchOnly } from "@/lib/cloneWatchOnly";
 
 export const revalidate = 3600;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const entries = await buildSitemap();
+  // Clone-Watch-only mode: never advertise a route middleware would redirect
+  // to /paused (docs/ops/clone-watch-only-mode.md).
+  if (!featureFlags.cloneWatchOnly) return entries;
+  return entries.filter((e) => isAllowedInCloneWatchOnly(new URL(e.url).pathname));
+}
+
+async function buildSitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = "https://askarthur.au";
 
   const staticEntries: MetadataRoute.Sitemap = [

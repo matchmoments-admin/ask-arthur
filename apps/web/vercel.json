@@ -6,22 +6,6 @@
       "schedule": "30 8 * * 1"
     },
     {
-      "path": "/api/cron/weekly-email",
-      "schedule": "0 14 * * 1"
-    },
-    {
-      "path": "/api/cron/nurture",
-      "schedule": "0 23 * * *"
-    },
-    {
-      "path": "/api/cron/bot-queue-sweep",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/bot-queue-cleanup",
-      "schedule": "0 4 * * *"
-    },
-    {
       "path": "/api/cron/cost-daily-check",
       "schedule": "0 */6 * * *"
     },
@@ -30,40 +14,12 @@
       "schedule": "0 22 * * 0"
     },
     {
-      "path": "/api/cron/vuln-retention",
-      "schedule": "0 3 * * *"
-    },
-    {
       "path": "/api/cron/clone-watch-retention",
       "schedule": "15 3 * * *"
     },
     {
-      "path": "/api/cron/scam-reports-retention",
-      "schedule": "30 3 * * *"
-    },
-    {
       "path": "/api/cron/onward-retention",
       "schedule": "35 3 * * *"
-    },
-    {
-      "path": "/api/cron/shop-checks-retention",
-      "schedule": "45 3 * * *"
-    },
-    {
-      "path": "/api/cron/ensure-partitions",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/reddit-intel-trigger",
-      "schedule": "0 1,7,13,19 * * *"
-    },
-    {
-      "path": "/api/cron/reddit-intel-retention",
-      "schedule": "30 4 * * *"
-    },
-    {
-      "path": "/api/cron/feedback-digest",
-      "schedule": "0 9 * * *"
     },
     {
       "path": "/api/cron/health-digest",
@@ -72,10 +28,6 @@
     {
       "path": "/api/cron/pg-stuck-query-watchdog",
       "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/scraper-brake-alert",
-      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/axiom-fleet-watch",

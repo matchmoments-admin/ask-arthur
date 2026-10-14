@@ -10,6 +10,14 @@ All feature flags live in `packages/utils/src/feature-flags.ts`. Default is **OF
 
 ---
 
+## Operating mode
+
+| Flag                                                                         | Default | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cloneWatchOnly` (`FF_CLONE_WATCH_ONLY`) + `NEXT_PUBLIC_FF_CLONE_WATCH_ONLY` | OFF     | **Clone-Watch-only mode** (founder decision 2026-10-12). Server flag: `/api/inngest` serves only `CLONE_WATCH_KEEP_IDS` (`apps/web/lib/cloneWatchOnly.ts`), `apps/web/middleware.ts` returns 503 `paused` for every other API and 307s every other page to `/paused`, the sitemap drops paused routes, `alerting-canary` skips the paused alerters' floors and `health-digest` skips the feed check. Client twin (literal access, build-inlined — redeploy after flipping): the homepage swaps `ScamChecker` for a Clone Watch hero. The Vercel cron removal that goes with it is NOT flag-gated. Runbook + restore order: [docs/ops/clone-watch-only-mode.md](../ops/clone-watch-only-mode.md). |
+
+---
+
 ## Consumer features
 
 | Flag                   | Default | Purpose                                                                                                                                                                                                                                                                                                                                                                                         |

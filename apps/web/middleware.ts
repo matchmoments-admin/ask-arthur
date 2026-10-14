@@ -5,6 +5,7 @@ import { getLogger } from "@askarthur/utils/axiom-logger";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { verifyAdminToken, COOKIE_NAME as ADMIN_COOKIE } from "@/lib/adminAuth";
+import { isAllowedInCloneWatchOnly } from "@/lib/cloneWatchOnly";
 
 // First-touch attribution cookie. Captured once on the visitor's FIRST landing
 // and never overwritten, so a later organic return doesn't clobber the paid /
@@ -107,6 +108,28 @@ export async function middleware(req: NextRequest) {
   const requestId = resolveRequestId(req.headers);
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-request-id", requestId);
+
+  // Clone-Watch-only mode (docs/ops/clone-watch-only-mode.md). Runs FIRST and
+  // touches no network — a paused path never reaches Supabase Auth or Upstash.
+  // Allowed paths (lib/cloneWatchOnly.ts) fall through to the unchanged logic
+  // below, including the cron-secret check on the kept /api/cron/* routes.
+  if (featureFlags.cloneWatchOnly && !isAllowedInCloneWatchOnly(req.nextUrl.pathname)) {
+    if (req.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { error: "paused" },
+        {
+          status: 503,
+          headers: { "Retry-After": "86400", "X-Request-Id": requestId },
+        },
+      );
+    }
+    const pausedUrl = req.nextUrl.clone();
+    pausedUrl.pathname = "/paused";
+    pausedUrl.search = "";
+    const pausedResponse = NextResponse.redirect(pausedUrl, 307);
+    pausedResponse.headers.set("X-Request-Id", requestId);
+    return pausedResponse;
+  }
 
   // Inngest webhook — authenticated by Inngest's signing key inside the
   // route handler (`serve()` from `inngest/next` validates X-Inngest-

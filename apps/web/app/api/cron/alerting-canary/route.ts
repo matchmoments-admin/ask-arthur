@@ -8,6 +8,8 @@ import {
   type Alerter,
 } from "@/lib/alerting/deliveryLog";
 import { html, joinHtml } from "@askarthur/utils/html";
+import { featureFlags } from "@askarthur/utils/feature-flags";
+import { CLONE_WATCH_ONLY_PAUSED_ALERTERS } from "@/lib/cloneWatchOnly";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,9 +54,22 @@ const LIVENESS_FLOORS: Record<Exclude<Alerter, "alerting-canary">, number> = {
   "cost-weekly-digest": 1,
 };
 
+/**
+ * The floors swept on this run. In Clone-Watch-only mode the paused alerters'
+ * crons are removed from vercel.json, so their silence is the expected state
+ * and must not page as a dead alerter (docs/ops/clone-watch-only-mode.md).
+ */
+function activeFloors(): Array<[string, number]> {
+  const all = Object.entries(LIVENESS_FLOORS);
+  if (!featureFlags.cloneWatchOnly) return all;
+  return all.filter(([alerter]) => !CLONE_WATCH_ONLY_PAUSED_ALERTERS.includes(alerter));
+}
+
 export async function GET(req: Request) {
   const unauthorized = requireCronAuth(req);
   if (unauthorized) return unauthorized;
+
+  const floors = activeFloors();
 
   const supabase = createServiceClient();
 
@@ -71,7 +86,7 @@ export async function GET(req: Request) {
     // "silent alerter", or spread the cap across alerters and mask a real one.
     // `count: "exact", head: true` is not row-capped.
     counts = {};
-    for (const alerter of Object.keys(LIVENESS_FLOORS)) {
+    for (const [alerter] of floors) {
       const { count, error } = await supabase
         .from("alert_delivery_log")
         .select("id", { count: "exact", head: true })
@@ -95,7 +110,7 @@ export async function GET(req: Request) {
   const silent: string[] = [];
   const summary: string[] = [];
   if (counts) {
-    for (const [alerter, floor] of Object.entries(LIVENESS_FLOORS)) {
+    for (const [alerter, floor] of floors) {
       const n = counts[alerter] ?? 0;
       summary.push(`${alerter}: ${n}`);
       if (n < floor) silent.push(`${alerter} (${n} rows, floor ${floor})`);
@@ -105,7 +120,7 @@ export async function GET(req: Request) {
   const headline = !counts
     ? html`⚠️ Canary alive but the liveness sweep FAILED — check alert_delivery_log connectivity.`
     : silent.length === 0
-      ? html`✅ All ${Object.keys(LIVENESS_FLOORS).length} alerters alive.`
+      ? html`✅ All ${floors.length} alerters alive.`
       : html`🚨 ${silent.length} alerter(s) below liveness floor:\n${joinHtml(silent.map((s) => html`  • ${s}`), "\n")}`;
 
   const result = await alertAndRecord({
@@ -120,7 +135,11 @@ export async function GET(req: Request) {
       ],
       "\n",
     ),
-    metadata: { silent, sweepOk: counts !== null },
+    metadata: {
+      silent,
+      sweepOk: counts !== null,
+      cloneWatchOnly: featureFlags.cloneWatchOnly,
+    },
   });
 
   if (!result.ok) {
