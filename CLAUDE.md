@@ -308,7 +308,7 @@ EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
    - Both bites surface as immediate exceptions on the first call,
      regardless of input data — which is what
      `packages/scam-engine/src/__tests__/rpcs.smoke.test.ts` is for.
-     **Know its limits before you rely on it:** it covers 13 of 124 RPCs
+     **Know its limits before you rely on it:** it covers 22 of 124 RPCs
      and self-skips when its env vars are absent (`describe.skipIf(!hasEnv)`),
      so a green CI run is NOT evidence it ran. It is nonetheless the only
      gate between a PL/pgSQL runtime error and production, because
