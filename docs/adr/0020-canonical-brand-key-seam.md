@@ -184,6 +184,20 @@ columns were backfilled from live data at apply time, which is recorded in the
 migration and the ops runbook. August's stewardship batch has to be re-fired by
 hand once.
 
+## Amendment 2026-10-13 — the Brand Subscriber is keyed on the Canonical Brand (v347, #1295)
+
+A paying brand was identified five ways (Stripe `org_id`, `monitored_brands.brand_normalized`,
+`brand_contact_directory.legitimate_domain`, `known_brands.brand_domain`, the store's primary
+domain). The **Brand Subscriber** (CONTEXT.md) — the reshaped `monitored_brands` row — is keyed
+`(org_id, brand_normalized)`, where checkout computes `brand_normalized` as
+`brand_normalize(resolve_brand(name) ?? name)`: the Canonical Brand, so "AusPost" and
+"Australia Post" are one subscriber and the key equals a clone alert's
+`target_brand_normalized`. A lookalike also belongs to a subscriber when its
+`inferred_target_domain` is one of the subscriber's legitimate domains (the discriminator,
+ADR-0016, used as a second match, not merged into the key). `deriveBrandKey` is not used
+anywhere on the subscriber path. Not changed here: the stewardship ledger still keys rows on
+`brand_key` (the slug); its send route resolves the subscriber by the canonical key or domain.
+
 ## Related
 
 - `docs/plans/brand-convergence-seam.md` — the phased plan (Phases 0–3).

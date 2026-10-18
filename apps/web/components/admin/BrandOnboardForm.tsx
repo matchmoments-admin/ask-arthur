@@ -26,6 +26,7 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
   const [domains, setDomains] = useState("");
   const [aliases, setAliases] = useState("");
   const [plan, setPlan] = useState<string>("brand_pilot");
+  const [alertContact, setAlertContact] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -51,6 +52,7 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
           legitimateDomains,
           aliases: parseList(aliases),
           plan,
+          ...(alertContact.trim() ? { alertContactEmail: alertContact.trim() } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -71,6 +73,7 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
       setBrandName("");
       setDomains("");
       setAliases("");
+      setAlertContact("");
     } catch {
       setMsg({ kind: "err", text: "Request failed." });
     } finally {
@@ -109,6 +112,16 @@ export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; n
           {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
       </div>
+      {orgId !== HOUSE_ORG.id && (
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gov-slate">
+            Alert contact <span className="font-normal normal-case text-slate-400">— the customer&rsquo;s own address for weaponised alerts and the monthly report (outranks the brand contact directory)</span>
+          </label>
+          <input type="email" value={alertContact} onChange={(e) => setAlertContact(e.target.value)}
+            placeholder="security@brand.com.au"
+            className="mt-1 w-full rounded border border-border-light px-3 py-2 text-sm" />
+        </div>
+      )}
       <div>
         <label className="block text-xs font-semibold uppercase tracking-wide text-gov-slate">Plan</label>
         <select value={plan} onChange={(e) => setPlan(e.target.value)}

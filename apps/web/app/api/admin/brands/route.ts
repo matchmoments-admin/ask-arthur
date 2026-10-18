@@ -9,14 +9,14 @@
 // Deliberate constraints, all inherited from v207's own schema rather than
 // invented here: verification_status starts 'pending' (the matcher index only
 // covers verified+active, so a new row can't silently go live unverified);
-// brand_normalized comes from the CANONICAL brandNormalize() shared with the
-// SQL function and the seed generator, never a local re-implementation.
+// brand_normalized comes from canonicalBrandKey() — the one Canonical Brand
+// derivation (alias-resolve, then brandNormalize) checkout also uses (#1295).
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { brandNormalize } from "@askarthur/shopfront-glue";
+import { canonicalBrandKey } from "@/lib/clone-watch/canonical-brand-key";
 import { logger } from "@askarthur/utils/logger";
 
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
@@ -37,6 +37,9 @@ const Body = z.object({
   aliases: z.array(z.string().trim().min(5)).max(20).optional(),
   plan: z.enum(["brand_pilot", "brand_monitor", "brand_monitor_plus", "brand_enterprise"]),
   verificationMethod: z.enum(["dns_txt", "email_domain", "manual"]).optional(),
+  /** #1295: the Brand Subscriber's own alert contact (weaponised alerts +
+   *  monthly report). Ignored for the house org, which never subscribes. */
+  alertContactEmail: z.string().trim().toLowerCase().email().max(254).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -49,28 +52,31 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const { orgId, brandName, legitimateDomains, aliases, plan, verificationMethod } = parsed.data;
+  const { orgId, brandName, legitimateDomains, aliases, plan, verificationMethod, alertContactEmail } =
+    parsed.data;
+  const isHouse = orgId === HOUSE_ORG_ID;
 
   const bad = legitimateDomains.filter((d) => !DOMAIN.test(d));
   if (bad.length > 0) {
     return NextResponse.json({ error: "invalid_domain", detail: bad.join(", ") }, { status: 400 });
   }
 
-  // The join key. A brand whose name normalises to null (symbols only) would
-  // match nothing forever — reject rather than create a dead row.
-  const brandNormalized = brandNormalize(brandName);
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
+
+  // The join key — the SAME Canonical Brand derivation checkout uses
+  // (ADR-0020, #1295), so an operator-onboarded brand and a bought one are
+  // one row. A name that normalises to null would match nothing forever.
+  const brandNormalized = await canonicalBrandKey(sb, brandName);
   if (!brandNormalized) {
     return NextResponse.json({ error: "brand_name_not_normalisable" }, { status: 400 });
   }
-
-  const sb = createServiceClient();
-  if (!sb) return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
 
   // A customer org must actually have members, or the v207 RLS read policy
   // (membership via org_members) means the customer can never see the brand we
   // just onboarded for them — it would be visible only to us. The house org is
   // exempt by design: it has no members and isn't meant to.
-  if (orgId !== HOUSE_ORG_ID) {
+  if (!isHouse) {
     const { count: memberCount } = await sb
       .from("org_members")
       .select("user_id", { count: "exact", head: true })
@@ -96,13 +102,21 @@ export async function POST(req: NextRequest) {
       legitimate_domains: legitimateDomains,
       aliases: aliases ?? [],
       plan,
+      // #1295: a customer org's row is a Brand Subscriber — onboarded here by
+      // hand (the A$300 pilot is manually billed), so it is active at once;
+      // its entitlements still wait for verification (brand-subscriber.ts).
+      // A house-org row is a watch row, never a subscriber (v347 CHECK).
+      subscription_status: isHouse ? null : "active",
+      billing_provider: isHouse ? null : "manual",
+      activated_at: isHouse ? null : new Date().toISOString(),
+      alert_contact_email: isHouse ? null : (alertContactEmail ?? null),
       verification_method: verificationMethod ?? "manual",
       // Left at the schema default ('pending') ON PURPOSE: the matcher's
       // partial index only covers verified+active rows, so nothing goes live
       // until someone verifies it. Onboarding must not be able to skip that.
       created_by: await getAdminUserId(),
     })
-    .select("id, brand_name, brand_normalized, verification_status, plan")
+    .select("id, brand_name, brand_normalized, verification_status, plan, subscription_status")
     .maybeSingle();
 
   if (error) {

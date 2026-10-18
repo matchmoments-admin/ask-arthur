@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  mergePriorityRows,
   planUrlscanRechecks,
   type SliceRow,
 } from "@/app/api/inngest/functions/clone-watch-lifecycle-recheck";
@@ -622,5 +623,100 @@ describe("opaque shared fronts", () => {
     expect(p.scan.map((r) => r.id)).toEqual([2]);
     expect(p.unchangedIds).toEqual([1]);
     expect(p.counts).toMatchObject({ stale_fill: 1, dns_opaque: 1 });
+  });
+});
+
+// #1295 — Brand Subscriber priority rescans inside the same cap.
+// Go-reds (2026-10-13), each against an edited planUrlscanRechecks, reverted:
+//   - priorityIds ignored (the pre-#1295 plan) failed "a priority row is
+//     scanned even when DNS says unchanged" and "priority rows lead";
+//   - priority rows NOT skipped in the gate loop failed "is never stamped
+//     unchanged" (an unstamped/stamped double-count — the row would be both
+//     scanned and DNS-stamped, its queue clock moved without a rescan record);
+//   - `limit` not reduced by the priority count failed "never exceeds the cap".
+describe("planUrlscanRechecks — Brand Subscriber priority (#1295)", () => {
+  const row = (id: number, over: Partial<SliceRow> = {}): SliceRow => ({
+    id,
+    candidate_domain: `c${id}.example`,
+    candidate_url: `https://c${id}.example`,
+    lifecycle_state: "monitoring",
+    last_rechecked_at: daysAgo(1.5),
+    first_seen_at: daysAgo(10),
+    recheck_dns_fingerprint: "fp",
+    risk: 10,
+    ...over,
+  });
+  const unchanged = (id: number): DnsRead => ({ id, verdict: "unchanged", fingerprint: "fp" });
+  const changed = (id: number): DnsRead => ({ id, verdict: "changed", fingerprint: "fp2" });
+
+  it("a priority row is scanned even when DNS says unchanged, and is never stamped unchanged", () => {
+    const p = planUrlscanRechecks([row(1)], [unchanged(1)], 5, NOW, new Set([1]));
+    expect(p.scan.map((r) => r.id)).toEqual([1]);
+    expect(p.unchangedIds).toEqual([]);
+    expect(p.counts).toMatchObject({ priority: 1, dns_unchanged: 0 });
+  });
+
+  it("priority rows lead the scan, stalest first, ahead of a DNS change", () => {
+    const p = planUrlscanRechecks(
+      [row(1, { risk: 99 }), row(2, { last_rechecked_at: daysAgo(3) }), row(3)],
+      [changed(1), unchanged(2), unchanged(3)],
+      90,
+      NOW,
+      new Set([3, 2]),
+    );
+    expect(p.scan.map((r) => r.id).slice(0, 3)).toEqual([2, 3, 1]);
+  });
+
+  it("never exceeds the cap — priority takes slots from the gate, it adds none", () => {
+    const slice = [row(1), row(2), row(3), row(4)];
+    const p = planUrlscanRechecks(
+      slice,
+      [changed(1), changed(2), unchanged(3), unchanged(4)],
+      3,
+      NOW,
+      new Set([3, 4]),
+    );
+    expect(p.scan.map((r) => r.id)).toEqual([3, 4, 1]);
+    expect(p.counts.deferred).toBe(1);
+  });
+
+  it("no priority set → the plan is exactly the pre-#1295 plan", () => {
+    const slice = [row(1), row(2)];
+    const reads = [unchanged(1), changed(2)];
+    const a = planUrlscanRechecks(slice, reads, 1, NOW);
+    const b = planUrlscanRechecks(slice, reads, 1, NOW, new Set());
+    expect(b).toEqual(a);
+    expect(a.counts.priority).toBe(0);
+  });
+});
+
+describe("mergePriorityRows (#1295)", () => {
+  const sliceRow = (id: number): SliceRow => ({
+    id,
+    candidate_domain: `c${id}.example`,
+    candidate_url: `https://c${id}.example`,
+    lifecycle_state: "monitoring",
+    last_rechecked_at: null,
+    first_seen_at: null,
+    recheck_dns_fingerprint: null,
+    risk: 42,
+  });
+  const prio = (id: number) => ({
+    id,
+    candidate_domain: `p${id}.example`,
+    candidate_url: `https://p${id}.example`,
+    lifecycle_state: "declined",
+    last_rechecked_at: daysAgo(2),
+    first_seen_at: daysAgo(100),
+    recheck_dns_fingerprint: "fp",
+    brand_subscriber_id: 1,
+    due_total: 2,
+  });
+
+  it("appends rows the ranked slice missed and keeps the slice's own row (and risk) for the rest", () => {
+    const out = mergePriorityRows([sliceRow(1)], [prio(1), prio(2), prio(2)]);
+    expect(out.map((r) => r.id)).toEqual([1, 2]);
+    expect(out[0].risk).toBe(42);
+    expect(out[1]).toMatchObject({ id: 2, risk: 0, queue_clock_at: daysAgo(2) });
   });
 });

@@ -7,6 +7,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { hasPermission, type OrgRole } from "@askarthur/types";
+import { canonicalBrandKey } from "@/lib/clone-watch/canonical-brand-key";
+import { createPendingBrandSubscriber } from "@/lib/clone-watch/brand-subscriber";
 
 // Brand Monitor checkout (Wave 3 of clone-watch-enforcement-and-monetisation;
 // Brand activation 2/4). Session-authed, org-anchored: the purchaser must be
@@ -22,10 +24,40 @@ import { hasPermission, type OrgRole } from "@askarthur/types";
 //
 // brand_pilot is intentionally not accepted here — it is provisioned manually
 // (billing_provider='manual'), never via self-serve checkout. See brandSkus.ts.
+// The self-serve tiers are not linked from the public pricing page (#1295
+// decision 5: sell only the manual pilot until the first customer); the route
+// stays so the flow is ready when pricing leaves the fog.
+//
+// #1295: checkout collects the brand FIRST. A `pending` Brand Subscriber row
+// (monitored_brands, v347) is created before the Stripe session and its id
+// rides in the server-set metadata, so the webhook activates exactly that row.
+// A payment that cannot be attached lands in brand_unmatched_payments.
+
+/** Lower-case host: strips scheme, www., path and a trailing dot. */
+function normaliseDomain(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[/?#].*$/, "")
+    .replace(/\.$/, "");
+}
+
+const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 const CheckoutSchema = z.object({
   orgId: z.string().uuid(),
   plan: z.enum(["brand_monitor", "brand_monitor_plus"]),
+  brandName: z.string().trim().min(2).max(120),
+  primaryDomain: z
+    .string()
+    .max(253)
+    .transform(normaliseDomain)
+    .refine((d) => DOMAIN.test(d), "primaryDomain must be a domain, e.g. example.com.au"),
+  /** Who receives this brand's alerts and monthly report. Defaults to the
+   *  purchaser's own email. */
+  alertContactEmail: z.string().trim().toLowerCase().email().max(254).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -57,7 +89,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const { orgId, plan } = parsed.data;
+    const { orgId, plan, brandName, primaryDomain, alertContactEmail } = parsed.data;
 
     const priceId = brandMonitorPriceId(plan);
     if (!priceId) {
@@ -91,9 +123,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The ADR-0020 Canonical Brand: alias-resolve the typed name, then
+    // brand_normalize — so "AusPost" and "Australia Post" are one subscriber,
+    // and the key matches clone alerts' target_brand_normalized. An alias
+    // read failure only weakens canonicalisation (falls back to the raw name).
+    const brandNormalized = await canonicalBrandKey(supabase, brandName);
+    if (!brandNormalized) {
+      return NextResponse.json(
+        { error: "validation_error", message: "brandName has no letters or digits" },
+        { status: 400 },
+      );
+    }
+
+    const pending = await createPendingBrandSubscriber(supabase, {
+      orgId,
+      brandName,
+      brandNormalized,
+      primaryDomain,
+      plan,
+      alertContactEmail: alertContactEmail ?? user.email ?? null,
+      createdBy: user.id,
+    });
+    if (pending.outcome === "already_subscribed") {
+      return NextResponse.json(
+        {
+          error: "already_subscribed",
+          message: "This brand already has an active subscription in this organisation.",
+        },
+        { status: 409 },
+      );
+    }
+
     const customerId = await getOrCreateStripeCustomer(user.id, user.email, supabase);
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://askarthur.au";
-    const meta = { org_id: orgId, user_id: user.id, plan };
+    const meta = {
+      org_id: orgId,
+      user_id: user.id,
+      plan,
+      brand_subscriber_id: String(pending.brandSubscriberId),
+    };
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,

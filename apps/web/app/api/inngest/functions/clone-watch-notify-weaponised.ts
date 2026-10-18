@@ -21,6 +21,15 @@ import {
 } from "./clone-watch-notify-brand";
 import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
 import { readAttribution } from "@/lib/clone-watch/attribution";
+import {
+  loadBrandSubscriber,
+  routeBrandAlert,
+  type BrandAlertRoute,
+} from "@/lib/clone-watch/brand-subscriber";
+import {
+  checkBrandSend,
+  type BrandSendDecision,
+} from "@/lib/clone-watch/brand-send-gate";
 import { isFeatureBrakedOrUnknown } from "@askarthur/scam-engine/cost-log";
 import { html, joinHtml, type SafeHtml } from "@askarthur/utils/html";
 
@@ -157,20 +166,30 @@ export const cloneWatchNotifyWeaponised = inngest.createFunction(
         return rows as DirectoryRow | null;
       });
 
-      // monitored_brands tag-along (telemetry only — zero rows in prod
-      // today and no contact email column; org-email routing is a
-      // follow-up, see the plan doc).
-      const monitoredBrand = await step.run("monitored-brand-tag", async () => {
-        if (!alert.target_brand_normalized) return null;
-        const { data: row } = await sb
-          .from("monitored_brands")
-          .select("id, plan")
-          .eq("brand_normalized", alert.target_brand_normalized)
-          .eq("is_active", true)
-          .eq("verification_status", "verified")
-          .maybeSingle();
-        return row as { id: number; plan: string } | null;
+      // #1295: the Brand Subscriber outranks brand_contact_directory (the
+      // directory is for unsolicited outreach only). A read error throws for
+      // the step's retry — it must never read as "no subscriber" and fall
+      // through to an unsolicited directory alert for a paying brand.
+      const subscriberRoute = await step.run("load-brand-subscriber", async () => {
+        const { subscriber } = await loadBrandSubscriber(sb, {
+          brandNormalized: alert.target_brand_normalized,
+          domain: alert.inferred_target_domain,
+        });
+        return {
+          route: routeBrandAlert(subscriber, "weaponisedAlert"),
+          subscriberId: subscriber?.id ?? null,
+          plan: subscriber?.plan ?? null,
+          status: subscriber?.subscriptionStatus ?? null,
+        };
       });
+      const monitoredBrand =
+        subscriberRoute.subscriberId === null
+          ? null
+          : { id: subscriberRoute.subscriberId, plan: subscriberRoute.plan };
+
+      if (subscriberRoute.route.kind === "subscriber") {
+        return await routeToSubscriber(step, sb, alert, data.via, subscriberRoute.route, urlscanEvidenceFromJsonb(alert.urlscan_evidence)?.resultUrl);
+      }
 
       const action = decideNotificationAction(directoryRow, "critical");
       const urlscanEvidence = urlscanEvidenceFromJsonb(alert.urlscan_evidence);
@@ -375,6 +394,85 @@ export const cloneWatchNotifyWeaponised = inngest.createFunction(
   ),
 );
 
+// ── Subscriber route (#1295) ─────────────────────────────────────────────
+
+type Step = Parameters<Parameters<typeof withAxiomLogging>[1]>[0]["step"];
+type Sb = NonNullable<ReturnType<typeof createServiceClient>>;
+
+/**
+ * The weaponised alert for a Brand Subscriber: routed to the subscriber's own
+ * contact, SHADOWED until #371. Nothing is sent from here — the decision and
+ * what the Brand Send Gate ("subscriber" profile, which carries the #371
+ * sign-off) would say are recorded on the alert, and the admin is paged so a
+ * human can tell the customer today. The real send lands with #371 as a
+ * subscriber send path that must call the same gate.
+ */
+async function routeToSubscriber(
+  step: Step,
+  sb: Sb,
+  alert: WeaponisedAlertRow,
+  via: string,
+  route: Extract<BrandAlertRoute, { kind: "subscriber" }>,
+  urlscanResultUrl: string | undefined,
+) {
+  const gate = await step.run("subscriber-gate", async () => {
+    const d = await checkBrandSend("subscriber", sb, {
+      recipient: route.recipient,
+      subscriberId: route.subscriberId,
+      context: { alert_id: alert.id, via },
+    });
+    return { allowed: d.allowed, codes: d.reasons.map((r) => r.code) };
+  });
+  const value = subscriberShadowStamp(route, gate, via, new Date().toISOString());
+  await step.run("stamp-subscriber-shadow", async () => {
+    await sb.rpc("merge_clone_alert_submission", {
+      p_alert_id: alert.id,
+      p_key: "weaponised_notification",
+      p_value: value,
+      p_set_triage_status: null,
+    });
+  });
+  await step.run("telegram-admin-subscriber", async () => {
+    await sendAdminTelegramMessage(
+      buildWeaponisedTelegramMessage({
+        stage: "subscriber_shadow",
+        brand: route.brandName,
+        candidateDomain: alert.candidate_domain,
+        via,
+        urlscanResultUrl,
+        detail: gate.allowed ? "gate would allow" : `gate: ${gate.codes.join(", ")}`,
+      }),
+    );
+  });
+  // Rare, high-value — always-ship warn.
+  logger.warn("clone-watch: weaponised alert routed to Brand Subscriber (shadow)", {
+    alertId: alert.id,
+    subscriberId: route.subscriberId,
+    gateAllowed: gate.allowed,
+    gateCodes: gate.codes,
+    via,
+  });
+  return { ok: true, outcome: "subscriber_shadow", subscriberId: route.subscriberId };
+}
+
+/** The `weaponised_notification` stamp for a subscriber-routed alert. Pure.
+ *  Carries no address — only the subscriber id. */
+export function subscriberShadowStamp(
+  route: Extract<BrandAlertRoute, { kind: "subscriber" }>,
+  gate: Pick<BrandSendDecision, "allowed"> & { codes: string[] },
+  via: string,
+  at: string,
+): Record<string, unknown> {
+  return {
+    status: "subscriber_shadow",
+    brand_subscriber_id: route.subscriberId,
+    gate_allowed: gate.allowed,
+    gate_codes: gate.codes,
+    via,
+    at,
+  };
+}
+
 // ── Pure helpers (exported for unit testing) ─────────────────────────────
 
 /** Email props from the ONE attribution reader (lib/clone-watch/attribution.ts).
@@ -438,7 +536,7 @@ export function buildWeaponisedSubject(
 }
 
 export function buildWeaponisedTelegramMessage(args: {
-  stage: "staged" | "manual_channel" | "no_contact";
+  stage: "staged" | "manual_channel" | "no_contact" | "subscriber_shadow";
   brand: string;
   candidateDomain: string;
   via: string;
@@ -469,6 +567,12 @@ export function buildWeaponisedTelegramMessage(args: {
         html`No auto-email channel (<i>${args.detail ?? "manual"}</i>) — notify the brand manually.`,
       );
       if (args.recipient) lines.push(html`Open: ${args.recipient}`);
+      break;
+    case "subscriber_shadow":
+      lines.push(
+        html``,
+        html`Brand Subscriber — routed to the subscriber's own contact. <b>Shadow until #371</b>: nothing was sent (<i>${args.detail ?? ""}</i>). Tell the customer directly.`,
+      );
       break;
     case "no_contact":
       lines.push(
