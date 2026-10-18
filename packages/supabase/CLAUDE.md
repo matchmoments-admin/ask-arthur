@@ -28,20 +28,20 @@ Scoped guidance for the Supabase client factories. Read this in addition to the 
 
 - Server components, pages, layouts (`*.tsx` under `apps/web/app/` outside `api/`).
 - `apps/web/middleware.ts`.
-- `apps/web/lib/**` — request-context utilities. Use `createServerClient` (RLS-bearing) instead.
+- `apps/web/lib/**` — request-context utilities. Use `createAuthServerClient` (RLS-bearing) instead.
 - Any other `packages/**/*` outside the allowed two.
 
 If you reach for `createServiceClient` outside the allowed tiers, stop and ask. The `rls-and-tenant-isolation.sh` advisory reviewer (PostToolUse) flags violations with `BLOCK_RECOMMENDED` severity.
 
-> **Note on the current state.** The "all routes under `apps/web/app/api/**` are allowed" rule reflects the codebase as of 2026-05-25, not an ideal future state. Some of those routes could in principle use `createServerClient` instead and rely on RLS — the audit to evaluate that is tracked separately. The reviewer's job is to prevent NEW additions in the _forbidden_ tier, not to retrofit the historical state.
+> **Note on the current state.** The "all routes under `apps/web/app/api/**` are allowed" rule reflects the codebase as of 2026-05-25, not an ideal future state. Some of those routes could in principle use `createAuthServerClient` instead and rely on RLS — the audit to evaluate that is tracked separately. The reviewer's job is to prevent NEW additions in the _forbidden_ tier, not to retrofit the historical state.
 
 ## Decision tree: which factory should I call?
 
 | Caller surface                                   | Factory                      | RLS?   | Notes                                                                                           |
 | ------------------------------------------------ | ---------------------------- | ------ | ----------------------------------------------------------------------------------------------- |
-| Server component / server action / route handler | `createServerClient`         | Yes    | Reads the user's session from cookies                                                           |
+| Server component / server action / route handler | `createAuthServerClient`     | Yes    | Reads the user's session from cookies                                                           |
 | Browser component                                | `createBrowserClient`        | Yes    | Public anon key only; never put the service-role key in the client bundle                       |
-| Auth-aware route handler (login, signup)         | `createAuthServerClient`     | Yes    | Variant of `createServerClient` with extra cookie handling for auth flows                       |
+| Auth-aware route handler (login, signup)         | `createAuthServerClient`     | Yes    | Same factory as above; also covers auth-flow cookie handling                                    |
 | Next.js middleware                               | `createMiddlewareClient`     | Yes    | Handles cookie refresh; must run before auth checks                                             |
 | Durable worker (Inngest function, cron)          | `createServiceClient`        | **No** | Service-role; bypasses RLS; only legitimate use is cross-tenant background work                 |
 | Python scraper                                   | `supabase-py` w/ service key | **No** | Same rule as `createServiceClient`; chunked writes only on hot tables (see incident 2026-05-09) |
@@ -50,8 +50,7 @@ If you reach for `createServiceClient` outside the allowed tiers, stop and ask. 
 
 | Export                   | From                              | Purpose                                               |
 | ------------------------ | --------------------------------- | ----------------------------------------------------- |
-| `createServerClient`     | `@askarthur/supabase/server`      | RLS-bearing server client (cookies → session)         |
-| `createAuthServerClient` | `@askarthur/supabase/server-auth` | Same as above with auth-flow cookie handling          |
+| `createAuthServerClient` | `@askarthur/supabase/server-auth` | RLS-bearing server client (cookies → session)         |
 | `createBrowserClient`    | `@askarthur/supabase/browser`     | RLS-bearing client-side client                        |
 | `createMiddlewareClient` | `@askarthur/supabase/middleware`  | Cookie-refresh-aware middleware client                |
 | `createServiceClient`    | `@askarthur/supabase/server`      | Service-role; **restricted callers only** (see above) |

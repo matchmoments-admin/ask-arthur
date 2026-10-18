@@ -17,6 +17,7 @@ app/
 │   ├── v1/                # B2B endpoints (API-key gated, tier-throttled)
 │   ├── webhooks/          # bot platforms + Stripe
 │   ├── cron/              # Vercel cron handlers
+│   ├── inngest/           # Durable consumers for analyze.completed.v1
 │   └── ...
 ├── app/                   # authenticated consumer pages
 │   ├── page.tsx           # main user dashboard (route root — there is no dashboard/ subdir)
@@ -37,7 +38,6 @@ lib/                       # Local-only utilities (use @/lib/...)
   └── ...
 __tests__/                 # vitest, mocks the @askarthur/* packages
 middleware.ts              # Auth wrapping (Promise.race 3s), bot routing
-inngest/                   # Durable consumers for analyze.completed.v1
 emails/                    # React Email templates
 ```
 
