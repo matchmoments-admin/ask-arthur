@@ -1,6 +1,16 @@
 # Grant Strategy — Ask Arthur
 
-*Updated April 2026*
+> ⚠️ **DATA-RESIDENCY CLAIM IN THIS DOCUMENT IS INCORRECT — verified 2026-07-30.**
+> Any statement here that Ask Arthur is "Australian-hosted", has "sovereign data
+> residency" or "zero US data dependency" does not match the live
+> infrastructure. The Supabase database is `ap-southeast-1` (**Singapore**) and
+> Vercel server functions execute in `iad1` (**Washington DC, USA**); only the
+> CDN edge is Sydney. See `docs/compliance/data-residency-statement.md`.
+> **The narrative below has deliberately NOT been rewritten** — if any version
+> of this document has already been sent to an investor, customer or grant body,
+> that needs a decision from the founder, not a silent edit.
+
+_Updated April 2026_
 
 ## Priority 1: Apply Immediately
 
@@ -113,27 +123,28 @@
 
 The Scams Prevention Framework Act 2025 (Royal Assent 21 February 2025) mandates six principles for banks, telcos, and digital platforms from 1 July 2026. Ask Arthur directly enables:
 
-| SPF Principle | How Ask Arthur Enables It |
-|---------------|--------------------------|
-| **Detect** | Threat API provides Actionable Scam Intelligence feeds; 16 threat feeds + entity enrichment |
-| **Report** | Government export views; structured data aligned to Scamwatch categories; provider reporting RPCs |
-| **Disrupt** | Entity intelligence (phone, URL, email, IP) with risk scores enables blocking decisions |
-| **Prevent** | Consumer scam checker; security scanner; real-time warnings |
+| SPF Principle | How Ask Arthur Enables It                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------- |
+| **Detect**    | Threat API provides Actionable Scam Intelligence feeds; 16 threat feeds + entity enrichment       |
+| **Report**    | Government export views; structured data aligned to Scamwatch categories; provider reporting RPCs |
+| **Disrupt**   | Entity intelligence (phone, URL, email, IP) with risk scores enables blocking decisions           |
+| **Prevent**   | Consumer scam checker; security scanner; real-time warnings                                       |
 
 This alignment is central to all grant narratives and investor pitches.
 
 ## Alignment with AU Cyber Security Strategy 2023-2030
 
-| Shield | Our Alignment |
-|--------|--------------|
-| **Shield 1: Strong businesses and citizens** | Free consumer scam checker empowers everyday Australians |
-| **Shield 2: Safe technology** | AI-powered detection of emerging scam techniques; security scanner for extensions/MCP/AI skills |
-| **Shield 3: World-class threat sharing** | B2B Threat API provides real-time intelligence to regulated entities |
-| **Shield 5: Sovereign capabilities** | Australian-built, Australian-hosted, zero US data dependency |
+| Shield                                       | Our Alignment                                                                                   |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Shield 1: Strong businesses and citizens** | Free consumer scam checker empowers everyday Australians                                        |
+| **Shield 2: Safe technology**                | AI-powered detection of emerging scam techniques; security scanner for extensions/MCP/AI skills |
+| **Shield 3: World-class threat sharing**     | B2B Threat API provides real-time intelligence to regulated entities                            |
+| **Shield 5: Sovereign capabilities**         | Australian-built, Australian-hosted, zero US data dependency                                    |
 
 ## Grant Application Scoring Tips
 
 **Score well on:**
+
 - Clear NRF priority alignment with specific Australian capability uplift
 - Named customers or LOIs with dates
 - Specific TRL current-to-target with evidence
@@ -141,6 +152,7 @@ This alignment is central to all grant narratives and investor pitches.
 - Quantified metrics (FTEs by year, revenue projections, export potential)
 
 **Score poorly on:**
+
 - Business-as-usual activities dressed as innovation
 - Hand-wavy market claims without named customers
 - Weak additionality arguments ("what happens with vs without this grant")
@@ -152,6 +164,7 @@ This alignment is central to all grant narratives and investor pitches.
 The SPF Rules — which will formally authorise third-party data gateways as Actionable Scam Intelligence (ASI) sources — **have not yet been finalised**. Gilbert + Tobin's analysis specifically notes the development of rules including "the authorisation of any third party data gateways, portals or websites that give access to actionable scam intelligence."
 
 This creates a first-mover opportunity:
+
 - **Engage Treasury and ACCC/NASC during the rulemaking process** to shape how providers like Ask Arthur are formally recognised
 - Submit to any open Treasury SPF consultations (position paper was 28 November 2025)
 - Contact NASC about fusion cell participation (investment scam, job scam, romance scam fusion cells have run since launch)
@@ -162,19 +175,19 @@ This creates a first-mover opportunity:
 
 ## Action Timeline
 
-| Action | Deadline | Priority |
-|--------|----------|----------|
-| Apply to IGP Advisory Service | This week | CRITICAL |
-| Register FY24-25 R&D activities (RDTI) | 30 April 2026 | CRITICAL |
-| Begin contemporaneous R&D documentation | Immediately | CRITICAL |
-| Apply to Startmate | Next cohort opening | HIGH |
-| Submit to Treasury SPF consultation (rulemaking) | This month | HIGH |
-| Contact NASC about fusion cell participation | This month | HIGH |
-| AFCX membership enquiry | This month | HIGH |
-| GASA membership application | Within 60 days | HIGH |
-| ASD Business Partner registration | Within 60 days | MEDIUM |
-| Monitor NSW MVP Ventures next round | Ongoing (until June 2027) | MEDIUM |
-| Submit IGP grant (after Advisory Service report) | ~8 weeks from now | HIGH |
-| Monitor QLD Ignite Ideas | Ongoing | MEDIUM |
+| Action                                           | Deadline                  | Priority |
+| ------------------------------------------------ | ------------------------- | -------- |
+| Apply to IGP Advisory Service                    | This week                 | CRITICAL |
+| Register FY24-25 R&D activities (RDTI)           | 30 April 2026             | CRITICAL |
+| Begin contemporaneous R&D documentation          | Immediately               | CRITICAL |
+| Apply to Startmate                               | Next cohort opening       | HIGH     |
+| Submit to Treasury SPF consultation (rulemaking) | This month                | HIGH     |
+| Contact NASC about fusion cell participation     | This month                | HIGH     |
+| AFCX membership enquiry                          | This month                | HIGH     |
+| GASA membership application                      | Within 60 days            | HIGH     |
+| ASD Business Partner registration                | Within 60 days            | MEDIUM   |
+| Monitor NSW MVP Ventures next round              | Ongoing (until June 2027) | MEDIUM   |
+| Submit IGP grant (after Advisory Service report) | ~8 weeks from now         | HIGH     |
+| Monitor QLD Ignite Ideas                         | Ongoing                   | MEDIUM   |
 
 **Important caveat**: Government grants received for the same R&D activity reduce eligible RDTI expenditure. Plan grant and RDTI claims in coordination.
