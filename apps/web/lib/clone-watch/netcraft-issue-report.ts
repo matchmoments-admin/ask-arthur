@@ -1,4 +1,5 @@
 import { stripUrlPii } from "@/lib/onward/url-blocklist-report";
+import { grantCovers, type NetcraftGrant } from "./netcraft-budget";
 import {
   NETCRAFT_API_BASE,
   type FalseNegativeCandidate,
@@ -120,8 +121,15 @@ export interface NetcraftIssueResult {
 export async function postNetcraftIssue(
   uuid: string,
   payload: NetcraftIssuePayload,
+  // One report_issue is one unit of the issue Lane's budget
+  // (lib/clone-watch/netcraft-budget.ts). Without a covering grant nothing is
+  // sent.
+  grant: NetcraftGrant | null,
   timeoutMs = 20_000,
 ): Promise<NetcraftIssueResult> {
+  if (!grantCovers(grant, "issue", 1)) {
+    return { ok: false, status: 0, body: "netcraft_budget: no issue grant" };
+  }
   try {
     const res = await fetch(
       `${NETCRAFT_API_BASE}/submission/${encodeURIComponent(uuid)}/report_issue`,

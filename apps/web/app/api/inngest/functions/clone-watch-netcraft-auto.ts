@@ -16,6 +16,10 @@ import {
 } from "@/lib/clone-watch/netcraft-deferral";
 import { WORKLIST_MIN_CONFIDENCE } from "@/lib/clone-watch/preclassify-thresholds";
 import {
+  claimNetcraftBudget,
+  netcraftLaneCap,
+} from "@/lib/clone-watch/netcraft-budget";
+import {
   buildNetcraftBulkBody,
   buildNetcraftResubmitBody,
   netcraftReporterEmail,
@@ -50,11 +54,13 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  * throw, so a transient Netcraft hiccup never raises an Inngest fn error / the
  * Axiom fleet alert.
  *
- * Daily cap (no flooding). The candidate RPC (v185) folds in a 24h budget:
- * it counts clones already auto-bulk-submitted in the last 24h and returns at
- * most (DAILY_CAP − that), hard-capped at 50, ordered best-confidence-first. So
- * a normal day is ONE bulk request of ≤50 URLs, and re-firing the manual
- * trigger cannot exceed the day's budget — structurally impossible to flood.
+ * Daily cap (no flooding). The candidate RPC (v185, per-UTC-day since v258)
+ * counts clones already auto-bulk-submitted today and returns at most
+ * (cap − that), hard-capped at 50. The cap itself, and the account-wide
+ * ceiling shared with the resubmit and issue Lanes, live in the Netcraft
+ * budget Module (lib/clone-watch/netcraft-budget.ts, #1301): each live POST
+ * needs a grant from it, so re-firing the manual trigger cannot exceed the
+ * day's budget — structurally impossible to flood.
  *
  * Test mode. Fire the manual-trigger event with `{ test: true }` to validate
  * the exact payload against Netcraft's TEST endpoint (validates only — NO
@@ -102,7 +108,9 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
 // batches by design and self-heals through v289's age-gate bypass; the live
 // invariant is `stranded_live` on the reconcile Outcome Row (#1265). Watch
 // queries: docs/ops/clone-watch-config.md "Escalation is gated by BATCH SIZE".
-const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
+// Max clones auto-submitted per UTC day: NETCRAFT_LANES.auto in the budget
+// Module, the one declaration (#1301).
+const DAILY_CAP = netcraftLaneCap("auto");
 // ADR-0026: `confidence` is Jev's calibrated P(clone); the threshold lives
 // with its evidence in lib/clone-watch/preclassify-thresholds.ts.
 const MIN_CONFIDENCE = WORKLIST_MIN_CONFIDENCE;
@@ -114,10 +122,10 @@ const RESUBMIT_BRAKE = LANES["shopfront-clone-netcraft-auto/resubmit"].brake;
 // an unreadable brake counts as engaged, because this Lane reports third-party
 // URLs to an external vendor in Ask Arthur's name.
 const AUTO_BRAKE = LANES["shopfront-clone-netcraft-auto/auto"].brake;
-// 15 (was 10, #1231): 10/10 on 2026-09-23 and -24 with 25 and 17 candidates.
-// A precision cap (each report goes out in Ask Arthur's name), not a quota —
-// NETCRAFT_RESUBMIT_DAILY_CAP overrides.
-const RESUBMIT_DEFAULT_CAP = 15;
+// The resubmit cap (15, was 10 — #1231: 10/10 on 2026-09-23 and -24 with 25
+// and 17 candidates) is a precision cap, each report going out in Ask Arthur's
+// name. Declared in the Netcraft budget Module (NETCRAFT_LANES.resubmit,
+// NETCRAFT_RESUBMIT_DAILY_CAP overrides), #1301.
 const RESUBMIT_MIN_AGE_DAYS = 30; // matches the issue reporter's window
 const RESUBMIT_COOLDOWN_DAYS = 14;
 const RESUBMIT_MAX_PER_ALERT = 3;
@@ -131,11 +139,7 @@ const RESUBMIT_PROBE_MULTIPLIER = 3;
 const RESUBMIT_DEAD_RECHECK_MS = NETCRAFT_DEFERRAL.resubmit.deadRecheckMs;
 
 function resubmitCap(): number {
-  const raw = Number.parseInt(
-    process.env.NETCRAFT_RESUBMIT_DAILY_CAP ?? "",
-    10,
-  );
-  return Number.isFinite(raw) && raw > 0 ? raw : RESUBMIT_DEFAULT_CAP;
+  return netcraftLaneCap("resubmit");
 }
 
 export const cloneWatchNetcraftAuto = inngest.createFunction(
@@ -151,7 +155,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
     // account's 5 Hobby-plan concurrency slots (~30–60s each under
     // contention). Finite per ADR-0019; guarded by
     // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "10m" },
+    // 12m, not 10m (#1301): the Netcraft budget adds a claim step per Lane
+    // and a refusal-log step per Lane (22 static boundaries × 30s + 60s slack
+    // = 12m). A run takes at most one claim per Lane. Like netcraft-issue's
+    // 12m this exceeds the 10m pg-stuck-query-watchdog window; the long pole
+    // is external HTTP and slot queue wait, not a Postgres backend, so a long
+    // run is expected and not a watchdog condition.
+    timeouts: { finish: "12m" },
   },
   [
     // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:10 pass, so the
@@ -243,15 +253,43 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           };
         }
 
+        // Netcraft budget (#1301): the account-wide ceiling shared with the
+        // resubmit and issue Lanes. A validation run files nothing and claims
+        // nothing. A refusal is not a quiet day — the row carries the reason
+        // and the Lane's silent-zero shape (candidates>0, marked=0) shows it.
+        const claim = isTest
+          ? null
+          : await step.run("auto-claim-budget", () =>
+              claimNetcraftBudget(sb, "auto", candidates.length),
+            );
+        if (claim && !claim.ok) {
+          await step.run("log-budget-refused", () =>
+            recordLaneOutcome("shopfront-clone-netcraft-auto/auto", 0, {
+              reason: "netcraft_budget",
+              budget_refused: claim.reason,
+              candidates: candidates.length,
+              marked: 0,
+            }),
+          );
+          return {
+            ok: true,
+            candidates: candidates.length,
+            submitted: 0,
+            reason: `netcraft_budget:${claim.reason}`,
+          };
+        }
+        const grant = claim?.grant ?? null;
+        // Held rows stay unstamped and lead tomorrow's worklist: a budget hold
+        // is a later day, not a gate reject.
+        const batch = grant ? candidates.slice(0, grant.allowed) : candidates;
+        const budgetHeld = candidates.length - batch.length;
+
         // ONE bulk request for the whole (≤50) batch — no per-request flood.
         // Test mode hits the validation-only endpoint (no report, no email).
         const result = await step.run("submit-netcraft-bulk", () =>
           postNetcraftBulk(
-            buildNetcraftBulkBody(
-              candidates,
-              netcraftReporterEmail(),
-            ),
-            { test: isTest },
+            buildNetcraftBulkBody(batch, netcraftReporterEmail()),
+            isTest ? { test: true } : { test: false, grant, lane: "auto" },
           ),
         );
 
@@ -311,7 +349,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         const marked = await step.run("persist-submissions", () =>
           recordAutoSubmission(
             sb,
-            candidates.map((c) => c.id),
+            batch.map((c) => c.id),
             result,
           ),
         );
@@ -320,6 +358,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           await recordLaneOutcome("shopfront-clone-netcraft-auto/auto", marked, {
             candidates: candidates.length,
             marked,
+            budget_held: budgetHeld,
             netcraft_uuid: result.uuid,
           });
         });
@@ -502,10 +541,44 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         // The 24h budget bounds SUBMISSIONS; the over-fetch above only widened
         // what we probe. Defaults to the cap when the column is absent (an old
         // deployment reading the new RPC, or vice versa).
-        const budget = Math.max(
+        const rpcBudget = Math.max(
           0,
           pending[0]?.budget_remaining ?? resubmitCap(),
         );
+        // Netcraft budget (#1301): the account-wide ceiling shared with the
+        // auto Lane (which has already written today's row by now — the two
+        // run sequentially) and the issue Lane. Claimed only when there is a
+        // live row to file; test mode claims nothing.
+        const want = Math.min(rpcBudget, liveAll.length);
+        const claim =
+          isTest || want === 0
+            ? null
+            : await step.run("resubmit-claim-budget", () =>
+                claimNetcraftBudget(sb, "resubmit", want),
+              );
+        if (claim && !claim.ok) {
+          await step.run("resubmit-log-budget-refused", () =>
+            recordLaneOutcome("shopfront-clone-netcraft-auto/resubmit", 0, {
+              rejected_excluded: rejectedExcluded,
+              reason: "netcraft_budget",
+              budget_refused: claim.reason,
+              candidates: pending.length,
+              marked: 0,
+              deferred,
+              dead,
+            }),
+          );
+          return {
+            ok: true,
+            candidates: pending.length,
+            submitted: 0,
+            dead,
+            deferred,
+            reason: `netcraft_budget:${claim.reason}`,
+          };
+        }
+        const grant = claim?.grant ?? null;
+        const budget = grant ? Math.min(rpcBudget, grant.allowed) : rpcBudget;
         const live = liveAll.slice(0, budget);
 
         // Nothing to file — but under test the point is to validate the payload
@@ -549,7 +622,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               batch,
               netcraftReporterEmail(),
             ),
-            { test: isTest },
+            isTest ? { test: true } : { test: false, grant, lane: "resubmit" },
           ),
         );
 
@@ -659,6 +732,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             deferred,
             budget,
             marked,
+            budget_held: Math.max(0, Math.min(rpcBudget, liveAll.length) - live.length),
             // #1231: held by the day's budget with live rows left over.
             cap: resubmitCap(),
             cap_reached: liveAll.length > budget,

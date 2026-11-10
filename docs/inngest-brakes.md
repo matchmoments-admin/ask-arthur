@@ -120,6 +120,16 @@ submits would let one batch starve every blocklist send for the day. The cap FAI
 CLOSED when the count query errors (execute throws; the admin send route returns 503).
 `clone-watch-enforcement-execute.ts` step `record-queued`; v318 §6, v320)
 
+² **Netcraft budget (#1301).** The three Netcraft filing Lanes above (auto, resubmit,
+issue) keep their own caps (50 / `NETCRAFT_RESUBMIT_DAILY_CAP` 15 /
+`NETCRAFT_ISSUE_DAILY_CAP` 20) and now also share one account ceiling of **50 reports
+per UTC day**, declared with the caps in `apps/web/lib/clone-watch/netcraft-budget.ts`.
+Ledger = each Lane's Outcome Row `units`; a live POST needs a grant
+(`claimNetcraftBudget`), an unreadable ledger refuses (fail closed), and the refusal
+lands on the Outcome Row as `reason='netcraft_budget'` + `budget_refused`. Measured
+before adoption: max 13/day combined since v284 (2026-08-24); the issue Lane no
+longer calls `count_todays_netcraft_issues`.
+
 - `concurrency: 1`, but has **no Inngest `throttle` and no same-window cooldown** —
   unlike its cron+manual siblings (recheck has both; notify-brand-prepare has a 24h
   per-brand cooldown). The shared cap bounds the daily TOTAL, so a manual-trigger

@@ -10,6 +10,7 @@ import {
   type NetcraftAutoCandidate,
   type NetcraftResubmitCandidate,
 } from "@/lib/clone-watch/netcraft-report";
+import { decideNetcraftSpend } from "@/lib/clone-watch/netcraft-budget";
 
 function candidate(o: Partial<NetcraftAutoCandidate> = {}): NetcraftAutoCandidate {
   return {
@@ -158,6 +159,10 @@ describe("postNetcraftBulk", () => {
     reason: "r",
     urls: [{ url: "https://a.test/", country: "AU" }],
   };
+  // A live send needs a Netcraft budget grant (#1301); built by the Module.
+  const decision = decideNetcraftSpend("auto", 5, { auto: 0, resubmit: 0, issue: 0 }, Date.now());
+  const GRANT = decision.ok ? decision.grant : null;
+  const LIVE = { test: false as const, grant: GRANT, lane: "auto" as const };
 
   function mockFetch(res: { status: number; body: string }) {
     const spy = vi.fn().mockResolvedValue({
@@ -183,7 +188,7 @@ describe("postNetcraftBulk", () => {
 
   it("routes a real run to the live intake", async () => {
     const spy = mockFetch({ status: 200, body: '{"uuid":"u-1","state":"processing"}' });
-    const result = await postNetcraftBulk(BODY, { test: false });
+    const result = await postNetcraftBulk(BODY, LIVE);
     expect(spy.mock.calls[0]?.[0]).toBe(
       "https://report.netcraft.com/api/v3/report/urls",
     );
@@ -192,16 +197,31 @@ describe("postNetcraftBulk", () => {
 
   it("surfaces a non-2xx as data rather than throwing (soft-fail contract)", async () => {
     mockFetch({ status: 429, body: "rate limited" });
-    const result = await postNetcraftBulk(BODY, { test: false });
+    const result = await postNetcraftBulk(BODY, LIVE);
     expect(result.ok).toBe(false);
     expect(result.status).toBe(429);
     expect(result.errText).toBe("rate limited");
     expect(result.uuid).toBeNull();
   });
 
+  it("sends nothing live without a grant covering every url (#1301)", async () => {
+    const spy = mockFetch({ status: 200, body: '{"uuid":"u-1"}' });
+    const noGrant = await postNetcraftBulk(BODY, { test: false, grant: null, lane: "auto" });
+    const wrongLane = await postNetcraftBulk(BODY, { test: false, grant: GRANT, lane: "resubmit" });
+    const tooSmall = await postNetcraftBulk(
+      { ...BODY, urls: Array.from({ length: 6 }, (_, i) => ({ url: `https://${i}.test/`, country: "AU" })) },
+      LIVE,
+    );
+    for (const r of [noGrant, wrongLane, tooSmall]) {
+      expect(r).toMatchObject({ ok: false, status: 0, uuid: null });
+      expect(r.errText).toMatch(/netcraft_budget/);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("does not throw on an unparseable body", async () => {
     mockFetch({ status: 200, body: "<html>maintenance</html>" });
-    const result = await postNetcraftBulk(BODY, { test: false });
+    const result = await postNetcraftBulk(BODY, LIVE);
     expect(result.uuid).toBeNull();
     expect(result.raw).toEqual({ raw: "<html>maintenance</html>" });
   });

@@ -39,8 +39,8 @@ import { laneCrons, laneGate } from "@/lib/laneHealth";
  *    across this path and the human admin send — every report that goes out
  *    under our one email sending identity (count_todays_takedown_submissions,
  *    v320). Netcraft is NOT in it: it is an API with its own reporter standing
- *    and its own caps (auto lane 50/day in its worklist RPC, resubmit lane
- *    NETCRAFT_RESUBMIT_DAILY_CAP, issues count_todays_netcraft_issues). Each
+ *    and its own caps and account ceiling, all in the Netcraft budget Module
+ *    (lib/clone-watch/netcraft-budget.ts, #1301). Each
  *    enqueued row records `enforcement.queued` (awaited), which the counter
  *    reads. A counter error FAILS CLOSED: the run throws, nothing is enqueued.
  *  - Worklist = list_clone_alerts_pending_onward (v318): lifecycle_state
