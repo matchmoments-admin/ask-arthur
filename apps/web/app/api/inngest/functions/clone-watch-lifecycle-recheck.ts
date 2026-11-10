@@ -10,12 +10,13 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCostAsync } from "@/lib/cost-telemetry";
+import { riskBand } from "@/lib/clone-watch/weaponisation-risk";
 import {
-  computeWeaponisationRisk,
-  riskBand,
-} from "@/lib/clone-watch/weaponisation-risk";
+  loadBrandCategoryLookup,
+  scoreAlertRisk,
+  type BrandCategoryLookup,
+} from "@/lib/clone-watch/alert-risk";
 import { submitCandidateBatch } from "@/lib/clone-watch/urlscan-submit-one";
-import { attributionRiskInputs } from "@/lib/clone-watch/attribution";
 import {
   RECHECK_DNS,
   isUrlscanFloorDue,
@@ -135,13 +136,17 @@ interface RecheckRow {
   last_rechecked_at: string | null;
   // v222 risk-score inputs (all nullable — enrichment/classification partial).
   signals: unknown;
-  /** attribution jsonb — read via attributionRiskInputs, never destructured. */
+  /** attribution jsonb — read via scoreAlertRisk (alert-risk.ts), never destructured. */
   attribution: unknown;
   clf_is_clone: boolean | null;
   clf_confidence: number | null;
   clf_attack_intent: string | null;
   clf_clone_tactic: string | null;
+  /** Deploy-window fallback only — scoring reads the category lookup by
+   *  inferred_target_domain (v344, #1298); see RiskAlertRow.brand_category. */
   brand_category: string | null;
+  /** v344: the impersonated brand's domain — the category lookup key. */
+  inferred_target_domain?: string | null;
   // v334 DNS-gate inputs (absent before the migration: every row then reads
   // no_baseline + floor-due, i.e. is scanned exactly as before).
   first_seen_at?: string | null;
@@ -199,6 +204,9 @@ export function selectTopRiskCandidates(
   rows: RecheckRow[],
   limit: number,
   nowMs: number,
+  /** known_brands categories (alert-risk.ts) — the same lookup stewardship
+   *  scores with, so both rank an alert identically (#1298). */
+  categories: BrandCategoryLookup,
   // Proportional, deliberately NOT max(1, …): at a batch of 2 a one-slot reserve
   // would be half the run. The floor is a production-scale device — it is 0 below
   // a limit of 5 and 10 at the real batch size of 50.
@@ -207,16 +215,7 @@ export function selectTopRiskCandidates(
 ): ScoredRow[] {
   const scored: ScoredRow[] = rows.map((r) => ({
     ...r,
-    risk: computeWeaponisationRisk({
-      urlscanClassification: r.urlscan_classification,
-      signals: r.signals,
-      isClone: r.clf_is_clone,
-      confidence: r.clf_confidence,
-      attackIntent: r.clf_attack_intent,
-      brandCategory: r.brand_category,
-      ...attributionRiskInputs(r.attribution),
-      nowMs,
-    }).score,
+    risk: scoreAlertRisk(r, categories, nowMs).score,
   }));
   return pickWithStaleFloor(scored, limit, staleFloor, clock);
 }
@@ -515,12 +514,19 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // + rank-by-risk), so a run in flight across the deploy cannot replay
       // the old shape into this code.
       const loaded = await step.run("load-and-rank", async () => {
-        const [{ data, error }, dormant] = await Promise.all([
+        const [{ data, error }, dormant, categories] = await Promise.all([
           sb.rpc("list_clone_alerts_for_recheck", {
             p_limit: RECHECK_FETCH_LIMIT,
             p_cadence_hours: RECHECK_CADENCE_HOURS,
           }),
           sb.rpc("count_clone_recheck_dormant_dead"),
+          // #1298: the category lookup stewardship also scores with. A failed
+          // read is a lane error, not a quiet "no categories" ranking.
+          loadBrandCategoryLookup(sb).catch(async (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            await recordLaneError("shopfront-clone-lifecycle-recheck", msg);
+            throw err;
+          }),
         ]);
         // A failed worklist read must not look like a quiet "nothing due" run
         // (that is exactly how a broken read hides) — record it and throw.
@@ -544,6 +550,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           rows,
           RECHECK_DNS.limit,
           Date.now(),
+          categories,
           undefined,
           queueClock,
         ).map(toSliceRow);
