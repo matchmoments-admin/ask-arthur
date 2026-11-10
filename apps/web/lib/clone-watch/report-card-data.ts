@@ -4,8 +4,8 @@ import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
 import {
   applyCohortRules,
+  CLONE_COHORT_RELATION,
   CLONE_COHORT_SELECT,
-  CLONE_COHORT_SOURCE,
   isAuditMiss,
   isAuditWithheld,
   type CloneAlertRow,
@@ -66,19 +66,17 @@ async function fetchMonth(
   const { rows: raw, truncated, error } = await fetchAllRows<CloneAlertRow>(
     (from, to) =>
       sb
-        .from("shopfront_clone_alerts")
-        // The cohort's own SELECT and source (clone-cohort.ts), shared with the
-        // brand-stewardship report and the internal digest, so all three
-        // reconcile by construction rather than by three files agreeing. It was
-        // three inline lists, and the drift already cost `clone_tactic` once —
-        // the column simply arrived undefined, which reads as thin classifier
-        // coverage rather than as a missing column.
+        // The Brand Cohort (v342) and its SELECT (clone-cohort.ts): membership
+        // — nrd, brand-attributed, not fp, not an FP dictionary brand — is the
+        // view's, the same relation the outreach worklist and exposure teaser
+        // read, so every surface reconciles by construction. This read adds
+        // only its period. The shared SELECT matters too: drift already cost
+        // `clone_tactic` once — the column arrived undefined, which reads as
+        // thin classifier coverage rather than as a missing column.
+        .from(CLONE_COHORT_RELATION)
         .select(CLONE_COHORT_SELECT)
-        .eq("source", CLONE_COHORT_SOURCE)
         .gte("first_seen_at", startIso)
         .lt("first_seen_at", endIso)
-        .not("inferred_target_domain", "is", null)
-        .or("triage_status.is.null,triage_status.neq.fp")
         .order("id", { ascending: true })
         .range(from, to) as unknown as PromiseLike<{
         data: CloneAlertRow[] | null;
@@ -137,10 +135,8 @@ async function fetchTakedownEvents(
     const { rows, truncated, error } = await fetchAllRows<Row>(
       (from, to) =>
         sb
-          .from("shopfront_clone_alerts")
+          .from(CLONE_COHORT_RELATION)
           .select("candidate_domain, inferred_target_domain, submitted_to, triage_status")
-          .eq("source", CLONE_COHORT_SOURCE)
-          .not("inferred_target_domain", "is", null)
           .not("submitted_to->netcraft->>takedown_at", "is", null)
           .order("id", { ascending: true })
           .range(from, to) as unknown as PromiseLike<{

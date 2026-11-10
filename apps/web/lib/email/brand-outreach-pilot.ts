@@ -6,6 +6,7 @@ import type {
 import { readAttribution } from "@/lib/clone-watch/attribution";
 import {
   AUDIT_SAMPLE_EMBED,
+  CLONE_COHORT_RELATION,
   withholdAuditVerdict,
   type AuditSampleEmbed,
 } from "@/lib/clone-watch/clone-cohort";
@@ -185,9 +186,9 @@ export function buildBrandCloneSample(
  * Fetch + shape the clone sample for a brand's legit domain (the worklist's
  * brand_key == shopfront_clone_alerts.inferred_target_domain). Returns null when
  * no domain is supplied (ad-hoc sends) or the query fails — callers then render
- * the email without a sample section. Mirrors the Brand Stewardship clone fetch
- * filters (source='nrd', not-FP, first_seen_at window) so the sample is always a
- * subset of what the monthly report would show.
+ * the email without a sample section. Reads the Brand Cohort (v342), the
+ * membership the monthly report counts, so the sample is always a subset of
+ * what the report would show for the same days.
  */
 export async function getBrandCloneSample(
   sb: SupabaseClient,
@@ -202,13 +203,13 @@ export async function getBrandCloneSample(
 
   // Over-fetch (dedupe + ranking happen in-memory); a month of one brand's
   // clones is small (observed max ~80/brand). Newest first as a sensible cap.
+  // The Brand Cohort (v342) — the same membership the worklist row beside
+  // this sample and the monthly report count. This read adds only its period.
   const { data, error } = await sb
-    .from("shopfront_clone_alerts")
+    .from(CLONE_COHORT_RELATION)
     .select(CLONE_SAMPLE_SELECT)
     .eq("inferred_target_domain", domain)
-    .eq("source", "nrd")
     .gte("first_seen_at", since)
-    .or("triage_status.is.null,triage_status.neq.fp")
     .order("first_seen_at", { ascending: false })
     .limit(200);
 

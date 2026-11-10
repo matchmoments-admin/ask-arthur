@@ -9,6 +9,8 @@ import {
 } from "@/lib/email/brand-outreach-worklist";
 import type { BrandCloneSample } from "@/emails/BrandOutreachPilot";
 import { lifecycleBadge } from "@/lib/clone-watch/outcome-copy";
+import { describeMonthFacts } from "@/lib/clone-watch/targeting-copy";
+import type { BrandMonthFacts } from "@/lib/clone-watch/month-facts";
 
 interface Props {
   /** Pilot starter body (with a {{hook}} placeholder) from the shared lib. */
@@ -58,9 +60,15 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
     "idle" | "loading" | "error"
   >("idle");
 
+  // The brand's month facts (month-facts.ts): last published month as the
+  // store froze it — what the brand's own report prints — and this month so
+  // far. Shown beside the 30-day sample so a pitch never quotes a third number.
+  const [monthFacts, setMonthFacts] = useState<Array<BrandMonthFacts | null>>([]);
+
   const loadCloneSample = useCallback(async (key: string) => {
     setSampleState("loading");
     setCloneSample(null);
+    setMonthFacts([]);
     try {
       const res = await fetch(
         `/api/admin/brand-outreach/clone-sample?brandKey=${encodeURIComponent(key)}`,
@@ -68,6 +76,10 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
       const json = await res.json();
       if (res.ok && json.ok) {
         setCloneSample((json.sample as BrandCloneSample | null) ?? null);
+        const mf = json.monthFacts as
+          | { lastClosed: BrandMonthFacts | null; current: BrandMonthFacts | null }
+          | undefined;
+        setMonthFacts(mf ? [mf.lastClosed, mf.current] : []);
         setSampleState("idle");
       } else {
         setSampleState("error");
@@ -308,6 +320,14 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
               Couldn&apos;t load the clone sample. You can still send, but the
               email won&apos;t carry evidence.
             </p>
+          )}
+
+          {sampleState === "idle" && monthFacts.some(Boolean) && (
+            <ul className="mt-3 space-y-0.5 text-[11px] text-slate-600">
+              {monthFacts.map((f) =>
+                f ? <li key={f.periodMonth}>{describeMonthFacts(f)}</li> : null,
+              )}
+            </ul>
           )}
 
           {sampleState === "idle" && cloneSample && (

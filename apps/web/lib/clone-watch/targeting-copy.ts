@@ -35,6 +35,7 @@
  *     come from the gate that made the decision, never from a hand count.
  */
 import { methodChangedBrandsClause } from "@/lib/clone-watch/trend-copy";
+import type { BrandMonthFacts } from "@/lib/clone-watch/month-facts";
 
 /**
  * THE unit a published clone count is printed in. Until matcher v5 every count
@@ -228,4 +229,23 @@ export function buildTldLine(
   // three while listing two, in the line this module calls its most defensible.
   const noun = named.length === 1 ? "one domain ending" : `just ${numberWord(named.length)} domain endings`;
   return `${sum} of ${total} lookalikes were registered on ${noun} — ${list}.`;
+}
+
+/**
+ * One brand-month as an operator reads it (month-facts.ts, #1296):
+ *   "September 2026 (published): 12 lookalike domains · 2 weaponised · 1 taken down"
+ *   "October 2026 so far (provisional): 4 lookalike domains"
+ *   "September 2026: not published yet"
+ * The basis travels with the number, always — a provisional figure printed
+ * without its label reads as the published one.
+ */
+export function describeMonthFacts(f: BrandMonthFacts): string {
+  if (f.basis === "unpublished") return `${f.label}: not published yet`;
+  const head =
+    f.basis === "published" ? `${f.label} (published)` : `${f.label} so far (provisional)`;
+  if (!f.counts) return `${head}: not watched that month`;
+  const parts = [lookalikeDomains(f.counts.clones)];
+  if (f.counts.weaponised > 0) parts.push(`${f.counts.weaponised} weaponised`);
+  if (f.counts.takenDown > 0) parts.push(`${f.counts.takenDown} taken down`);
+  return `${head}: ${parts.join(" · ")}`;
 }

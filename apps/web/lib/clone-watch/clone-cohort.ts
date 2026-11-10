@@ -19,11 +19,12 @@
  *     dropped (losing it from every denominator) or kept as unknown;
  *   - the two fetches used different row caps and different error policies.
  *
- * DEPTH: the row shape, the SELECT list that fills it, and the rules that decide
- * membership are one thing with one home. A surface reads the cohort by pairing
- * `CLONE_COHORT_SELECT` + `CLONE_COHORT_SOURCE` with `applyCohortRules`, so a
- * column added here reaches every consumer at once and the FP judgement cannot
- * drift between them.
+ * DEPTH: the row shape and the SELECT list that fills it are one thing with
+ * one home. MEMBERSHIP has moved to SQL (v342): a surface reads the cohort by
+ * pairing `CLONE_COHORT_SELECT` with `.from(CLONE_COHORT_RELATION)` and passes
+ * the rows through `applyCohortRules` (audit withholding), so a column added
+ * here reaches every consumer at once and the FP judgement has exactly one
+ * home — the view the SQL surfaces read too.
  *
  * This Module owns `CloneAlertRow` because the row shape IS the cohort's
  * Interface. It previously lived in the brand-stewardship Inngest function,
@@ -32,7 +33,6 @@
  * the first place: the shape had two owners and no home.
  */
 import { MATCHER_V5_FROM, candidateLabelKey } from "@askarthur/shopfront-glue";
-import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 
 /**
  * A clone alert as every reporting surface reads it.
@@ -127,7 +127,33 @@ export const CLONE_COHORT_SELECT =
   "id, candidate_domain, candidate_url, inferred_target_domain, target_brand_normalized, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic, model_id), " +
   AUDIT_SAMPLE_EMBED;
 
-/** The NRD daily sweep — the only source these reporting surfaces count. */
+/**
+ * THE BRAND COHORT — the relation every per-brand count reads (v342, #1296).
+ *
+ * `clone_watch_brand_cohort` is `shopfront_clone_alerts` restricted to members:
+ * source nrd, attributed to a brand, not triaged `fp`, not an FP dictionary
+ * brand (FP_BRAND_DENYLIST, pinned by fpBrandDenylistSqlDrift.test.ts). It is
+ * the ONLY membership authority: the outreach worklist, the exposure teaser,
+ * the public impact panel (SQL) and the report card, digests, stewardship and
+ * pilot email (here) all read it, so "who counts for brand X" cannot drift
+ * between them. Before v342 five surfaces restated it and the outreach
+ * worklist counted 161 cleared false positives across 8 brands (iinet.net.au: 41 vs 10).
+ *
+ * A reader adds only its PERIOD (`first_seen_at` window) and, when it names
+ * domains publicly, a DISCLOSURE filter (confirmed-only) — a subset of the
+ * cohort, never a different one. `brandCohortScan.test.ts` fails a reporting
+ * file that re-states a membership filter against the base table.
+ *
+ * Closed months are not re-derived from it: they come from the frozen
+ * Monthly Brand Store (month-facts.ts holds that rule).
+ */
+export const CLONE_COHORT_RELATION = "clone_watch_brand_cohort";
+
+/**
+ * The NRD daily sweep. Membership readers use CLONE_COHORT_RELATION, which
+ * already applies it; this remains for the month-end STOCK walk, which is a
+ * different question (every active lookalike, any first-seen month).
+ */
 export const CLONE_COHORT_SOURCE = "nrd";
 
 /**
@@ -338,28 +364,22 @@ export function countTargetingEvents(
 }
 
 /**
- * Rows that survive the cohort rules, applied to an already-fetched page.
+ * Cohort rows as a brand-attributed count may see them.
  *
- * Split from the fetch so it is testable without a database — the FP rules are
- * where the judgement lives, and they were previously only reachable through a
- * live query.
+ * MEMBERSHIP IS NOT DECIDED HERE any more (v342, #1296): the rows come from
+ * CLONE_COHORT_RELATION, which already dropped `fp`-triaged rows and the FP
+ * dictionary brands. This used to re-apply both filters in TS, a second
+ * authority the SQL surfaces (worklist, exposure teaser) never shared — which
+ * is how the worklist came to count cleared false positives while the report
+ * card did not.
  *
- * Every surviving row also passes through `withholdAuditVerdict`, so a cohort
- * consumer cannot forget to do it and attribute a not-a-clone audit scan to a
- * brand. The row is kept because membership is lexical. Only the audit's facts
- * are removed.
+ * What stays is the one rule that is not membership: every row passes through
+ * `withholdAuditVerdict`, so a consumer cannot forget to do it and attribute a
+ * not-a-clone audit scan to a brand. The row is kept because membership is
+ * lexical; only the audit's facts are removed.
  */
 export function applyCohortRules(rows: CloneAlertRow[]): CloneAlertRow[] {
-  return rows.map(withholdAuditVerdict).filter(
-    (r) =>
-      // Confirmed false positives only. Untriaged (null) rows are the majority
-      // and are exactly what these surfaces exist to report.
-      r.triage_status !== "fp" &&
-      // Generic-dictionary brands (domain.com.au, lendi.com.au, …) that produce
-      // matches on ordinary words. Belt-and-braces against a stale detection
-      // that was never triaged.
-      !isFpBrand(r.inferred_target_domain),
-  );
+  return rows.map(withholdAuditVerdict);
 }
 
 /**

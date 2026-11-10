@@ -11,7 +11,7 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   applyCohortRules,
   CLONE_COHORT_SELECT,
-  CLONE_COHORT_SOURCE,
+  CLONE_COHORT_RELATION,
   type CloneAlertRow,
 } from "@/lib/clone-watch/clone-cohort";
 import {
@@ -260,17 +260,15 @@ export const cloneWatchInternalDigest = inngest.createFunction(
         // this digest, and the lifecycle sort collapsed to its default rank for
         // every row. It typechecked perfectly — the exact failure clone-cohort's
         // header warns about, and it was NOT gated by the feature flag.
+        // The Brand Cohort (v342): fp-triaged rows and the FP dictionary
+        // brands are excluded by the view, unconditionally — this digest once
+        // counted confirmed false positives while its flag was OFF, and once
+        // relied on a hand-rolled isFpBrand call. Only the period is ours.
         const q = sb
-          .from("shopfront_clone_alerts")
+          .from(CLONE_COHORT_RELATION)
           .select(CLONE_COHORT_SELECT)
-          .eq("source", CLONE_COHORT_SOURCE)
           .gte("first_seen_at", period.startIso)
-          .lt("first_seen_at", period.endIso)
-          .not("inferred_target_domain", "is", null)
-          // Unconditional now. This was gated on `full`, so with the flag OFF
-          // the digest counted confirmed false positives. "Byte-identical to
-          // today" was only worth preserving while today was right.
-          .or("triage_status.is.null,triage_status.neq.fp");
+          .lt("first_seen_at", period.endIso);
         // Paginated: `.limit(CLONE_FETCH_LIMIT)` returned at most 1000 rows
         // regardless of the constant, and the `=== CLONE_FETCH_LIMIT` guard below
         // it compared against 5000 — unreachable, so it never fired.
@@ -290,10 +288,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
             period: periodMonth,
           });
         }
-        // Also unconditional, and via the shared rules rather than a hand-rolled
-        // isFpBrand call — the generic-dictionary FP brands are not a full-mode
-        // nicety, they are what stops domain.com.au / lendi.com.au polluting a
-        // digest the founder reads as fact.
+        // Audit withholding (#1256) — the one cohort rule that is not membership.
         const cloneRows = applyCohortRules(
           data as unknown as CloneAlertRow[],
         ) as CloneRowWithUrl[];

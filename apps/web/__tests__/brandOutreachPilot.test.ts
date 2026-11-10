@@ -182,7 +182,8 @@ describe("getBrandCloneSample", () => {
       order: vi.fn(() => builder),
       limit,
     };
-    const sb = { from: vi.fn(() => builder) } as never;
+    const from = vi.fn(() => builder);
+    const sb = { from } as never;
 
     const s = await getBrandCloneSample(sb, "Reece.com.au");
     expect(s).not.toBeNull();
@@ -190,7 +191,11 @@ describe("getBrandCloneSample", () => {
     expect(s!.rows[0].domain).toBe("reece-login.click");
     // filtered on the lowercased brand domain
     expect(eq).toHaveBeenCalledWith("inferred_target_domain", "reece.com.au");
-    expect(eq).toHaveBeenCalledWith("source", "nrd");
+    // #1296: membership (nrd, not fp, not an FP brand) is the Brand Cohort
+    // view's — the read names the view and restates none of it.
+    expect(from).toHaveBeenCalledWith("clone_watch_brand_cohort");
+    expect(eq).not.toHaveBeenCalledWith("source", "nrd");
+    expect(builder.or).not.toHaveBeenCalled();
   });
 
   it("returns a shaped empty sample on a query error path (no throw)", async () => {
