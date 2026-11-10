@@ -34,12 +34,13 @@ export interface SubmitOutcome {
     // the row carries no trace either.
     | "rate_limited"
     // DNS precheck proved the name points at no host: urlscan + reputation
-    // were NOT called (the saving). Stamped like urlscan's 400 so the v277
-    // dead-domain cadence applies; counted apart from real submit failures.
+    // were NOT called (the saving). Recorded as dns_precheck = 'no_host'
+    // (v343), which puts the row on the dead-domain cadence; urlscan evidence
+    // is left untouched. Counted apart from real submit failures.
     | "dns_no_host"
     // DNS precheck: A and AAAA both SERVFAIL (a dead/lame delegation — every
     // one measured in prod was also refused by urlscan as "could not resolve").
-    // Not submitted; stamped like dns_no_host; counted apart from both.
+    // Not submitted; recorded as dns_precheck = 'servfail'; counted apart.
     | "dns_servfail"
     | "submit_failed"
     | "no_client";
@@ -54,17 +55,17 @@ export interface SubmitOutcome {
  * submit-failed-but-reputation-malicious corner, where urlscan is unavailable
  * yet SB/VT already gave a decisive verdict.
  */
-/** Recorded instead of a urlscan call when DNS proves the name points at no
- *  host (no A, no AAAA). Status 400 on purpose: it is exactly what urlscan
- *  returns for a no-DNS domain, so the v277 dead-domain cadence
- *  (`urlscan_evidence->>'status' = '400'`) treats both identically; `error`
- *  distinguishes who decided. Rows stamped before PR B (3 in prod) carry the
- *  old value `dns_nxdomain_precheck`. */
+/** Outcome error code when DNS proves the name points at no host (no A, no
+ *  AAAA). Since v343 (#1297) the reading is stored in `dns_precheck`
+ *  ('no_host'), NOT as a fake urlscan 400 in `urlscan_evidence` — that stamp
+ *  overwrote retrieved renders and reputation hits on the recheck lane. Rows
+ *  stamped before v343 still carry `{status: 400, error: this}` (or the older
+ *  `dns_nxdomain_precheck`), which `clone_alert_dns_dead` keeps reading. */
 export const DNS_PRECHECK_ERROR = "dns_no_host_precheck";
-/** Recorded instead of a urlscan call when A and AAAA both SERVFAIL. Same
- *  status-400 evidence shape as DNS_PRECHECK_ERROR, so the v277/v317 dead-domain
- *  cadence (`urlscan_evidence->>'status' = '400'`, 168 h) applies — the same
- *  cadence urlscan's own "could not resolve" refusal already put these rows on. */
+/** Outcome error code when A and AAAA both SERVFAIL; stored as
+ *  `dns_precheck = 'servfail'` since v343. Same 168 h dead-domain cadence as
+ *  no_host — the cadence urlscan's own "could not resolve" refusal puts these
+ *  rows on. */
 export const DNS_SERVFAIL_PRECHECK_ERROR = "dns_servfail_precheck";
 
 export async function submitCloneCandidate(
@@ -87,19 +88,16 @@ export async function submitCloneCandidate(
   if (precheck === "no_host" || precheck === "servfail") {
     const servfail = precheck === "servfail";
     const errorCode = servfail ? DNS_SERVFAIL_PRECHECK_ERROR : DNS_PRECHECK_ERROR;
-    const nowIso = new Date().toISOString();
+    // v343 (#1297): the reading goes in its own column. p_evidence stays NULL
+    // so the row keeps whatever urlscan evidence it already holds — a
+    // rechecked clone's render (screenshot, hosting) or the Safe Browsing hit
+    // its verdict rests on. Still bumps the failure streak (null uuid), which
+    // the v326 dead-dormancy rule counts.
     const { error } = await sb.rpc("record_clone_alert_urlscan_submit", {
       p_alert_id: candidate.id,
       p_urlscan_uuid: null,
-      p_evidence: serialiseSubmitFailure(
-        errorCode,
-        400,
-        { isMalicious: false, sources: [] },
-        nowIso,
-        servfail
-          ? "DNS precheck: A and AAAA both SERVFAIL — not submitted to urlscan"
-          : "DNS precheck: no A and no AAAA record — not submitted to urlscan",
-      ),
+      p_evidence: null,
+      p_dns_precheck: precheck,
     });
     if (error) throw new Error(`record dns precheck failed: ${error.message}`);
     return {
@@ -123,6 +121,8 @@ export async function submitCloneCandidate(
       p_alert_id: candidate.id,
       p_urlscan_uuid: submission.uuid,
       p_evidence: serialiseSubmitEvidence(submission.uuid, reputation, nowIso),
+      // v343: a live reading clears a previous dead one.
+      p_dns_precheck: precheck,
     });
     if (error) throw new Error(`record scan submission failed: ${error.message}`);
     return { kind: "submitted", reputationMalicious: reputation.isMalicious };
@@ -173,6 +173,7 @@ export async function submitCloneCandidate(
       nowIso,
       submission.message,
     ),
+    p_dns_precheck: precheck,
   });
   if (error) throw new Error(`record scan failure failed: ${error.message}`);
   return {
