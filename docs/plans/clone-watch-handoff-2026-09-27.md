@@ -130,3 +130,55 @@ with the Claude session. Run it by hand:
   parking rotation). Compare by prefix.
 - **GitHub CI sometimes hangs for 8 minutes with no turbo output.** Rerun it; a
   normal run takes about 3 minutes.
+
+## Addendum (2026-09-29): architecture deepening, waves 1 and 2
+
+This work came out of an /improve-codebase-architecture review of map #1224. That
+review found that the map's PRs had mostly added parallel copies instead of
+deepening Modules, and that some of those copies already disagreed in ways
+visible in prod. The plan was 6 PRs (A–F). A, B, C, D and F are merged, and
+their migrations are applied and verified in prod.
+
+| PR    | Module                                                                                                                                                                                                                                                                                                                            | Migration | Prod evidence                                                                                                                                                                                                                                                        |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #1281 | One parking mechanism for Lanes (`parked` in LANE_SHAPES; laneHealth reports "parked but enabled"). A durable whoisjson quota count: callers must pass a priority, and batch callers fail closed on `quota_unknown`.                                                                                                              | —         | Inngest resync `modified:true`                                                                                                                                                                                                                                       |
+| #1283 | urlscan budget Module (`urlscan-budget.ts`): one roster of spenders, a static test that no hour exceeds 100 and no day exceeds 1,000, and a manual-fire guard across lanes that writes a `manual_reservation` row and projects the day ahead.                                                                                     | —         | Watch for urlscan 429s on the lane Outcome Rows                                                                                                                                                                                                                      |
+| #1282 | Brand Send Gate (`brand-send-gate.ts`), with profiles stewardship-real / batch / auto-send / outreach / requester. Founder outreach is gated on readiness; `BRAND_OUTREACH_READINESS_OVERRIDE` is recorded in cost_telemetry, and the send is refused if that record can't be written. Shadow recipients must be `@askarthur.au`. | —         | Outreach is refused: Sep readiness `ready=false`, override unset                                                                                                                                                                                                     |
+| #1284 | Domain DNS State (`liveness.ts`): one probe and one state, with every verdict a reading of it. "Present" now means the name resolves to an address. `sweepDomainDns` is shared by three sweeps, and there is one parking table.                                                                                                   | v341      | The 5 NS-only weaponised rows (1385, 2761, 3081, 3907, 3952) went `present` → `no_host` on the 2026-09-29 10:02 UTC reconcile (`liveness_no_host=5`, `stranded_live=0`)                                                                                              |
+| #1286 | /clone-watch page claims made true, plus one copy home per published fact (lookalike label, matcher-change notice, biggest mover, outcomes, brand count)                                                                                                                                                                          | v340      | Live page equals SQL: n=10 of 42 (true subset), 832 brand-name matches (fp removed), 29 reported, 9 listed newest-first, "Actioned by Netcraft" on exactly the 4 rows with `netcraft_log`/`malicious` evidence, "290+" brands (293 open in `brand_coverage_history`) |
+
+### Still open
+
+- **PR-E** (month-facts Module + cohort as the only membership authority).
+  Start it after #1262 merges on 1 Oct, to avoid conflicts in cohort and
+  report-card.
+- **#1285**: three opt-out gaps that were there before this work, found by the #1282 review.
+- **`ADMIN_TEST_EMAIL` is a non-`@askarthur.au` address**, so the founder
+  outreach _test_ send now returns 403 `shadow_recipient_not_internal`. The
+  founder needs to decide: move the variable to an internal address, or
+  allowlist that exact address.
+- `domaincontrol.com` / `parklogic.com` count as parked only in domain intel,
+  not in Clone Watch. Adopting them would change stock status on about 226
+  alerts, so it needs a decision.
+- A `no_host` read does not start the dormancy clock (only NXDOMAIN does).
+  Whether NS-only weaponised clones should age towards dormant is a policy
+  question.
+
+### Not a regression: fewer confirmations since 24 Aug
+
+Weekly confirmed lookalikes dropped from about 150 to about 8 starting the week
+of 24 Aug. The cause is v284 (#1035, 2026-08-23), which requires
+`urlscan_classification='likely_phishing'` or `weaponised` before an auto-submit
+to Netcraft. It ended the 89% decline rate. Weaponised counts held steady at
+5–8 a week. The rest are name matches waiting on live-site evidence
+(`declined`/`monitoring`, triage `pending`), and the recheck lane keeps
+revisiting them. The public list is short because it only shows confirmed,
+reported domains.
+
+### Traps from this round
+
+- macOS has no `timeout` command. Reviewer agents that prefixed commands with it
+  stalled.
+- An ISR page rendered before a migration keeps showing the old RPC output
+  until the next revalidate (up to 1h). Verify page numbers after that, not
+  straight after applying.
